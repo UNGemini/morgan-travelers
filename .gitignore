@@ -1,0 +1,17 @@
+node_modules
+dist
+artifacts
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+.vite
+# Large routing graphs (prefer CDN / CI artifacts)
+public/data/*.wheelsrouter
+# Keep .gz optional local fallback tracked if desired; ignore raw dumps
+*.wheelsrouter
+!src/pkg/**
+
+# Local serverless contribute-path drafts (vite dev)
+artifacts/contributions/

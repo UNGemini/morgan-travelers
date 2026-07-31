@@ -1,0 +1,219 @@
+# Collect open data that changes over time (fares, TD bus/GMB MDBs, edge graph).
+# Rebuilds public/fares/hk-fares.json and opens a PR when outputs change.
+#
+# Secrets (optional):
+#   None required for collect + fare build.
+#   GITHUB_TOKEN is provided automatically for PR creation.
+#
+# Variables (optional):
+#   DATA_PUBLIC_BASE_URL  — edge data origin (default https://hk-gtfsdata.morgandev.cc)
+
+name: Collect open data
+
+on:
+  schedule:
+    # Twice weekly — TD fares update ~twice/month; MTR fares change irregularly
+    # Mon & Thu 17:00 UTC ≈ 01:00 HKT Tue/Fri
+    - cron: "0 17 * * 1,4"
+  workflow_dispatch:
+    inputs:
+      skip_large:
+        description: "Skip large edge assets (GTFS / PMTiles / wheelsrouter)"
+        type: boolean
+        default: true
+      open_pr:
+        description: "Open a PR if public/fares changed"
+        type: boolean
+        default: true
+
+concurrency:
+  group: collect-open-data
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  DATA_PUBLIC_BASE_URL: ${{ vars.DATA_PUBLIC_BASE_URL || 'https://hk-gtfsdata.morgandev.cc' }}
+  # Default: skip multi‑GB edge binaries on scheduled runs (metadata still collected)
+  COLLECT_SKIP_LARGE: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_large == false && '0' || '1' }}
+
+jobs:
+  collect:
+    name: Download · Build fares · PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install mdbtools (TD Access MDB → CSV)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mdbtools
+          mdb-export --version || true
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # ── 1. Download all mutable open-data sources ────────────────────────
+      - name: Collect open-data sources
+        env:
+          COLLECT_SKIP_LARGE: ${{ env.COLLECT_SKIP_LARGE }}
+          DATA_PUBLIC_BASE_URL: ${{ env.DATA_PUBLIC_BASE_URL }}
+        run: |
+          set -euo pipefail
+          node scripts/collect-open-data.mjs artifacts/open-data
+          echo "── manifest summary ──"
+          jq '.summary' artifacts/open-data/manifest.json
+          echo "── failed (if any) ──"
+          jq '[.sources[] | select(.ok == false)] | map({name, error, status})' \
+            artifacts/open-data/manifest.json
+
+      # ── 2. Rebuild client fare pack from live sources ────────────────────
+      - name: Build hk-fares.json
+        run: |
+          set -euo pipefail
+          node scripts/build-fares.mjs
+          ls -lh public/fares/hk-fares.json
+          # Sanity: multi-type matrices + bus section present
+          node -e '
+            const p = require("./public/fares/hk-fares.json");
+            const stu = Object.keys(p.mtr?.byType?.octopus_student?.byId || {}).length;
+            const joy = Object.keys(p.mtr?.byType?.octopus_joyyou?.byId || {}).length;
+            const bus = Object.keys(p.busSection || {}).length;
+            console.log(JSON.stringify({
+              version: p.version,
+              updated_at: p.updated_at,
+              mtr_student_pairs: stu,
+              mtr_joyyou_pairs: joy,
+              bus_section_routes: bus,
+            }, null, 2));
+            if (stu < 1000) { console.error("student matrix too small"); process.exit(1); }
+            if (bus < 100) { console.error("busSection too small"); process.exit(1); }
+          '
+
+      # ── 3. Snapshot checksums of repo data that may change ───────────────
+      - name: Checksum committed data products
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/checksums
+          {
+            echo "# Data product checksums $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo
+            find public/fares public/mtr public/data -type f 2>/dev/null \
+              | sort \
+              | while read -r f; do
+                  sha256sum "$f"
+                done
+          } | tee artifacts/checksums/data-products.sha256
+
+      # ── 4. Upload raw sources + built fares as workflow artifacts ────────
+      - name: Upload collect artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-data-${{ github.run_id }}
+          path: |
+            artifacts/open-data/manifest.json
+            artifacts/open-data/mtr-fares/**
+            artifacts/open-data/td-bus/**
+            artifacts/open-data/td-gmb/**
+            artifacts/open-data/hkbus/**
+            artifacts/open-data/edge/metadata.json
+            artifacts/checksums/**
+            public/fares/hk-fares.json
+          retention-days: 30
+          if-no-files-found: warn
+
+      # Large edge binaries (optional) — separate artifact if collected
+      - name: Upload large edge artifacts (if present)
+        if: env.COLLECT_SKIP_LARGE != '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-binaries-${{ github.run_id }}
+          path: |
+            artifacts/open-data/edge/**
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ── 5. PR when fare pack / data products changed ─────────────────────
+      - name: Create Pull Request if data changed
+        if: >-
+          github.event_name == 'schedule' ||
+          (github.event_name == 'workflow_dispatch' && inputs.open_pr != false)
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: |
+            chore(data): refresh open fare tables
+
+            Automated collect from MTR open data, TD FARE_BUS, and hk-bus-crawling.
+          title: "chore(data): refresh open fare tables"
+          body: |
+            ## Automated open-data refresh
+
+            This PR was opened by the **Collect open data** workflow.
+
+            ### Sources
+            | Group | Contents |
+            |-------|----------|
+            | `mtr-fares` | MTR / AEL / LRT / MTR Bus fare CSVs |
+            | `td-bus` | TD `FARE_BUS` / `ROUTE_BUS` / `RSTOP_BUS` MDBs |
+            | `td-gmb` | TD GMB MDBs (separate from FARE_BUS) |
+            | `hkbus` | routeFareList (full-journey + ferry fallback) |
+            | `edge` | metadata from data plane (binaries optional) |
+
+            ### Built
+            - `public/fares/hk-fares.json` via `npm run build:fares`
+
+            ### Not modified
+            - `public/overrides/**` — hand-maintained static overrides (LRT shapes, access pins)
+
+            ### Run
+            - Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            - Collected at: see `artifacts/open-data/manifest.json` in the workflow artifact
+
+            Please review the fare pack size/diff before merge.
+          branch: chore/open-data-refresh
+          delete-branch: true
+          # Never touch public/overrides/* (hand-maintained static corrections)
+          add-paths: |
+            public/fares/hk-fares.json
+            public/fares/mtr-stations.json
+          labels: |
+            data
+            automated
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Collect open data"
+            echo
+            if [ -f artifacts/open-data/manifest.json ]; then
+              echo "### Manifest summary"
+              echo '```json'
+              jq '.summary' artifacts/open-data/manifest.json
+              echo '```'
+              echo
+              echo "### Required failures"
+              echo '```json'
+              jq '[.sources[] | select(.required == true and .ok == false)]' artifacts/open-data/manifest.json
+              echo '```'
+            else
+              echo "_manifest.json missing_"
+            fi
+            if [ -f public/fares/hk-fares.json ]; then
+              echo
+              echo "### Fare pack"
+              ls -lh public/fares/hk-fares.json
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

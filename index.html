@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#000000" />
+    <meta
+      name="description"
+      content="MORGAN Travelers — Hong Kong transit map, GTFS data, and live routing foundation."
+    />
+    <link rel="icon" href="/siteicon.png" type="image/png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap"
+      rel="stylesheet"
+    />
+    <title>MORGAN Travelers</title>
+  </head>
+  <body>
+    <div class="bg-orb bg-orb-1" aria-hidden="true"></div>
+    <div class="bg-orb bg-orb-2" aria-hidden="true"></div>
+
+    <div id="app" class="app-shell" data-ui-mode="eta" data-toolbar="open" data-detail="closed">
+      <!-- Full-bleed map -->
+      <div id="map-stage" class="map-stage">
+        <main id="map" role="application" aria-label="Hong Kong map"></main>
+        <div
+          id="map-route-loading"
+          class="map-route-loading"
+          hidden
+          aria-live="polite"
+          aria-busy="false"
+        >
+          <div class="map-route-loading-card" data-acrylic>
+            <span class="map-route-loading-spinner" aria-hidden="true"></span>
+            <span class="map-route-loading-label">Drawing route…</span>
+          </div>
+        </div>
+        <!-- Router / app status — top-right, independent of dock -->
+        <div id="map-status" class="map-status" data-acrylic role="status" aria-live="polite">
+          <p id="router-status" class="status-line">Loading WASM router…</p>
+        </div>
+      </div>
+
+      <!-- Settings sheet -->
+      <div id="settings-sheet" class="sheet" hidden role="dialog" aria-labelledby="settings-title">
+        <div class="sheet-backdrop" data-sheet-close></div>
+        <div class="sheet-card" data-acrylic>
+          <header class="sheet-head">
+            <h2 id="settings-title">
+              <span class="material-symbols-outlined" aria-hidden="true">settings</span>
+              Settings
+            </h2>
+            <button type="button" class="btn btn-icon" data-sheet-close aria-label="Close">
+              <span class="material-symbols-outlined" aria-hidden="true">close</span>
+            </button>
+          </header>
+          <div class="sheet-body">
+            <section class="panel-section">
+              <h3>Dataset status</h3>
+              <p id="meta-status" class="status-line">Checking edge metadata…</p>
+              <dl id="meta-details" class="meta-grid" hidden></dl>
+            </section>
+            <section class="panel-section">
+              <h3>Downloads</h3>
+              <div class="btn-stack">
+                <button
+                  type="button"
+                  id="btn-download-gtfs"
+                  class="btn btn-ghost"
+                  data-acrylic
+                  disabled
+                >
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">folder_zip</span>
+                    Download GTFS
+                  </span>
+                  <span class="btn-sub" id="gtfs-size-label">—</span>
+                </button>
+                <button
+                  type="button"
+                  id="btn-download-pmtiles"
+                  class="btn btn-ghost"
+                  data-acrylic
+                  disabled
+                >
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">map</span>
+                    Download PMTiles
+                  </span>
+                  <span class="btn-sub" id="pmtiles-size-label">—</span>
+                </button>
+                <a
+                  id="link-metadata"
+                  class="btn btn-ghost"
+                  data-acrylic
+                  href="https://hk-gtfsdata.morgandev.cc/metadata.json"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">data_object</span>
+                    Open metadata.json
+                  </span>
+                </a>
+              </div>
+            </section>
+            <section class="panel-section">
+              <h3>Map</h3>
+              <p class="hint">
+                Vector basemap <code>hongkong.pmtiles</code> · WASM RAPTOR
+                <code>hk.wheelsrouter</code>
+              </p>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <!-- Info sheet -->
+      <div id="info-sheet" class="sheet" hidden role="dialog" aria-labelledby="info-title">
+        <div class="sheet-backdrop" data-sheet-close></div>
+        <div class="sheet-card" data-acrylic>
+          <header class="sheet-head">
+            <h2 id="info-title">
+              <span class="material-symbols-outlined" aria-hidden="true">info</span>
+              About
+            </h2>
+            <button type="button" class="btn btn-icon" data-sheet-close aria-label="Close">
+              <span class="material-symbols-outlined" aria-hidden="true">close</span>
+            </button>
+          </header>
+          <div class="sheet-body">
+            <section class="panel-section">
+              <h3>MORGAN Travelers</h3>
+              <p class="hint">
+                Hong Kong transit map &amp; trip planner. Routes use the public GTFS graph
+                (RAPTOR) with Octopus adult fare estimates. Search supports
+                <code>@MTR</code>, <code>@LRT</code>, and <code>@Bus</code> filters.
+              </p>
+              <p class="hint" style="margin-top: 10px">
+                Data: MTR open data · Protomaps · OpenStreetMap contributors.
+              </p>
+            </section>
+            <section
+              class="panel-section contrib-desktop-only"
+              id="contrib-about-section"
+            >
+              <h3>Contribute</h3>
+              <p class="hint">
+                Bus paths are drawn live from the road network and can miss real
+                alignments (e.g. Mei Tung Street vs the bus terminus). On
+                <strong>desktop</strong>, you can load a calculated path and
+                edit turning points for moderators to review.
+              </p>
+              <button
+                type="button"
+                id="btn-contribute-path"
+                class="btn btn-ghost"
+                data-acrylic
+                style="margin-top: 10px; width: 100%"
+              >
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">edit_road</span>
+                  Contribute route path
+                </span>
+              </button>
+              <p class="hint contrib-desktop-note" style="margin-top: 8px">
+                Desktop only · mouse/trackpad recommended.
+              </p>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <!-- Contribute route path (sub-page sheet) -->
+      <div
+        id="contribute-sheet"
+        class="sheet contribute-sheet"
+        hidden
+        role="dialog"
+        aria-labelledby="contribute-title"
+      >
+        <div class="sheet-backdrop" data-contrib-close></div>
+        <div class="sheet-card contribute-card" data-acrylic>
+          <header class="sheet-head">
+            <h2 id="contribute-title">
+              <span class="material-symbols-outlined" aria-hidden="true">edit_road</span>
+              Contribute route path
+            </h2>
+            <button
+              type="button"
+              class="btn btn-icon"
+              data-contrib-close
+              aria-label="Close"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">close</span>
+            </button>
+          </header>
+          <div class="sheet-body contribute-body">
+            <p class="hint">
+              <strong>1.</strong> Choose operator + route → <strong>Load path</strong>
+              (merged official stops + OSRM densify).<br />
+              <strong>2.</strong> Edit path turns (hollow green) and/or
+              <em>visual stop pins</em> (orange). Official stop coords stay fixed
+              (grey ghosts) for identity / merge.<br />
+              <strong>3.</strong> Submit for review — mods publish after check.
+            </p>
+
+            <div class="contrib-mode-bar contrib-mode-bar-3" role="group" aria-label="Edit mode">
+              <button
+                type="button"
+                id="contrib-mode-path"
+                class="contrib-mode-btn is-active"
+                data-acrylic
+                title="Path turning points (V)"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">timeline</span>
+                Path turns
+                <kbd>V</kbd>
+              </button>
+              <button
+                type="button"
+                id="contrib-mode-stops"
+                class="contrib-mode-btn"
+                data-acrylic
+                title="Visual stop pins (S) — official stays fixed"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">hail</span>
+                Visual stops
+                <kbd>S</kbd>
+              </button>
+              <button
+                type="button"
+                id="contrib-mode-select"
+                class="contrib-mode-btn"
+                data-acrylic
+                title="Box-select path points / offsets (B)"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">select_all</span>
+                Select
+                <kbd>B</kbd>
+              </button>
+            </div>
+            <p id="contrib-mode-label" class="contrib-mode-label">
+              Mode: Path turns (V) — drag hollow green rings
+            </p>
+            <p class="hint contrib-keys-hint">
+              <kbd>V</kbd> path · <kbd>S</kbd> stops · <kbd>B</kbd> select ·
+              <kbd>R</kbd> roads · <kbd>Tab</kbd> cycle
+            </p>
+
+            <div id="contrib-select-actions" class="contrib-select-actions" hidden>
+              <button type="button" id="contrib-select-offsets" class="btn btn-ghost" data-acrylic>
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">warning</span>
+                  Select offsets
+                  <kbd class="contrib-inline-kbd">O</kbd>
+                </span>
+              </button>
+              <button type="button" id="contrib-delete-selected" class="btn btn-ghost" data-acrylic disabled>
+                Delete selected
+              </button>
+              <button type="button" id="contrib-clear-selection" class="btn btn-ghost" data-acrylic disabled>
+                Clear selection
+              </button>
+              <p class="hint contrib-keys-hint" style="margin: 0; flex: 1 1 100%">
+                Drag a box on the map · <kbd>Shift</kbd>+drag to add · amber =
+                offset from route · red = selected · <kbd>Del</kbd> remove
+              </p>
+            </div>
+
+            <div class="contrib-fields">
+              <label class="loc-label" for="contrib-agency">Operator / mode</label>
+              <select id="contrib-agency" class="loc-input contrib-select">
+                <option value="">Select…</option>
+                <option value="KMB">KMB / LWB</option>
+                <option value="CTB">Citybus (CTB)</option>
+                <option value="NLB">NLB</option>
+                <option value="GMB">GMB (green minibus)</option>
+                <option value="MTRBUS">MTR Bus</option>
+                <option value="MTR">MTR (heavy rail)</option>
+                <option value="AEL">Airport Express (AEL)</option>
+                <option value="LRT">Light Rail (LRT)</option>
+                <option value="OTHER">Other / joint</option>
+              </select>
+
+              <div class="contrib-row-2">
+                <div>
+                  <label class="loc-label" for="contrib-route">Route / line</label>
+                  <input
+                    id="contrib-route"
+                    class="loc-input"
+                    type="text"
+                    placeholder="38 · S1 · TWL · AEL · 505 · 1"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                </div>
+                <div>
+                  <label class="loc-label" for="contrib-direction">Direction</label>
+                  <select id="contrib-direction" class="loc-input contrib-select">
+                    <option value="O">Outbound / O / UP / seq 1</option>
+                    <option value="I">Inbound / I / DOWN / seq 2</option>
+                    <option value="circular">Circular</option>
+                  </select>
+                </div>
+              </div>
+              <p class="hint contrib-keys-hint" style="margin-top: 0">
+                Bus: route no. · MTR: line code (TWL, ISL, TCL…) · AEL · LRT: route no.
+                (505) · GMB: route code (auto region search)
+              </p>
+
+              <button type="button" id="contrib-load-path" class="btn" data-acrylic>
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">route</span>
+                  Load calculated path
+                </span>
+              </button>
+              <p class="hint contrib-keys-hint" style="margin-top: 0">
+                Loads this route’s published override if any; otherwise a
+                <em>similar</em> published path that covers the same corridor;
+                otherwise live OSRM.
+              </p>
+
+              <button
+                type="button"
+                id="contrib-follow-roads"
+                class="btn contrib-follow-roads"
+                data-acrylic
+                title="Snap your path onto nearby road edges only — does not re-route (R)"
+              >
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">assistant_navigation</span>
+                  Follow roads
+                  <kbd class="contrib-inline-kbd">R</kbd>
+                </span>
+              </button>
+              <p class="hint contrib-keys-hint" style="margin-top: 0">
+                Snaps your vertices onto nearby streets. Never deletes points —
+                only adds road detail where OSRM can; weak sections stay as you
+                drew them. Result is drawn on the map as a calculation overlay.
+              </p>
+              <div id="contrib-follow-legend" class="contrib-follow-legend" hidden>
+                <p class="contrib-follow-legend-title">Follow roads calculation</p>
+                <ul class="contrib-follow-legend-list">
+                  <li><span class="swatch swatch-grey-dash"></span> Original path (before)</li>
+                  <li><span class="swatch swatch-purple"></span> Snap link (old → new)</li>
+                  <li><span class="swatch swatch-green"></span> Vertex snapped to road</li>
+                  <li><span class="swatch swatch-amber"></span> Vertex kept raw (OSRM weak)</li>
+                  <li><span class="swatch swatch-blue"></span> Segment densified + inserted mids</li>
+                  <li><span class="swatch swatch-orange-dash"></span> Segment left as-is</li>
+                </ul>
+                <div
+                  id="contrib-follow-confirm-row"
+                  class="contrib-follow-confirm-row"
+                  hidden
+                >
+                  <p class="hint contrib-keys-hint" style="margin: 0 0 6px; flex: 1 1 100%">
+                    Preview only — <strong>Confirm</strong> to keep, <strong>Revert</strong> to
+                    discard. <kbd>Enter</kbd> / <kbd>Esc</kbd>
+                  </p>
+                  <button
+                    type="button"
+                    id="contrib-follow-confirm"
+                    class="btn contrib-follow-confirm"
+                    data-acrylic
+                  >
+                    <span class="btn-row">
+                      <span class="material-symbols-outlined" aria-hidden="true">check</span>
+                      Confirm
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    id="contrib-follow-revert"
+                    class="btn btn-ghost contrib-follow-revert"
+                    data-acrylic
+                  >
+                    <span class="btn-row">
+                      <span class="material-symbols-outlined" aria-hidden="true">undo</span>
+                      Revert
+                    </span>
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  id="contrib-clear-follow-debug"
+                  class="btn btn-ghost"
+                  data-acrylic
+                  style="width: 100%; margin-top: 6px"
+                >
+                  Hide calculation overlay
+                </button>
+              </div>
+
+              <input
+                id="contrib-import-file"
+                type="file"
+                accept="application/json,.json"
+                hidden
+              />
+              <button
+                type="button"
+                id="contrib-import-json"
+                class="btn btn-ghost"
+                data-acrylic
+                title="Import a downloaded contribution JSON to continue editing"
+                style="width: 100%"
+              >
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
+                  Import JSON
+                </span>
+              </button>
+              <p class="hint contrib-keys-hint" style="margin-top: 0">
+                Resume a downloaded draft (or drop a <code>.json</code> on this panel).
+              </p>
+
+              <div class="contrib-draw-actions">
+                <button type="button" id="contrib-from-plan" class="btn btn-ghost" data-acrylic>
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">timeline</span>
+                    From plan
+                  </span>
+                </button>
+                <button type="button" id="contrib-snap-stops" class="btn btn-ghost" data-acrylic>
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">my_location</span>
+                    Snap visuals
+                  </span>
+                </button>
+                <button type="button" id="contrib-undo" class="btn btn-ghost" data-acrylic title="Undo (⌘/Ctrl+Z)">
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">undo</span>
+                    Undo
+                  </span>
+                </button>
+                <button type="button" id="contrib-redo" class="btn btn-ghost" data-acrylic title="Redo (⌘/Ctrl+Shift+Z or ⌘/Ctrl+Y)" disabled>
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">redo</span>
+                    Redo
+                  </span>
+                </button>
+                <button type="button" id="contrib-clear" class="btn btn-ghost" data-acrylic>
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">delete</span>
+                    Clear
+                  </span>
+                </button>
+              </div>
+
+              <p id="contrib-status" class="contrib-status" role="status"></p>
+              <div class="contrib-map-hint" role="status">
+                <span class="material-symbols-outlined" aria-hidden="true">edit</span>
+                <span
+                  ><span id="contrib-point-count">0 path pts</span> ·
+                  green rings = path · orange = visual stop · grey = official fixed</span
+                >
+              </div>
+
+              <label class="loc-label" for="contrib-from">Board match</label>
+              <input
+                id="contrib-from"
+                class="loc-input"
+                type="text"
+                placeholder="auto after load"
+                autocomplete="off"
+              />
+
+              <label class="loc-label" for="contrib-to">Alight match</label>
+              <input
+                id="contrib-to"
+                class="loc-input"
+                type="text"
+                placeholder="auto after load"
+                autocomplete="off"
+              />
+
+              <label class="loc-label" for="contrib-notes">Notes for moderators</label>
+              <textarea
+                id="contrib-notes"
+                class="loc-input contrib-textarea"
+                rows="2"
+                placeholder="e.g. via Mei Tung Street, not terminus bay"
+              ></textarea>
+
+              <label class="loc-label" for="contrib-name">Your name (optional)</label>
+              <input id="contrib-name" class="loc-input" type="text" autocomplete="name" />
+
+              <label class="loc-label" for="contrib-email">Your email (optional)</label>
+              <input
+                id="contrib-email"
+                class="loc-input"
+                type="email"
+                autocomplete="email"
+                placeholder="for follow-up if needed"
+              />
+            </div>
+
+            <p class="hint contrib-review-note">
+              Choose how to open a review PR on
+              <a
+                href="https://github.com/UNGemini/morgan-travelers-overrides"
+                target="_blank"
+                rel="noopener noreferrer"
+                >morgan-travelers-overrides</a
+              >.
+            </p>
+
+            <div class="contrib-submit-mode" role="group" aria-label="Submit method">
+              <label class="contrib-mode-option contrib-mode-option-recommended">
+                <input
+                  type="radio"
+                  name="contrib-submit-mode"
+                  id="contrib-submit-mode-oauth"
+                  value="oauth"
+                  checked
+                />
+                <span class="contrib-mode-option-body">
+                  <span class="contrib-mode-option-title">
+                    GitHub account
+                    <span class="contrib-badge-rec">Recommended</span>
+                  </span>
+                  <span class="contrib-mode-option-desc">
+                    Log in and open a PR from <em>your</em> fork (credited to you).
+                  </span>
+                </span>
+              </label>
+              <label class="contrib-mode-option">
+                <input
+                  type="radio"
+                  name="contrib-submit-mode"
+                  id="contrib-submit-mode-bot"
+                  value="bot"
+                />
+                <span class="contrib-mode-option-body">
+                  <span class="contrib-mode-option-title">Bot account</span>
+                  <span class="contrib-mode-option-desc">
+                    App opens the PR with the site bot token (no GitHub login).
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            <div id="contrib-github-user" class="contrib-github-user" hidden>
+              <img id="contrib-gh-avatar" class="contrib-gh-avatar" alt="" width="28" height="28" />
+              <span id="contrib-gh-login" class="contrib-gh-login"></span>
+              <button type="button" id="contrib-gh-logout" class="btn btn-ghost btn-sm" data-acrylic>
+                Log out
+              </button>
+            </div>
+            <div id="contrib-github-login-row" class="contrib-github-login-row">
+              <button type="button" id="contrib-gh-login-btn" class="btn btn-ghost" data-acrylic>
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">login</span>
+                  Log in with GitHub
+                </span>
+              </button>
+              <p id="contrib-gh-login-hint" class="hint contrib-keys-hint" style="margin: 6px 0 0">
+                Required for “GitHub account” submit.
+              </p>
+            </div>
+
+            <div class="contrib-submit-actions">
+              <button type="button" id="contrib-submit" class="btn" data-acrylic>
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">cloud_upload</span>
+                  Submit for review
+                </span>
+              </button>
+              <button type="button" id="contrib-download" class="btn btn-ghost" data-acrylic>
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">download</span>
+                  Download JSON
+                </span>
+              </button>
+              <button type="button" id="contrib-copy" class="btn btn-ghost" data-acrylic>
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">content_copy</span>
+                  Copy JSON
+                </span>
+              </button>
+              <button type="button" id="contrib-email-send" class="btn btn-ghost" data-acrylic>
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">mail</span>
+                  Email fallback
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Closable bottom dock: compact toolbar ↔ expands for detail -->
+      <div id="main-toolbar" class="main-toolbar" data-acrylic>
+        <!-- Expandable detail (above the chrome row) -->
+        <aside
+          id="side-panel"
+          class="detail-sidebar"
+          aria-label="Trip details"
+          aria-hidden="true"
+        >
+          <header class="detail-sidebar-head">
+            <h2 class="detail-sidebar-title">
+              <span class="material-symbols-outlined" aria-hidden="true">route</span>
+              <span id="detail-title">Route planner</span>
+            </h2>
+            <button
+              type="button"
+              id="btn-detail-close"
+              class="toolbar-icon-btn"
+              title="Collapse details"
+              aria-label="Collapse details"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">expand_more</span>
+            </button>
+          </header>
+
+          <div class="detail-sidebar-body">
+            <!-- Page: search + plan list -->
+            <div id="sidebar-page-search" class="sidebar-page">
+            <section class="panel-section">
+              <div class="loc-field" data-field="origin">
+                <label class="loc-label" for="input-origin">
+                  <span class="material-symbols-outlined" aria-hidden="true">trip_origin</span>
+                  From
+                </label>
+                <div class="loc-input-row">
+                  <input
+                    id="input-origin"
+                    class="loc-input"
+                    type="search"
+                    enterkeyhint="search"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="e.g. Central Station · @MTR @LRT @Bus"
+                    aria-autocomplete="list"
+                    aria-controls="suggest-origin"
+                  />
+                  <button
+                    type="button"
+                    id="btn-use-location"
+                    class="btn btn-icon"
+                    data-acrylic
+                    title="Use current location"
+                    aria-label="Use current location as origin"
+                  >
+                    <span class="material-symbols-outlined" aria-hidden="true">my_location</span>
+                  </button>
+                </div>
+                <ul
+                  id="suggest-origin"
+                  class="loc-suggest"
+                  hidden
+                  role="listbox"
+                  aria-label="Origin suggestions"
+                ></ul>
+              </div>
+
+              <div class="loc-field" data-field="destination">
+                <label class="loc-label" for="input-dest">
+                  <span class="material-symbols-outlined" aria-hidden="true">flag</span>
+                  To
+                </label>
+                <div class="loc-input-row">
+                  <input
+                    id="input-dest"
+                    class="loc-input"
+                    type="search"
+                    enterkeyhint="search"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="e.g. Yuen Long Station"
+                    aria-autocomplete="list"
+                    aria-controls="suggest-dest"
+                  />
+                  <button
+                    type="button"
+                    id="btn-swap"
+                    class="btn btn-icon"
+                    data-acrylic
+                    title="Swap origin and destination"
+                    aria-label="Swap origin and destination"
+                  >
+                    <span class="material-symbols-outlined" aria-hidden="true">swap_vert</span>
+                  </button>
+                </div>
+                <ul id="suggest-dest" class="loc-suggest" hidden role="listbox"></ul>
+              </div>
+
+              <p class="search-mode-hint" id="search-mode-hint">
+                Filter stops:
+                <code>@MTR</code>
+                <code>@LRT</code>
+                <code>@Bus</code>
+              </p>
+
+              <div class="pref-field" id="route-pref-field">
+                <span class="loc-label pref-label">
+                  <span class="material-symbols-outlined" aria-hidden="true">tune</span>
+                  Prefer
+                  <span class="pref-multi-hint">multi-select</span>
+                </span>
+                <div class="pref-segment" role="group" aria-label="Route preferences">
+                  <label class="pref-opt">
+                    <input type="checkbox" name="route-pref" value="fastest" checked />
+                    <span>Fastest</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="checkbox" name="route-pref" value="simplest" />
+                    <span>Simplest</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="checkbox" name="route-pref" value="cheapest" />
+                    <span>Least fare</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="pref-field" id="service-day-field">
+                <span class="loc-label pref-label">
+                  <span class="material-symbols-outlined" aria-hidden="true">event</span>
+                  Mode
+                </span>
+                <div
+                  class="pref-segment pref-segment-2"
+                  role="group"
+                  aria-label="Service day mode"
+                >
+                  <label class="pref-opt">
+                    <input type="radio" name="service-day" value="usual" checked />
+                    <span>Usual</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="radio" name="service-day" value="holiday" />
+                    <span>Holiday</span>
+                  </label>
+                </div>
+                <p class="pref-field-note" id="service-day-note">
+                  Usual uses weekday timetables; Holiday uses Sunday / public-holiday service.
+                </p>
+              </div>
+
+              <div class="loc-field" id="depart-time-field" data-field="depart">
+                <label class="loc-label" for="input-depart-time">
+                  <span class="material-symbols-outlined" aria-hidden="true">schedule</span>
+                  Departure
+                  <span class="pref-multi-hint">UTC+8</span>
+                </label>
+                <div class="loc-input-row depart-time-row is-now">
+                  <input
+                    id="input-depart-time"
+                    class="loc-input depart-time-input"
+                    type="time"
+                    step="60"
+                    aria-label="Departure time (Hong Kong, UTC+8)"
+                  />
+                  <button
+                    type="button"
+                    id="btn-depart-reset"
+                    class="btn btn-icon"
+                    data-acrylic
+                    title="Reset to now (UTC+8)"
+                    aria-label="Reset departure time to now"
+                  >
+                    <span class="material-symbols-outlined" aria-hidden="true">restart_alt</span>
+                  </button>
+                </div>
+                <p class="pref-field-note" id="depart-time-note">
+                  Default: <strong>Now</strong> (Hong Kong time, UTC+8). Reset returns to live clock.
+                </p>
+              </div>
+
+              <div class="pref-field" id="bus-company-field">
+                <span class="loc-label pref-label">
+                  <span class="material-symbols-outlined" aria-hidden="true">directions_bus</span>
+                  Bus company
+                  <span class="pref-multi-hint">multi-select</span>
+                </span>
+                <div
+                  class="pref-segment pref-segment-4"
+                  role="group"
+                  aria-label="Bus companies"
+                >
+                  <label class="pref-opt">
+                    <input type="checkbox" name="bus-company" value="kmb_lwb" checked />
+                    <span>KMB/LWB</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="checkbox" name="bus-company" value="ctb" checked />
+                    <span>CTB</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="checkbox" name="bus-company" value="nlb" checked />
+                    <span>NLB</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="checkbox" name="bus-company" value="gmb" checked />
+                    <span>GMB</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="pref-field" id="traffic-method-field">
+                <span class="loc-label pref-label">
+                  <span class="material-symbols-outlined" aria-hidden="true">commute</span>
+                  Traffic method
+                  <span class="pref-multi-hint">multi-select</span>
+                </span>
+                <div
+                  class="pref-segment pref-segment-3"
+                  role="group"
+                  aria-label="Traffic methods"
+                >
+                  <label class="pref-opt">
+                    <input type="checkbox" name="traffic-method" value="bus" checked />
+                    <span>Bus</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="checkbox" name="traffic-method" value="gmb" checked />
+                    <span>GMB</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="checkbox" name="traffic-method" value="lrt" checked />
+                    <span>LRT</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="checkbox" name="traffic-method" value="mtr" checked />
+                    <span>MTR</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="checkbox" name="traffic-method" value="walk" checked />
+                    <span>Walk</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="checkbox" name="traffic-method" value="ael" checked />
+                    <span>AEL</span>
+                  </label>
+                </div>
+                <p class="pref-field-note" id="traffic-method-note">
+                  *You might still need short station access if you disabled Walk. Plans to a stop/station itself stay listed.
+                </p>
+              </div>
+
+              <div class="pref-field fare-type-field" id="fare-type-field">
+                <label class="loc-label pref-label" for="select-fare-type">
+                  <span class="material-symbols-outlined" aria-hidden="true">payments</span>
+                  Fare
+                </label>
+                <select
+                  id="select-fare-type"
+                  class="fare-type-select"
+                  aria-label="Ticket / fare type"
+                >
+                  <option value="octopus_adult">Octopus Adult/Elderly</option>
+                  <option value="octopus_child">Octopus Child</option>
+                  <option value="octopus_student">Octopus Student</option>
+                  <option
+                    value="octopus_joyyou_65"
+                    title="Concessionary fare on domestic routes; excl. AEL, EAL First Class, Lo Wu &amp; Lok Ma Chau"
+                  >
+                    Octopus JoyYou Cards (65+)
+                  </option>
+                  <option
+                    value="octopus_joyyou_60"
+                    title="JoyYou $2/20% scheme; full adult for AEL, Lo Wu, Lok Ma Chau &amp; Racecourse"
+                  >
+                    Octopus JoyYou Cards (60–64)
+                  </option>
+                  <option value="qr_adult" title="Same rates as Octopus Adult/Elderly">
+                    QR Code Adult/Elderly
+                  </option>
+                  <option value="qr_child" title="Same rates as Octopus Child">
+                    QR Code Child
+                  </option>
+                  <option value="single_ride">Single Ride Ticket/Cash</option>
+                  <option value="contactless" title="Same rates as Octopus Adult">
+                    Contactless Bank Cards
+                  </option>
+                  <option value="china_tunion" title="Treated as adult Octopus rates">
+                    China T-Union Cards
+                  </option>
+                </select>
+              </div>
+
+              <div class="pref-field" id="eal-first-class-field">
+                <span class="loc-label pref-label">
+                  <span class="material-symbols-outlined" aria-hidden="true">airline_seat_recline_extra</span>
+                  EAL First Class
+                </span>
+                <div
+                  class="pref-segment pref-segment-2"
+                  role="group"
+                  aria-label="East Rail Line First Class"
+                >
+                  <label class="pref-opt">
+                    <input type="radio" name="eal-first-class" value="off" checked />
+                    <span>Off</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="radio" name="eal-first-class" value="on" />
+                    <span>On</span>
+                  </label>
+                </div>
+              </div>
+
+              <div id="plan-results" class="plan-results" hidden></div>
+            </section>
+            </div>
+
+            <!-- Page: full trip detail (all stops) -->
+            <div id="sidebar-page-trip" class="sidebar-page" hidden>
+              <div class="trip-detail-bar">
+                <button
+                  type="button"
+                  id="btn-trip-back"
+                  class="btn btn-ghost trip-back-btn"
+                  data-acrylic
+                >
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
+                    Back to plans
+                  </span>
+                </button>
+              </div>
+              <div id="trip-detail-head" class="trip-detail-head"></div>
+              <div id="trip-detail-timeline" class="trip-detail-timeline"></div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- Always-visible chrome row -->
+        <div class="toolbar-inner">
+          <button
+            type="button"
+            id="btn-detail-open"
+            class="toolbar-icon-btn"
+            title="Expand trip details"
+            aria-label="Expand trip details"
+            aria-controls="side-panel"
+            aria-expanded="false"
+          >
+            <span class="material-symbols-outlined" aria-hidden="true" id="btn-detail-open-icon"
+              >expand_less</span
+            >
+          </button>
+
+          <div class="toolbar-mode" role="tablist" aria-label="Search mode">
+            <button
+              type="button"
+              class="toolbar-mode-btn is-active"
+              data-ui-mode="eta"
+              role="tab"
+              aria-selected="true"
+              title="ETA · search bus / MTR / LRT routes"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">schedule</span>
+              <span class="toolbar-mode-label">ETA</span>
+            </button>
+            <button
+              type="button"
+              class="toolbar-mode-btn"
+              data-ui-mode="route"
+              role="tab"
+              aria-selected="false"
+              title="Trip Plan · origin to destination"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">alt_route</span>
+              <span class="toolbar-mode-label">Trip Plan</span>
+            </button>
+          </div>
+
+          <!-- One fixed mid slot: ETA search and Plan trip swap inside it (same size) -->
+          <div class="toolbar-mid-slot" id="toolbar-mid-slot">
+            <div class="toolbar-eta-search" id="toolbar-eta-search">
+              <span class="material-symbols-outlined toolbar-mid-icon" aria-hidden="true">search</span>
+              <input
+                id="input-eta-route"
+                class="toolbar-eta-input"
+                type="search"
+                enterkeyhint="search"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="Bus / MTR / LRT route"
+                aria-label="Search bus, MTR or LRT route"
+                aria-autocomplete="list"
+                aria-controls="eta-route-suggest"
+              />
+              <ul
+                id="eta-route-suggest"
+                class="eta-route-suggest"
+                hidden
+                role="listbox"
+                aria-label="Route suggestions"
+              ></ul>
+            </div>
+            <button
+              type="button"
+              id="btn-plan"
+              class="toolbar-plan-btn"
+              disabled
+              title="Plan trip"
+              aria-label="Plan trip"
+            >
+              <span class="material-symbols-outlined toolbar-mid-icon" aria-hidden="true">directions</span>
+              <span class="toolbar-plan-label">Plan trip</span>
+            </button>
+          </div>
+
+          <div class="toolbar-end">
+            <button
+              type="button"
+              id="btn-settings"
+              class="toolbar-icon-btn"
+              title="Settings"
+              aria-label="Settings"
+              aria-controls="settings-sheet"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">settings</span>
+            </button>
+            <button
+              type="button"
+              id="btn-info"
+              class="toolbar-icon-btn"
+              title="About"
+              aria-label="About"
+              aria-controls="info-sheet"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">info</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Legacy IDs kept for JS wiring (hidden) -->
+      <button type="button" id="btn-panel-toggle" hidden aria-hidden="true"></button>
+      <button type="button" id="btn-pick-origin" hidden aria-hidden="true"></button>
+      <button type="button" id="btn-pick-dest" hidden aria-hidden="true"></button>
+
+      <div id="toast" class="toast" hidden role="status"></div>
+    </div>
+
+    <!-- Outside #app so site blur does not hide the submit dialog -->
+    <div
+      id="contrib-submit-overlay"
+      class="contrib-submit-overlay"
+      hidden
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="contrib-submit-dialog-title"
+      aria-busy="false"
+    >
+      <div class="contrib-submit-scrim" data-contrib-submit-dismiss></div>
+      <div class="contrib-submit-dialog" data-acrylic>
+        <div id="contrib-submit-loading" class="contrib-submit-loading">
+          <span class="contrib-submit-spinner" aria-hidden="true"></span>
+          <p id="contrib-submit-loading-label" class="contrib-submit-loading-label">
+            Submitting…
+          </p>
+          <p class="hint contrib-keys-hint">Uploading path for review</p>
+        </div>
+        <div id="contrib-submit-result" class="contrib-submit-result" hidden>
+          <div class="contrib-submit-result-icon" aria-hidden="true">
+            <span
+              id="contrib-submit-result-icon-ok"
+              class="material-symbols-outlined contrib-submit-icon-ok"
+              >check_circle</span
+            >
+            <span
+              id="contrib-submit-result-icon-fail"
+              class="material-symbols-outlined contrib-submit-icon-fail"
+              hidden
+              >error</span
+            >
+          </div>
+          <h3 id="contrib-submit-dialog-title" class="contrib-submit-result-title">
+            Submit successful
+          </h3>
+          <p id="contrib-submit-result-msg" class="contrib-submit-result-msg"></p>
+          <p id="contrib-submit-result-meta" class="hint contrib-keys-hint"></p>
+          <div class="contrib-submit-result-actions">
+            <a
+              id="contrib-submit-visit-pr"
+              class="btn contrib-submit-pr-btn"
+              href="#"
+              target="_blank"
+              rel="noopener noreferrer"
+              hidden
+            >
+              <span class="btn-row">
+                <span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>
+                <span id="contrib-submit-visit-pr-label">Visit your PR</span>
+              </span>
+            </a>
+            <button
+              type="button"
+              id="contrib-submit-download"
+              class="btn btn-ghost"
+              data-acrylic
+            >
+              <span class="btn-row">
+                <span class="material-symbols-outlined" aria-hidden="true">download</span>
+                Download JSON copy
+              </span>
+            </button>
+            <button
+              type="button"
+              id="contrib-submit-copy"
+              class="btn btn-ghost"
+              data-acrylic
+            >
+              <span class="btn-row">
+                <span class="material-symbols-outlined" aria-hidden="true">content_copy</span>
+                Copy JSON
+              </span>
+            </button>
+            <button
+              type="button"
+              id="contrib-submit-done"
+              class="btn"
+              data-acrylic
+              data-contrib-submit-dismiss
+            >
+              <span class="btn-row">
+                <span class="material-symbols-outlined" aria-hidden="true">close</span>
+                Done
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

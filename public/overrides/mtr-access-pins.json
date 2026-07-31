@@ -1,0 +1,38 @@
+{
+  "updated_at": "2026-07-27",
+  "notes": "MTR station access pins that must not be overwritten by stations.geojson merge. Hand-maintained static overrides.",
+  "locked": [
+    {
+      "name_en": "Sha Tin",
+      "name_zh": "沙田",
+      "lat": 22.3827,
+      "lon": 114.1875,
+      "code": "SHT",
+      "note": "Offset pin for RAPTOR walk-graph connectivity"
+    },
+    {
+      "name_en": "Hong Kong",
+      "name_zh": "香港",
+      "lat": 22.28495,
+      "lon": 114.15835,
+      "code": "HOK",
+      "note": "AEL/TCL platform cluster (IFC) — geojson centroid has 0 RAPTOR walk edges; Central-street pin made AEL access ~450m"
+    },
+    {
+      "name_en": "Airport",
+      "name_zh": "機場",
+      "lat": 22.31595,
+      "lon": 113.93656,
+      "code": "AIR",
+      "note": "AEL Platform 2 — reliable RAPTOR board/alight"
+    },
+    {
+      "name_en": "AsiaWorld-Expo",
+      "name_zh": "博覽館",
+      "lat": 22.321897,
+      "lon": 113.942015,
+      "code": "AWE",
+      "note": "Station pin; AEL stop is orphaned in wheels graph — dual-access via Airport in stationAccess.js"
+    }
+  ]
+}

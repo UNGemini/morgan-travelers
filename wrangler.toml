@@ -1,0 +1,28 @@
+# Cloudflare Pages — optional bindings for serverless path contributions.
+# In the dashboard: Settings → Functions → KV / R2 / Environment variables.
+# Local: npx wrangler pages dev dist --kv CONTRIBUTIONS
+#
+# name is used when deploying via Wrangler; CF dashboard project name may differ.
+
+name = "morgan-travelers"
+compatibility_date = "2024-11-01"
+pages_build_output_dir = "dist"
+
+# Uncomment after creating resources in the Cloudflare dashboard:
+#
+# [[kv_namespaces]]
+# binding = "CONTRIBUTIONS"
+# id = "<your-kv-namespace-id>"
+#
+# [[r2_buckets]]
+# binding = "CONTRIBUTIONS_BUCKET"
+# bucket_name = "morgan-path-contributions"
+
+# Secrets (set via dashboard or `wrangler pages secret put`):
+#   RESEND_API_KEY
+#   CONTRIBUTE_TO=contributions@morgandev.cc
+#   CONTRIBUTE_FROM="MORGAN Travelers <noreply@your-verified-domain>"
+#   CONTRIBUTE_WEBHOOK_URL=https://discord.com/api/webhooks/...
+#   OVERRIDES_GITHUB_TOKEN   # fine-grained PAT → UNGemini/morgan-travelers-overrides
+#   OVERRIDES_REPO=UNGemini/morgan-travelers-overrides
+#   OVERRIDES_BASE_BRANCH=main

@@ -1,0 +1,285 @@
+{
+  "updated_at": "2026-07-27T09:35:33Z",
+  "stations": [
+    {
+      "name_en": "Admiralty",
+      "lat": 22.2786406,
+      "lon": 114.1662176,
+      "source": "Admiralty railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Airport",
+      "lat": 22.3049255,
+      "lon": 114.1616003,
+      "source": "Airport MTR Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "AsiaWorld-Expo",
+      "lat": 22.3219881,
+      "lon": 113.9422214,
+      "source": "AsiaWorld-Expo railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Austin",
+      "lat": 22.3042356,
+      "lon": 114.1666014,
+      "source": "Austin MTR Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Causeway Bay",
+      "lat": 22.2793921,
+      "lon": 114.1829259,
+      "source": "Causeway Bay railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Central",
+      "lat": 22.2847214,
+      "lon": 114.1579857,
+      "source": "Central MTR Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Chai Wan",
+      "lat": 22.2644535,
+      "lon": 114.237044,
+      "source": "Chai Wan railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Che Kung Temple",
+      "lat": 22.3747681,
+      "lon": 114.1861755,
+      "source": "Che Kung Temple railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Cheung Sha Wan",
+      "lat": 22.3355066,
+      "lon": 114.1561596,
+      "source": "Cheung Sha Wan railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Choi Hung",
+      "lat": 22.3339667,
+      "lon": 114.210174,
+      "source": "Choi Hung railway station Hong Kong",
+      "osm_type": "amenity/bus_station"
+    },
+    {
+      "name_en": "City One",
+      "lat": 22.3827992,
+      "lon": 114.2034491,
+      "source": "City One railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Diamond Hill",
+      "lat": 22.3396772,
+      "lon": 114.201197,
+      "source": "Diamond Hill railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Disneyland Resort",
+      "lat": 22.3153448,
+      "lon": 114.0451403,
+      "source": "Disneyland Resort railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "East Tsim Sha Tsui",
+      "lat": 22.295561,
+      "lon": 114.1750721,
+      "source": "East Tsim Sha Tsui railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Exhibition Centre",
+      "lat": 22.2816132,
+      "lon": 114.1756895,
+      "source": "Exhibition Centre MTR Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Fanling",
+      "lat": 22.4919663,
+      "lon": 114.1388298,
+      "source": "Fanling railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Fo Tan",
+      "lat": 22.3951537,
+      "lon": 114.1981013,
+      "source": "Fo Tan MTR Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Fortress Hill",
+      "lat": 22.2875631,
+      "lon": 114.1933149,
+      "source": "Fortress Hill railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "HKU",
+      "lat": 22.2839758,
+      "lon": 114.1355067,
+      "source": "HKU railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Hang Hau",
+      "lat": 22.3155713,
+      "lon": 114.2644401,
+      "source": "Hang Hau railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Heng Fa Chuen",
+      "lat": 22.2766433,
+      "lon": 114.239773,
+      "source": "Heng Fa Chuen railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Heng On",
+      "lat": 22.4172088,
+      "lon": 114.2256404,
+      "source": "Heng On railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Hin Keng",
+      "lat": 22.3638791,
+      "lon": 114.1707832,
+      "source": "Hin Keng railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Ho Man Tin",
+      "lat": 22.3095742,
+      "lon": 114.1821581,
+      "source": "Ho Man Tin railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Hong Kong",
+      "lat": 22.2847214,
+      "lon": 114.1579857,
+      "source": "Hong Kong MTR Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Hung Hom",
+      "lat": 22.3029008,
+      "lon": 114.182248,
+      "source": "Hung Hom MTR Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Jordan",
+      "lat": 22.30481,
+      "lon": 114.1717074,
+      "source": "Jordan MTR Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Kai Tak",
+      "lat": 22.3301046,
+      "lon": 114.1989492,
+      "source": "Kai Tak MTR Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Kam Sheung Road",
+      "lat": 22.434777,
+      "lon": 114.063432,
+      "source": "Kam Sheung Road railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Kennedy Town",
+      "lat": 22.2814852,
+      "lon": 114.1291911,
+      "source": "Kennedy Town railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Kowloon",
+      "lat": 22.3049255,
+      "lon": 114.1616003,
+      "source": "Kowloon MTR Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Kowloon Bay",
+      "lat": 22.3231377,
+      "lon": 114.2141235,
+      "source": "Kowloon Bay MTR Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Lo Wu",
+      "lat": 22.5281768,
+      "lon": 114.1133387,
+      "source": "Lo Wu MTR Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Lok Ma Chau",
+      "lat": 22.5144539,
+      "lon": 114.0656986,
+      "source": "Lok Ma Chau railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Racecourse",
+      "lat": 22.4004756,
+      "lon": 114.2028994,
+      "source": "Racecourse railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Sha Tin",
+      "lat": 22.3830693,
+      "lon": 114.1877572,
+      "source": "Sha Tin MTR Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Sha Tin Wai",
+      "lat": 22.3770341,
+      "lon": 114.1949867,
+      "source": "Sha Tin Wai railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Tai Wai",
+      "lat": 22.3730942,
+      "lon": 114.1788594,
+      "source": "Tai Wai MTR Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "Tsim Sha Tsui",
+      "lat": 22.2971596,
+      "lon": 114.1721874,
+      "source": "Tsim Sha Tsui railway station Hong Kong",
+      "osm_type": "station"
+    },
+    {
+      "name_en": "University",
+      "lat": 22.4135688,
+      "lon": 114.2101033,
+      "source": "University railway station Hong Kong",
+      "osm_type": "station"
+    }
+  ]
+}

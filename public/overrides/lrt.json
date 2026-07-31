@@ -1,0 +1,55 @@
+{
+  "updated_at": "2026-04-24",
+  "notes": "Hand-corrected Light Rail geometry/platforms. Not replaced by open-data collect or build:fares.",
+  "stops": {
+    "Tin Wing": {
+      "name_zh": "天榮",
+      "lat": 22.46,
+      "lon": 114.00222,
+      "code": "TWI",
+      "stop_id": "500",
+      "note": "Indoor under YOHO West podium (opened 2026-04-24; OSM lag)"
+    }
+  },
+  "platforms": {
+    "Tin Wing": {
+      "name_match": ["tin wing", "天榮"],
+      "centroid": { "lon": 114.00222, "lat": 22.46 },
+      "by_ref": {
+        "1": {
+          "lon": 114.00248,
+          "lat": 22.45978,
+          "note": "SE face under YOHO West, Tin Shing Road / Ginza approach"
+        },
+        "3": { "lon": 114.00228, "lat": 22.45995 },
+        "4": { "lon": 114.00212, "lat": 22.46008 }
+      }
+    }
+  },
+  "shapes": [
+    {
+      "id": "ginza_to_tin_wing",
+      "from_match": ["ginza", "銀座"],
+      "to_match": ["tin wing", "天榮"],
+      "note": "Tin Shing Road approach into Tin Wing P1 (not old NW outdoor loop)",
+      "coordinates": [
+        [114.004959, 22.457552],
+        [114.00455, 22.45795],
+        [114.0041, 22.45835],
+        [114.00355, 22.45885],
+        [114.00305, 22.45925],
+        [114.00272, 22.45952],
+        [114.00248, 22.45978]
+      ]
+    }
+  ],
+  "approach_rules": [
+    {
+      "id": "tin_wing_neighbour_approach",
+      "end_match": ["tin wing", "天榮"],
+      "use_shape": "ginza_to_tin_wing",
+      "slice_end": 4,
+      "note": "Any hop ending at Tin Wing forces final approach via Tin Shing Road"
+    }
+  ]
+}

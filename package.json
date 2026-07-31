@@ -1,0 +1,32 @@
+{
+  "name": "morgan-travelers",
+  "private": true,
+  "version": "0.4.0",
+  "type": "module",
+  "description": "MORGAN Travelers — Hong Kong transit PWA (MapLibre + PMTiles + WASM RAPTOR)",
+  "scripts": {
+    "postinstall": "node scripts/sync-maplibre-worker.mjs",
+    "predev": "node scripts/sync-maplibre-worker.mjs && node scripts/build-fares.mjs",
+    "prebuild": "node scripts/sync-maplibre-worker.mjs && node scripts/build-fares.mjs",
+    "dev": "vite",
+    "build": "vite build",
+    "build:fares": "node scripts/build-fares.mjs",
+    "collect:open-data": "node scripts/collect-open-data.mjs",
+    "preview": "vite preview",
+    "generate-metadata": "node scripts/generate-metadata.mjs",
+    "sync:bus-shapes": "node scripts/sync-bus-shapes-from-remote.mjs",
+    "overrides:status": "node scripts/overrides-local.mjs status",
+    "overrides:pending": "node scripts/overrides-local.mjs pending",
+    "overrides:merge": "node scripts/overrides-local.mjs merge",
+    "overrides:help": "node scripts/overrides-local.mjs help"
+  },
+  "dependencies": {
+    "@protomaps/basemaps": "^5.7.2",
+    "maplibre-gl": "^6.0.0",
+    "pmtiles": "^4.3.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.0",
+    "vite": "^6.3.5"
+  }
+}
