@@ -61,7 +61,19 @@ function isSecureRequest(request) {
 }
 
 function oauthConfigured(env) {
-  return !!(env.GITHUB_OAUTH_CLIENT_ID && env.GITHUB_OAUTH_CLIENT_SECRET);
+  const id = String(env?.GITHUB_OAUTH_CLIENT_ID || "").trim();
+  const secret = String(env?.GITHUB_OAUTH_CLIENT_SECRET || "").trim();
+  return !!(id && secret);
+}
+
+/** Safe debug flags (never include secret values). */
+function oauthEnvFlags(env) {
+  const e = env || {};
+  return {
+    has_client_id: !!String(e.GITHUB_OAUTH_CLIENT_ID || "").trim(),
+    has_client_secret: !!String(e.GITHUB_OAUTH_CLIENT_SECRET || "").trim(),
+    has_redirect_uri: !!String(e.GITHUB_OAUTH_REDIRECT_URI || "").trim(),
+  };
 }
 
 function redirectUri(request, env) {
@@ -84,11 +96,14 @@ export async function onRequest(context) {
 
   // ── me ────────────────────────────────────────────────────────────
   if (action === "me" && request.method === "GET") {
+    const flags = oauthEnvFlags(env);
+    const configured = oauthConfigured(env || {});
     const sess = parseSessionCookie(request.headers.get("Cookie"));
     if (!sess) {
       return json(200, {
         logged_in: false,
-        oauth_configured: oauthConfigured(env || {}),
+        oauth_configured: configured,
+        ...flags,
       });
     }
     return json(200, {
@@ -96,7 +111,8 @@ export async function onRequest(context) {
       login: sess.login,
       name: sess.name || sess.login,
       avatar: sess.avatar || "",
-      oauth_configured: oauthConfigured(env || {}),
+      oauth_configured: configured,
+      ...flags,
     });
   }
 

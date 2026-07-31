@@ -27,6 +27,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // API / auth — always network (secrets + session; never SW cache)
+  if (url.pathname.startsWith("/api/")) {
+    event.respondWith(fetch(request));
+    return;
+  }
+
   // Fare tables + hand overrides — always network (never stale SW cache)
   if (
     url.pathname.includes("/fares/") ||
