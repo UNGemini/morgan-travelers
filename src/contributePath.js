@@ -2728,8 +2728,17 @@ export function createPathContributor(ctx) {
     }
     if (els.submitMsg) els.submitMsg.textContent = opts.message || "";
     if (els.submitMeta) els.submitMeta.textContent = opts.meta || "";
-    if (els.submitIconOk) els.submitIconOk.hidden = !opts.ok;
-    if (els.submitIconFail) els.submitIconFail.hidden = !!opts.ok;
+    // Icons: CSS shows one based on .is-success / .is-failed (see style.css)
+    if (els.submitIconOk) {
+      els.submitIconOk.hidden = !opts.ok;
+      if (opts.ok) els.submitIconOk.removeAttribute("hidden");
+      else els.submitIconOk.setAttribute("hidden", "");
+    }
+    if (els.submitIconFail) {
+      els.submitIconFail.hidden = !!opts.ok;
+      if (!opts.ok) els.submitIconFail.removeAttribute("hidden");
+      else els.submitIconFail.setAttribute("hidden", "");
+    }
     if (els.submitVisitPr) {
       if (opts.prUrl) {
         els.submitVisitPr.hidden = false;

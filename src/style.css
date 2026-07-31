@@ -1578,15 +1578,28 @@ body.contrib-submitting .bg-orb {
 
 .contrib-submit-result-icon {
   margin-bottom: 6px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.contrib-submit-icon-ok {
+/* Exclusive icons — material-symbols often sets display:inline-block which
+   can fight the HTML hidden attribute; drive visibility from overlay state. */
+.contrib-submit-icon-ok,
+.contrib-submit-icon-fail {
   font-size: 48px;
+  line-height: 1;
+  display: none !important;
+}
+
+.contrib-submit-overlay.is-success .contrib-submit-icon-ok {
+  display: inline-block !important;
   color: #51cf66;
 }
 
-.contrib-submit-icon-fail {
-  font-size: 48px;
+.contrib-submit-overlay.is-failed .contrib-submit-icon-fail {
+  display: inline-block !important;
   color: #ff6b6b;
 }
 
