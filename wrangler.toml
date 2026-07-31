@@ -18,7 +18,7 @@ pages_build_output_dir = "dist"
 # binding = "CONTRIBUTIONS_BUCKET"
 # bucket_name = "morgan-path-contributions"
 
-# Secrets (set via dashboard or `wrangler pages secret put`):
+# Secrets / env (Pages → Settings → Environment variables, or wrangler pages secret put):
 #   RESEND_API_KEY
 #   CONTRIBUTE_TO=contributions@morgandev.cc
 #   CONTRIBUTE_FROM="MORGAN Travelers <noreply@your-verified-domain>"
@@ -26,3 +26,6 @@ pages_build_output_dir = "dist"
 #   OVERRIDES_GITHUB_TOKEN   # fine-grained PAT → UNGemini/morgan-travelers-overrides
 #   OVERRIDES_REPO=UNGemini/morgan-travelers-overrides
 #   OVERRIDES_BASE_BRANCH=main
+#   GITHUB_OAUTH_CLIENT_ID
+#   GITHUB_OAUTH_CLIENT_SECRET
+#   GITHUB_OAUTH_REDIRECT_URI=https://<your-pages-domain>/api/auth/callback
