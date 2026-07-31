@@ -391,7 +391,7 @@ body.mobile-ui [data-acrylic]::before {
   bottom: calc(var(--dock-pad) + var(--safe-bottom));
   top: auto;
   transform: translateY(0);
-  /* Width = chrome content × 1.2 (set as --dock-chrome-w in JS) */
+  /* Width locked via --dock-chrome-w (JS); max-width always caps to viewport */
   width: var(--dock-chrome-w, max-content);
   max-width: calc(100vw - 2 * var(--dock-pad));
   display: flex;
@@ -408,19 +408,21 @@ body.mobile-ui [data-acrylic]::before {
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
   pointer-events: auto;
   overflow: hidden;
+  box-sizing: border-box;
   transition:
     transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
     opacity 0.3s ease,
     top 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    bottom 0.35s cubic-bezier(0.22, 1, 0.36, 1),
     max-height 0.35s cubic-bezier(0.22, 1, 0.36, 1),
     width 0.2s ease;
 }
 
-/* Open detail: full height; width stays --dock-chrome-w (+20% chrome) */
+/* Open detail: pin top+bottom so height tracks viewport on resize */
 .app-shell[data-detail="open"] .main-toolbar {
   top: calc(var(--dock-pad) + var(--safe-top));
   bottom: calc(var(--dock-pad) + var(--safe-bottom));
-  max-height: none;
+  max-height: calc(100dvh - 2 * var(--dock-pad) - var(--safe-top) - var(--safe-bottom));
   height: auto;
   width: var(--dock-chrome-w, max-content);
   max-width: calc(100vw - 2 * var(--dock-pad));
@@ -3340,8 +3342,10 @@ body.contrib-submitting .bg-orb {
   .app-shell[data-detail="open"] .main-toolbar {
     top: calc(var(--dock-pad) + var(--safe-top));
     bottom: calc(var(--dock-pad) + var(--safe-bottom));
+    /* Full width on small screens, still capped if chrome lock is smaller */
     width: calc(100vw - 2 * var(--dock-pad));
-    max-height: none;
+    max-width: calc(100vw - 2 * var(--dock-pad));
+    max-height: calc(100dvh - 2 * var(--dock-pad) - var(--safe-top) - var(--safe-bottom));
   }
 
   .toolbar-inner {

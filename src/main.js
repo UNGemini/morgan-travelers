@@ -4284,47 +4284,117 @@ function setToolbarOpen(open) {
 /** Toolbar / sidebar width boost vs natural chrome content. */
 const DOCK_WIDTH_SCALE = 1.05;
 
+function dockPadPx() {
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue("--dock-pad")
+    .trim();
+  const n = parseFloat(raw);
+  return Number.isFinite(n) && n > 0 ? n : 12;
+}
+
 /**
- * Lock dock width to chrome content × 1.2 (collapsed + expanded).
- * Important: never re-measure while locked without force (avoids shrink loops).
+ * Lock dock width to chrome content × scale (collapsed + expanded).
+ * Always caps to viewport. Use force:true on resize / detail toggle.
+ * Without force, never shrink (avoids mid-slot flex shrink loops on mode switch).
  */
 function syncDockChromeWidth({ force = false } = {}) {
   const dock = els.mainToolbar;
-  if (!dock) return;
+  if (!dock || dock.offsetParent === null) return;
   const inner = dock.querySelector(".toolbar-inner");
   if (!inner) return;
 
-  const prevLock = dock.style.getPropertyValue("--dock-chrome-w").trim();
-  const prevW = parseFloat(prevLock) || 0;
+  const prevW =
+    parseFloat(dock.style.getPropertyValue("--dock-chrome-w").trim()) || 0;
+  const pad = dockPadPx();
+  const maxW = Math.max(200, Math.floor(window.innerWidth - 2 * pad));
 
-  // Measure natural chrome without the width lock
-  dock.style.removeProperty("--dock-chrome-w");
+  const mid = dock.querySelector(".toolbar-mid-slot");
+  const prevTransition = dock.style.transition;
   const prevInlineWidth = dock.style.width;
+  const midPrev = mid
+    ? {
+        flex: mid.style.flex,
+        width: mid.style.width,
+        minWidth: mid.style.minWidth,
+        maxWidth: mid.style.maxWidth,
+      }
+    : null;
+
+  // Pause transitions so measure isn't mid-animation
+  dock.style.transition = "none";
+  dock.style.removeProperty("--dock-chrome-w");
+  // Measure chrome only: mid slot at its min footprint (not flex-grown)
   dock.style.width = "max-content";
+  if (mid) {
+    mid.style.flex = "0 0 auto";
+    mid.style.width = "7.5rem";
+    mid.style.minWidth = "7.5rem";
+    mid.style.maxWidth = "7.5rem";
+  }
+
+  // Force layout
+  void dock.offsetWidth;
   const natural = Math.ceil(
-    Math.max(inner.scrollWidth, inner.getBoundingClientRect().width),
+    Math.max(inner.scrollWidth, inner.getBoundingClientRect().width, 1),
   );
-  dock.style.width = prevInlineWidth;
+
+  // Restore mid-slot + temporary width
+  if (mid && midPrev) {
+    mid.style.flex = midPrev.flex;
+    mid.style.width = midPrev.width;
+    mid.style.minWidth = midPrev.minWidth;
+    mid.style.maxWidth = midPrev.maxWidth;
+  }
+  dock.style.width = prevInlineWidth || "";
 
   if (natural <= 40) {
-    if (prevW > 40) dock.style.setProperty("--dock-chrome-w", `${prevW}px`);
+    if (prevW > 40) {
+      dock.style.setProperty(
+        "--dock-chrome-w",
+        `${Math.min(prevW, maxW)}px`,
+      );
+    }
+    dock.style.transition = prevTransition;
     return;
   }
 
   const boosted = Math.ceil(natural * DOCK_WIDTH_SCALE);
-  // Cap to viewport
-  const maxW = Math.floor(window.innerWidth - 24); // ~ 2 * dock-pad
-  const capped = Math.min(boosted, Math.max(maxW, natural));
+  // Hard cap to viewport (previous Math.max(maxW, natural) could overflow)
+  let next = Math.min(boosted, maxW);
+  if (!force && prevW > 40) {
+    next = Math.max(prevW, next);
+  }
+  next = Math.min(next, maxW);
 
-  // Without force, never shrink an existing lock
-  const next = !force && prevW > 40 ? Math.max(prevW, capped) : capped;
   dock.style.setProperty("--dock-chrome-w", `${next}px`);
+
+  // Keep map-tool offset in sync with real chrome height
+  const chromeH = Math.ceil(inner.getBoundingClientRect().height);
+  if (chromeH >= 40 && chromeH <= 80) {
+    document.documentElement.style.setProperty("--toolbar-h", `${chromeH}px`);
+  }
+
+  // Re-enable transitions after layout settles
+  requestAnimationFrame(() => {
+    dock.style.transition = prevTransition;
+  });
 }
 
-// Viewport resize: remeasure unconstrained
-window.addEventListener("resize", () => {
-  requestAnimationFrame(() => syncDockChromeWidth({ force: true }));
-});
+// Viewport / visualViewport resize: debounced full remeasure + map resize
+let dockResizeTimer = null;
+function onViewportChromeResize() {
+  clearTimeout(dockResizeTimer);
+  dockResizeTimer = setTimeout(() => {
+    syncDockChromeWidth({ force: true });
+    resizeMapSoon();
+  }, 80);
+}
+window.addEventListener("resize", onViewportChromeResize);
+try {
+  window.visualViewport?.addEventListener("resize", onViewportChromeResize);
+} catch {
+  /* ignore */
+}
 
 function setDetailOpen(open) {
   if (!els.app) return;
