@@ -2,7 +2,7 @@
  * Contributor / mod bus route path overrides.
  * Source: public/overrides/bus-shapes.json (reviewed entries only).
  *
- * Draft submissions are emailed to mods; they are NOT auto-published.
+ * Draft submissions open a GitHub PR (or download JSON); they are NOT auto-published.
  */
 
 import { getBusShapeOverrides } from "./overrides.js";
@@ -569,14 +569,11 @@ export function busShapeToPolyline(shape, stops, sliceFn) {
   return coords;
 }
 
-/** Email where contributors send path override drafts (mods review offline). */
-export const PATH_CONTRIBUTE_EMAIL = "contributions@morgandev.cc";
-
 /** Same-origin serverless intake (Cloudflare Pages Function). */
 export const PATH_CONTRIBUTE_API = "/api/contribute-path";
 
 /**
- * Build a submission draft object for email / download / API.
+ * Build a submission draft object for download / API / GitHub PR.
  * @param {object} fields
  * @returns {object}
  */
@@ -641,7 +638,6 @@ export function buildPathContributionDraft(fields) {
     // Official stop identity fixed in open data / merge; visual is map display only
     visual_stops: visualStops,
     contributor: String(fields.contributor || "").trim(),
-    contributor_email: String(fields.contributor_email || "").trim(),
     submitted_at: new Date().toISOString(),
     app_version: "0.4.0",
   };
@@ -703,55 +699,9 @@ export function applyVisualStopsFromShape(stopFeatures, shape) {
 }
 
 /**
- * @param {object} draft
- */
-export function draftToMailto(draft) {
-  const subject = encodeURIComponent(
-    `[MORGAN path] ${draft.agency || "?"} ${draft.route_short_name || "?"} — review`,
-  );
-  const body = encodeURIComponent(
-    [
-      "MORGAN Travelers — bus path override submission",
-      "",
-      "Please attach the downloaded JSON file (or paste below).",
-      "Mods: merge into public/overrides/bus-shapes.json after review.",
-      "",
-      `Route: ${draft.agency} ${draft.route_short_name}`,
-      `From match: ${(draft.from_match || []).join(", ")}`,
-      `To match: ${(draft.to_match || []).join(", ")}`,
-      `Direction: ${draft.direction || "—"}`,
-      `Points: ${(draft.coordinates || []).length}`,
-      `Contributor: ${draft.contributor || "—"} <${draft.contributor_email || ""}>`,
-      `Notes: ${draft.notes || "—"}`,
-      "",
-      "--- JSON ---",
-      JSON.stringify(draft, null, 2).slice(0, 1200),
-      (draft.coordinates || []).length > 40
-        ? "\n…(truncated — see attached file)…"
-        : "",
-    ].join("\n"),
-  );
-  return `mailto:${PATH_CONTRIBUTE_EMAIL}?subject=${subject}&body=${body}`;
-}
-
-/**
  * POST draft to serverless /api/contribute-path (Cloudflare Pages Function).
  * Works under COEP (same-origin). Returns API JSON or throws.
  *
- * @param {object} draft
- * @returns {Promise<{
- *   ok: boolean,
- *   id?: string,
- *   accepted?: boolean,
- *   stored?: boolean,
- *   emailed?: boolean,
- *   github_pr?: boolean,
- *   github_pr_url?: string,
- *   message?: string,
- *   error?: string,
- * }>}
- */
-/**
  * @param {object} draft
  * @param {{ submit_mode?: "oauth" | "bot" }} [opts]
  */

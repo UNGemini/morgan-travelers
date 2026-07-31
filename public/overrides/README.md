@@ -42,13 +42,11 @@ Same-origin under COEP. Optional notify/storage via Pages bindings.
 |---------------|---------|
 | `CONTRIBUTIONS` (KV) | Store pending drafts (~90 day TTL) |
 | `CONTRIBUTIONS_BUCKET` (R2) | Store full JSON files |
-| `RESEND_API_KEY` | Email mods via [Resend](https://resend.com) |
-| `CONTRIBUTE_TO` | Inbox (default `contributions@morgandev.cc`) |
-| `CONTRIBUTE_FROM` | Verified sender for Resend |
-| `CONTRIBUTE_WEBHOOK_URL` | Discord/Slack webhook |
+| `CONTRIBUTE_WEBHOOK_URL` | Discord/Slack webhook (optional) |
+| `OVERRIDES_GITHUB_TOKEN` / OAuth | Open review PR on overrides repo |
 
-Without bindings the API still **validates** and returns `accepted: false`; the
-app falls back to **download + mailto**.
+Without GitHub config the API still **validates**; the app falls back to
+**Download / Copy JSON**.
 
 Local dev: Vite writes accepted drafts to `artifacts/contributions/`.
 
@@ -89,7 +87,7 @@ npm run sync:bus-shapes
 
 ### Review checklist (manual / local)
 
-1. Fetch draft from GitHub PR `pending/`, KV/R2/email, or contributor JSON.
+1. Fetch draft from GitHub PR `pending/`, KV/R2, or contributor JSON.
 2. Confirm `route_short_name`, `agency`, `from_match` / `to_match` make sense.
 3. Spot-check `coordinates` on a map (lon, lat order — GeoJSON style).
 4. `node scripts/merge-pending.mjs pending/<id>.json` in the **overrides** repo.

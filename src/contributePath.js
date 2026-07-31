@@ -9,9 +9,7 @@
  */
 
 import {
-  PATH_CONTRIBUTE_EMAIL,
   buildPathContributionDraft,
-  draftToMailto,
   submitPathContribution,
   matchBusShapeForRoute,
   matchSimilarBusShapeOverride,
@@ -824,7 +822,6 @@ export function createPathContributor(ctx) {
     direction: document.getElementById("contrib-direction"),
     notes: document.getElementById("contrib-notes"),
     name: document.getElementById("contrib-name"),
-    email: document.getElementById("contrib-email"),
     count: document.getElementById("contrib-point-count"),
     status: document.getElementById("contrib-status"),
     modeLabel: document.getElementById("contrib-mode-label"),
@@ -843,7 +840,6 @@ export function createPathContributor(ctx) {
     btnImport: document.getElementById("contrib-import-json"),
     importFile: document.getElementById("contrib-import-file"),
     btnDownload: document.getElementById("contrib-download"),
-    btnEmail: document.getElementById("contrib-email-send"),
     btnSubmit: document.getElementById("contrib-submit"),
     btnCopy: document.getElementById("contrib-copy"),
     submitOverlay: document.getElementById("contrib-submit-overlay"),
@@ -2068,9 +2064,6 @@ export function createPathContributor(ctx) {
       if (els.name && draft.contributor != null) {
         els.name.value = String(draft.contributor);
       }
-      if (els.email && draft.contributor_email != null) {
-        els.email.value = String(draft.contributor_email);
-      }
 
       // Visual stops from draft (official stays fixed when provided)
       const vs = draft.visual_stops;
@@ -2619,7 +2612,6 @@ export function createPathContributor(ctx) {
       direction: String(els.direction?.value || "").trim(),
       notes: String(els.notes?.value || "").trim(),
       contributor: String(els.name?.value || "").trim(),
-      contributor_email: String(els.email?.value || "").trim(),
       coordinates: points,
       visual_stops: stopMarkers.map((s, i) => ({
         stop_id: String(s.stopId || ""),
@@ -3166,14 +3158,6 @@ export function createPathContributor(ctx) {
     showToast("JSON downloaded", 2000);
   });
 
-  els.btnEmail?.addEventListener("click", () => {
-    const draft = buildDraft();
-    if (!draft) return;
-    downloadDraft(draft);
-    window.location.href = draftToMailto(draft);
-    showToast(`Opening email to ${PATH_CONTRIBUTE_EMAIL}`, 2200);
-  });
-
   document.querySelectorAll('input[name="contrib-submit-mode"]').forEach((el) => {
     el.addEventListener("change", () => updateAuthUi());
   });
@@ -3242,8 +3226,6 @@ export function createPathContributor(ctx) {
         } else if (res.local_pending) {
           msg =
             "Saved locally to the overrides pending folder. Open the review page or merge via npm run overrides:merge.";
-        } else if (res.emailed) {
-          msg = "Your path was submitted and moderators were notified by email.";
         } else if (res.stored) {
           msg = "Your path was saved to the review queue.";
         }
@@ -3293,7 +3275,7 @@ export function createPathContributor(ctx) {
         showSubmitOverlayResult({
           ok: false,
           title: "Submit failed",
-          message: `${errMsg} Download a JSON copy and email it to moderators if needed.`,
+          message: `${errMsg} Download or copy the JSON and share it with moderators if needed.`,
           meta: draft.id ? `id ${draft.id}` : "",
           prUrl: null,
           draft,
@@ -3355,6 +3337,5 @@ export function createPathContributor(ctx) {
     open,
     close,
     isOpen: () => active,
-    PATH_CONTRIBUTE_EMAIL,
   };
 }

@@ -15,9 +15,7 @@ OVERRIDES_BASE_BRANCH = "main"
 # Optional (public OAuth client id is fine in vars once you have an App):
 # GITHUB_OAUTH_CLIENT_ID = "Iv1.xxxxxxxx"
 # Defaults to request origin + /api/auth/callback if unset:
-# GITHUB_OAUTH_REDIRECT_URI = "https://YOUR_PROJECT.pages.dev/api/auth/callback"
-# CONTRIBUTE_TO = "contributions@morgandev.cc"
-# CONTRIBUTE_FROM = "MORGAN Travelers <noreply@your-verified-domain>"
+# GITHUB_OAUTH_REDIRECT_URI = "https://travelers.morgandev.cc/api/auth/callback"
 
 # ── Secrets — set only in Dashboard (or: wrangler pages secret put NAME) ──
 # Do NOT put real values in this file.
@@ -25,8 +23,7 @@ OVERRIDES_BASE_BRANCH = "main"
 #   GITHUB_OAUTH_CLIENT_SECRET  # OAuth App secret
 #   GITHUB_OAUTH_CLIENT_ID      # optional as Secret if you prefer not to commit it
 #   GITHUB_OAUTH_REDIRECT_URI   # optional as Secret once you know production URL
-#   RESEND_API_KEY
-#   CONTRIBUTE_WEBHOOK_URL
+#   CONTRIBUTE_WEBHOOK_URL      # Discord/Slack notify (optional)
 #   GITHUB_TOKEN                # fallback for OVERRIDES_GITHUB_TOKEN
 
 # Uncomment after creating resources in the Cloudflare dashboard:

@@ -9,7 +9,7 @@
  *   GITHUB_OAUTH_* / session cookie for oauth mode
  *   OVERRIDES_GITHUB_TOKEN for bot mode
  *   OVERRIDES_REPO=UNGemini/morgan-travelers-overrides
- *   + optional KV/R2/Resend/webhook
+ *   + optional KV/R2/webhook
  */
 
 import {
@@ -126,7 +126,6 @@ function validateDraft(draft) {
     coordinates: coords.map((c) => [Number(c[0]), Number(c[1])]),
     visual_stops: visualStops,
     contributor: String(d.contributor || "").slice(0, 120),
-    contributor_email: String(d.contributor_email || "").slice(0, 200),
     submitted_at: String(d.submitted_at || new Date().toISOString()),
     app_version: String(d.app_version || "").slice(0, 32),
     received_at: new Date().toISOString(),
@@ -193,38 +192,6 @@ async function notifyWebhook(env, draft) {
   }
 }
 
-async function notifyEmail(env, draft) {
-  const apiKey = env.RESEND_API_KEY;
-  if (!apiKey) return { ok: false, skipped: true };
-  const to = env.CONTRIBUTE_TO || "contributions@morgandev.cc";
-  const from =
-    env.CONTRIBUTE_FROM || "MORGAN Travelers <onboarding@resend.dev>";
-  const text = [
-    "New path override (pending review)",
-    `Id: ${draft.id}`,
-    `Route: ${draft.agency} ${draft.route_short_name}`,
-    `Points: ${draft.coordinates.length}`,
-  ].join("\n");
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from,
-        to: [to],
-        subject: `[MORGAN path] ${draft.agency} ${draft.route_short_name}`,
-        text,
-      }),
-    });
-    return { ok: res.ok, status: res.status };
-  } catch (e) {
-    return { ok: false, error: String(e?.message || e) };
-  }
-}
-
 function json(status, payload) {
   return new Response(JSON.stringify(payload), {
     status,
@@ -276,7 +243,6 @@ export async function onRequest(context) {
 
   const draft = v.draft;
   const store = await storeDraft(env || {}, draft);
-  const email = await notifyEmail(env || {}, draft);
   const webhook = await notifyWebhook(env || {}, draft);
 
   let gh = { ok: false, skipped: true };
@@ -325,7 +291,6 @@ export async function onRequest(context) {
 
   const accepted =
     store.stored ||
-    email.ok === true ||
     webhook.ok === true ||
     gh.ok === true;
 
@@ -352,8 +317,6 @@ export async function onRequest(context) {
     stored: store.stored,
     storage: store.storage,
     storage_key: store.key,
-    emailed: email.ok === true,
-    email_skipped: !!email.skipped,
     webhook: webhook.ok === true,
     webhook_skipped: !!webhook.skipped,
     github_pr: gh.ok === true,
@@ -366,6 +329,6 @@ export async function onRequest(context) {
       ? gh.ok
         ? `Submitted — PR opened${gh.pr_url ? `: ${gh.pr_url}` : ""} (${submitMode})`
         : "Submission received. Moderators will review before publish."
-      : "Validated. No channel configured — use download/email fallback.",
+      : "Validated. No channel configured — use Download JSON or set OVERRIDES_GITHUB_TOKEN / OAuth.",
   });
 }
