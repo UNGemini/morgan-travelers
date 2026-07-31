@@ -1,12 +1,33 @@
-# Cloudflare Pages — optional bindings for serverless path contributions.
-# In the dashboard: Settings → Functions → KV / R2 / Environment variables.
-# Local: npx wrangler pages dev dist --kv CONTRIBUTIONS
+# Cloudflare Pages
+# Plain-text env vars live here ([vars]). Dashboard can only edit *Secrets*.
+# Local: npx wrangler pages dev dist
 #
 # name is used when deploying via Wrangler; CF dashboard project name may differ.
 
 name = "morgan-travelers"
 compatibility_date = "2024-11-01"
 pages_build_output_dir = "dist"
+
+# ── Non-secret runtime variables (committed; edit here + push to update) ──
+[vars]
+OVERRIDES_REPO = "UNGemini/morgan-travelers-overrides"
+OVERRIDES_BASE_BRANCH = "main"
+# Optional (public OAuth client id is fine in vars once you have an App):
+# GITHUB_OAUTH_CLIENT_ID = "Iv1.xxxxxxxx"
+# Defaults to request origin + /api/auth/callback if unset:
+# GITHUB_OAUTH_REDIRECT_URI = "https://YOUR_PROJECT.pages.dev/api/auth/callback"
+# CONTRIBUTE_TO = "contributions@morgandev.cc"
+# CONTRIBUTE_FROM = "MORGAN Travelers <noreply@your-verified-domain>"
+
+# ── Secrets — set only in Dashboard (or: wrangler pages secret put NAME) ──
+# Do NOT put real values in this file.
+#   OVERRIDES_GITHUB_TOKEN      # fine-grained PAT → overrides repo (bot PRs)
+#   GITHUB_OAUTH_CLIENT_SECRET  # OAuth App secret
+#   GITHUB_OAUTH_CLIENT_ID      # optional as Secret if you prefer not to commit it
+#   GITHUB_OAUTH_REDIRECT_URI   # optional as Secret once you know production URL
+#   RESEND_API_KEY
+#   CONTRIBUTE_WEBHOOK_URL
+#   GITHUB_TOKEN                # fallback for OVERRIDES_GITHUB_TOKEN
 
 # Uncomment after creating resources in the Cloudflare dashboard:
 #
@@ -17,15 +38,3 @@ pages_build_output_dir = "dist"
 # [[r2_buckets]]
 # binding = "CONTRIBUTIONS_BUCKET"
 # bucket_name = "morgan-path-contributions"
-
-# Secrets / env (Pages → Settings → Environment variables, or wrangler pages secret put):
-#   RESEND_API_KEY
-#   CONTRIBUTE_TO=contributions@morgandev.cc
-#   CONTRIBUTE_FROM="MORGAN Travelers <noreply@your-verified-domain>"
-#   CONTRIBUTE_WEBHOOK_URL=https://discord.com/api/webhooks/...
-#   OVERRIDES_GITHUB_TOKEN   # fine-grained PAT → UNGemini/morgan-travelers-overrides
-#   OVERRIDES_REPO=UNGemini/morgan-travelers-overrides
-#   OVERRIDES_BASE_BRANCH=main
-#   GITHUB_OAUTH_CLIENT_ID
-#   GITHUB_OAUTH_CLIENT_SECRET
-#   GITHUB_OAUTH_REDIRECT_URI=https://<your-pages-domain>/api/auth/callback
