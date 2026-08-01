@@ -4991,7 +4991,10 @@ function setToolbarOpen(open) {
 
 /** Toolbar / sidebar width boost vs natural chrome content. */
 const DOCK_WIDTH_SCALE = 1.05;
-/** Locked dock width (px) shared by ETA + Trip Plan until viewport resize. */
+/**
+ * Locked ideal dock width (px) shared by ETA + Trip Plan.
+ * Survives viewport resize (only clamped to max). Cleared only on first layout.
+ */
 let dockLockedWidthPx = 0;
 
 function dockPadPx() {
@@ -5002,17 +5005,24 @@ function dockPadPx() {
   return Number.isFinite(n) && n > 0 ? n : 12;
 }
 
+function dockViewportMaxWidth() {
+  const pad = dockPadPx();
+  return Math.max(200, Math.floor(window.innerWidth - 2 * pad));
+}
+
 /**
  * Apply a fixed dock width (ETA and Trip Plan use the same value).
- * @param {number} px
+ * Ideal lock is preserved; only the painted width is clamped to the viewport.
+ * @param {number} idealPx  preferred width to remember (pre-clamp)
  */
-function applyDockWidth(px) {
+function applyDockWidth(idealPx) {
   const dock = els.mainToolbar;
   if (!dock) return;
-  const pad = dockPadPx();
-  const maxW = Math.max(200, Math.floor(window.innerWidth - 2 * pad));
-  const w = Math.min(Math.max(Math.round(px), 200), maxW);
-  dockLockedWidthPx = w;
+  const maxW = dockViewportMaxWidth();
+  const ideal = Math.max(Math.round(idealPx), 200);
+  // Remember the intended chrome width even if viewport is currently narrower
+  dockLockedWidthPx = ideal;
+  const w = Math.min(ideal, maxW);
   dock.style.setProperty("--dock-chrome-w", `${w}px`);
   dock.style.width = `${w}px`;
   dock.style.minWidth = `${w}px`;
@@ -5076,34 +5086,30 @@ function measureDockChromeNatural() {
 /**
  * Lock dock width to chrome content × scale.
  * Default: keep existing lock (no grow/shrink) so ETA ↔ Trip Plan stay identical.
- * @param {{ remount?: boolean, allowShrink?: boolean }} [opts]
- *   remount — remeasure chrome (first open / rare)
- *   allowShrink — viewport resize may shrink
+ * @param {{ remount?: boolean }} [opts]
+ *   remount — remeasure chrome once (first layout only)
  */
-function syncDockChromeWidth({ remount = false, allowShrink = false } = {}) {
+function syncDockChromeWidth({ remount = false } = {}) {
   const dock = els.mainToolbar;
   if (!dock || dock.offsetParent === null) return;
-  const pad = dockPadPx();
-  const maxW = Math.max(200, Math.floor(window.innerWidth - 2 * pad));
 
-  // Already locked: only clamp to viewport (or remeasure when allowed)
-  if (dockLockedWidthPx > 40 && !remount && !allowShrink) {
-    applyDockWidth(Math.min(dockLockedWidthPx, maxW));
+  // Already locked: re-apply clamp only — never remeasure from content
+  if (dockLockedWidthPx > 40 && !remount) {
+    applyDockWidth(dockLockedWidthPx);
     return;
   }
 
   const natural = measureDockChromeNatural();
   if (natural <= 40) {
-    if (dockLockedWidthPx > 40) applyDockWidth(Math.min(dockLockedWidthPx, maxW));
+    if (dockLockedWidthPx > 40) applyDockWidth(dockLockedWidthPx);
     return;
   }
 
-  let next = Math.min(Math.ceil(natural * DOCK_WIDTH_SCALE), maxW);
-  if (dockLockedWidthPx > 40 && !allowShrink) {
-    // Never shrink or grow on mode/detail toggles
-    next = Math.min(Math.max(dockLockedWidthPx, next), maxW);
-    // If remount is false we already returned; remount can raise the lock once
-    if (!remount) next = Math.min(dockLockedWidthPx, maxW);
+  // First lock (or forced remount): measure chrome × scale
+  // If we already have a lock and remount is for rare recovery, keep the larger of the two
+  let next = Math.ceil(natural * DOCK_WIDTH_SCALE);
+  if (dockLockedWidthPx > 40) {
+    next = Math.max(dockLockedWidthPx, next);
   }
   applyDockWidth(next);
 
@@ -5116,13 +5122,16 @@ function syncDockChromeWidth({ remount = false, allowShrink = false } = {}) {
   }
 }
 
-// Viewport / visualViewport resize: debounced full remeasure + map resize
+// Viewport / visualViewport resize: only clamp locked width — never remeasure content
 let dockResizeTimer = null;
 function onViewportChromeResize() {
   clearTimeout(dockResizeTimer);
   dockResizeTimer = setTimeout(() => {
-    dockLockedWidthPx = 0; // allow full remeasure
-    syncDockChromeWidth({ remount: true, allowShrink: true });
+    if (dockLockedWidthPx > 40) {
+      applyDockWidth(dockLockedWidthPx);
+    } else {
+      syncDockChromeWidth({ remount: true });
+    }
     resizeMapSoon();
   }, 80);
 }
@@ -8173,7 +8182,7 @@ setToolbarOpen(true);
 // Initial dock width from chrome (locked for ETA + Trip Plan)
 requestAnimationFrame(() => {
   dockLockedWidthPx = 0;
-  syncDockChromeWidth({ remount: true, allowShrink: true });
+  syncDockChromeWidth({ remount: true });
 });
 
 // Detail expand/collapse (same dock, height grows/shrinks)

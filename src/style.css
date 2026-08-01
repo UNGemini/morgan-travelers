@@ -415,8 +415,8 @@ body.mobile-ui [data-acrylic]::before {
     opacity 0.3s ease,
     top 0.35s cubic-bezier(0.22, 1, 0.36, 1),
     bottom 0.35s cubic-bezier(0.22, 1, 0.36, 1),
-    max-height 0.35s cubic-bezier(0.22, 1, 0.36, 1),
-    width 0.2s ease;
+    max-height 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  /* width is JS-locked — no transition (resize must not animate width) */
 }
 
 /* Open detail: pin top+bottom so height tracks viewport on resize */
