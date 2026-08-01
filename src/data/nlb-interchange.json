@@ -1,0 +1,198 @@
+{
+  "schema": "morgan.travelers.nlb-interchange.v1",
+  "updated_at": "2026-08-01",
+  "source": {
+    "url": "https://www.nlb.com.hk/info/passenger#bus_bus_interchange",
+    "title_zh": "八達通轉乘優惠（乘客資訊）",
+    "language": "zh-HK only (no English passenger page; /en/info/passenger → 404)",
+    "note": "Hand-extracted from NLB Chinese HTML. South Lantau combined fares (總收費) are not simple BBI discounts — omitted from pair map."
+  },
+  "groups": {
+    "nlb_tung_chung_local": ["37", "37A", "37H", "37M", "38", "38X", "N38", "N37", "39M"],
+    "nlb_tung_chung_to_station": ["37", "37A", "37H", "37M", "38", "38X", "N38"],
+    "nlb_tung_chung_to_station_b": ["37A", "39M", "N37"],
+    "nlb_south": ["3M", "11", "23"],
+    "nlb_disney": ["36"],
+    "nlb_x11r": ["X11R"],
+    "nlb_b6": ["B6", "B6S"],
+    "nlb_hzmb_second": ["3M", "11", "23", "34"],
+    "nlb_hzmb_local": ["37", "37A", "37H", "37M"],
+    "ctb_e_to_city": ["E11", "E11A", "E11B", "E21", "E21D", "E22", "E22A", "E23", "E23A"],
+    "ctb_e_to_airport": ["E11", "E11A", "E11B", "E21", "E22", "E22A", "E23", "E23A"],
+    "lwb_e_to_nt": ["E32", "E33", "E33P", "E36", "E36P", "E36S", "E37", "E41", "E42"],
+    "lwb_e_airport": [
+      "E31",
+      "E32",
+      "E32A",
+      "E33",
+      "E33P",
+      "E36",
+      "E36A",
+      "E36P",
+      "E36S",
+      "E37",
+      "E41",
+      "E42",
+      "E42P",
+      "E43"
+    ]
+  },
+  "schemes": [
+    {
+      "id": "nlb_ctb_tung_chung",
+      "title_zh": "嶼巴與城巴八達通轉乘",
+      "adult": 1.0,
+      "child": 0.5,
+      "window_minutes": 90,
+      "place_zh": "東涌纜車站 / 東涌站",
+      "pairs": [
+        {
+          "from": "nlb_tung_chung_to_station",
+          "to": "ctb_e_to_city",
+          "window_minutes": 90
+        },
+        {
+          "from": "ctb_e_to_airport",
+          "to": ["37", "37A", "37H", "37M", "38"],
+          "window_minutes": 150
+        }
+      ]
+    },
+    {
+      "id": "nlb_lwb_tung_chung",
+      "title_zh": "嶼巴與龍運巴士八達通轉乘（東涌站／纜車站）",
+      "adult": 1.0,
+      "child": 0.5,
+      "window_minutes": 90,
+      "pairs": [
+        {
+          "from": ["37", "37A", "37H", "37M", "38", "38X"],
+          "to": "lwb_e_to_nt",
+          "window_minutes": 90
+        },
+        {
+          "from": "lwb_e_to_nt",
+          "to": ["37", "37A", "37H", "37M", "38", "38X"],
+          "window_minutes": 150
+        }
+      ]
+    },
+    {
+      "id": "nlb_lwb_south_lantau",
+      "title_zh": "嶼巴與龍運巴士八達通轉乘（嶼南／迪士尼）",
+      "adult": 1.0,
+      "child": 0.5,
+      "window_minutes": 150,
+      "exclude_elderly_pw_d": true,
+      "pairs": [
+        {
+          "from": "lwb_e_airport",
+          "to": ["3M", "11", "23", "36"]
+        },
+        {
+          "from": ["3M", "11", "23"],
+          "to": "lwb_e_airport"
+        }
+      ]
+    },
+    {
+      "id": "nlb_lwb_x11r",
+      "title_zh": "嶼巴 X11R ↔ 龍運 E 線",
+      "adult": 2.0,
+      "child": 1.0,
+      "window_minutes": 150,
+      "exclude_elderly_pw_d": true,
+      "pairs": [
+        { "from": "lwb_e_airport", "to": ["X11R"] },
+        { "from": ["X11R"], "to": "lwb_e_airport" }
+      ]
+    },
+    {
+      "id": "nlb_hzmb_b6",
+      "title_zh": "嶼巴港珠澳大橋香港口岸路線八達通轉乘",
+      "pairs_explicit": [
+        {
+          "from": ["B6"],
+          "to": ["3M", "11", "23", "34"],
+          "adult": 2.2,
+          "child": 1.1,
+          "elderly": 1.1,
+          "window_minutes": 120
+        },
+        {
+          "from": ["B6"],
+          "to": ["37", "37A", "37H", "37M"],
+          "adult": 2.2,
+          "child": 1.1,
+          "elderly": 1.1,
+          "window_minutes": 60
+        },
+        {
+          "from": ["B6"],
+          "to": ["38"],
+          "adult": 0,
+          "free": true,
+          "window_minutes": 60,
+          "note": "免費"
+        },
+        {
+          "from": ["38"],
+          "to": ["B6", "B6S"],
+          "adult": 3.8,
+          "child": 1.9,
+          "elderly": 1.4,
+          "window_minutes": 60
+        },
+        {
+          "from": ["3M", "11", "23", "34"],
+          "to": ["B6", "B6S"],
+          "adult": 2.2,
+          "child": 1.1,
+          "elderly": 1.1,
+          "window_minutes": 120
+        },
+        {
+          "from": ["37", "37A", "37H", "37M", "38X"],
+          "to": ["B6", "B6S"],
+          "adult": 2.2,
+          "child": 1.1,
+          "elderly": 1.1,
+          "window_minutes": 60
+        }
+      ]
+    },
+    {
+      "id": "nlb_mtr_tung_chung",
+      "title_zh": "嶼巴與港鐵八達通轉乘（東涌站）",
+      "note": "Already mirrored in mtr_pt for NLB Tung Chung routes ($1 adult). Bus-side free not applied to MTR matrix here.",
+      "adult": 1.0,
+      "window_minutes": 90,
+      "mtr_station": "Tung Chung",
+      "nlb_to_mtr": ["37", "37H", "37M", "38", "38X", "N38", "37A", "39M", "N37"],
+      "mtr_to_nlb": ["37", "37H", "37M", "38", "38X", "N38", "37A", "39M", "N37"]
+    },
+    {
+      "id": "nlb_local_tung_chung",
+      "title_zh": "東涌區內轉乘",
+      "adult": 1.0,
+      "window_minutes": 60,
+      "pairs": [
+        {
+          "from": ["37A", "37M"],
+          "to": ["38", "39M"]
+        }
+      ]
+    }
+  ],
+  "south_lantau_combined_fares": {
+    "note_zh": "總收費（非第二程折扣）：1↔23、1↔3M、3M↔23 等平日/假日固定總價，估價引擎暫不展開。",
+    "examples": [
+      { "from": "1", "to": "23", "weekday_total": 17.3, "holiday_total": 37 },
+      { "from": "23", "to": "1", "weekday_total": 20.4, "holiday_total": 37 },
+      { "from": "1", "to": "3M", "weekday_total": 14, "holiday_total": 23.3 },
+      { "from": "3M", "to": "1", "weekday_total": 14, "holiday_total": 23.3 },
+      { "from": "3M", "to": "23", "weekday_total": 17.3, "holiday_total": 37 },
+      { "from": "23", "to": "3M", "weekday_total": 20.4, "holiday_total": 37 }
+    ]
+  }
+}

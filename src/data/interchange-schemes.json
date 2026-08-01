@@ -42,6 +42,13 @@
         "!": "special",
         "default_minutes": 150
       }
+    },
+    {
+      "id": "nlb_passenger_bbi",
+      "title": "NLB Octopus interchange (Chinese only)",
+      "url": "https://www.nlb.com.hk/info/passenger#bus_bus_interchange",
+      "language": "zh-HK",
+      "note": "No English page (/en/info/passenger 404). Structured extract: src/data/nlb-interchange.json"
     }
   ],
   "mtr_pt": {
@@ -726,8 +733,10 @@
     "kmb_index_artifact": "artifacts/kmb-bbi-route-index.json",
     "kmb_note": "Search UI only. Static data: storage/en.BBI_route{F1,F2,B1,B2}.js (~12MB each). Route index via schemes:sync → artifacts/kmb-bbi-route-index.json",
     "compact_file": "fares/bbi-compact.json",
-    "compact_pairs": 53785,
+    "compact_pairs": 54154,
     "compact_bytes": 779181,
-    "compact_updated_at": "2026-08-01"
+    "compact_updated_at": "2026-08-01",
+    "nlb_pairs_merged": 369,
+    "nlb_source": "src/data/nlb-interchange.json"
   }
 }
