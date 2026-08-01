@@ -6766,26 +6766,72 @@ function etaCardDotsHtml(r, dirCount, activeDir) {
 }
 
 /**
- * @param {EtaRouteEntry[]} hits
- * @param {string} [hint]
+ * Status panel for the ETA route list (loading / empty / error).
+ * @param {"loading"|"empty"|"error"} status
+ * @param {string} [message]
  */
+function etaRouteListStatusHtml(status, message = "") {
+  if (status === "loading") {
+    return `<li class="eta-route-status is-loading" role="status" aria-live="polite" aria-busy="true">
+      <span class="eta-route-status-spinner" aria-hidden="true"></span>
+      <span class="eta-route-status-title">${escapeHtml(message || "Loading routes…")}</span>
+    </li>`;
+  }
+  if (status === "error") {
+    return `<li class="eta-route-status is-error" role="alert">
+      <span class="material-symbols-outlined eta-route-status-icon" aria-hidden="true">error</span>
+      <span class="eta-route-status-title">${escapeHtml(message || "Couldn’t load routes")}</span>
+      <span class="eta-route-status-sub">Check your connection and try again</span>
+    </li>`;
+  }
+  // empty / not found
+  return `<li class="eta-route-status is-empty" role="status">
+    <span class="material-symbols-outlined eta-route-status-icon" aria-hidden="true">search_off</span>
+    <span class="eta-route-status-title">${escapeHtml(message || "No routes found")}</span>
+    <span class="eta-route-status-sub">Try another filter or search term</span>
+  </li>`;
+}
+
 /**
  * @param {EtaRouteEntry[]} hits
  * @param {string} [hint]
- * @param {{ skipPrefetch?: boolean }} [opts]
+ * @param {{ skipPrefetch?: boolean, status?: "loading"|"empty"|"error" }} [opts]
  */
 function renderEtaRouteSuggest(hits, hint = "", opts = {}) {
   const list = els.etaRouteListSidebar;
   if (!list) return;
   if (els.etaRouteHintSidebar) {
-    if (hint) {
+    if (hint && opts.status !== "loading") {
       els.etaRouteHintSidebar.hidden = false;
       els.etaRouteHintSidebar.textContent = hint;
+    } else if (opts.status === "loading" && hint) {
+      els.etaRouteHintSidebar.hidden = false;
+      els.etaRouteHintSidebar.textContent = hint;
+    } else if (!hint || opts.status === "error" || opts.status === "empty") {
+      els.etaRouteHintSidebar.hidden = true;
+      els.etaRouteHintSidebar.textContent = "";
     } else {
       els.etaRouteHintSidebar.hidden = true;
       els.etaRouteHintSidebar.textContent = "";
     }
   }
+
+  if (opts.status === "loading") {
+    etaRouteHits = [];
+    etaRouteActive = -1;
+    list.innerHTML = etaRouteListStatusHtml(
+      "loading",
+      hint || "Loading routes…",
+    );
+    return;
+  }
+  if (opts.status === "error") {
+    etaRouteHits = [];
+    etaRouteActive = -1;
+    list.innerHTML = etaRouteListStatusHtml("error", hint || "Couldn’t load routes");
+    return;
+  }
+
   etaRouteHits = hits;
   // Keep selection index if still in range; do not auto-select 0
   if (etaRouteActive >= hits.length) etaRouteActive = hits.length ? 0 : -1;
@@ -6801,7 +6847,12 @@ function renderEtaRouteSuggest(hits, hint = "", opts = {}) {
   }
 
   if (!hits.length) {
-    list.innerHTML = `<li class="eta-route-empty" role="presentation">No matching routes</li>`;
+    list.innerHTML = etaRouteListStatusHtml(
+      "empty",
+      hint && /no |not found|none/i.test(hint)
+        ? hint
+        : "No routes found",
+    );
     return;
   }
 
@@ -6874,25 +6925,60 @@ function renderEtaRouteSuggest(hits, hint = "", opts = {}) {
   });
 }
 
+/** Generation so stale browse results don’t overwrite a newer search. */
+let etaSuggestGen = 0;
+
 /** Refresh sidebar list from current toolbar input + filter. */
 async function refreshEtaRouteSuggest() {
   if (getUiMode() !== "eta") return;
-  void ensureKmbRouteBounds();
+  const gen = ++etaSuggestGen;
   const q = String(els.inputEtaRoute?.value || "").trim();
+
   if (q.length >= 1) {
-    // Typed search uses catalog OD, not nearby dir slots
+    // Typed search — brief loading while bounds warm (usually fast)
     etaNearbyDirsByKey.clear();
-    await ensureKmbRouteBounds();
-    renderEtaRouteSuggest(searchEtaRoutes(q));
+    renderEtaRouteSuggest([], "Searching…", { status: "loading" });
+    try {
+      await ensureKmbRouteBounds();
+      if (gen !== etaSuggestGen || getUiMode() !== "eta") return;
+      if (String(els.inputEtaRoute?.value || "").trim() !== q) return;
+      const hits = searchEtaRoutes(q);
+      renderEtaRouteSuggest(
+        hits,
+        hits.length ? "" : `No routes match “${q}”`,
+        hits.length ? {} : { status: "empty" },
+      );
+    } catch (e) {
+      console.warn("[eta] search", e);
+      if (gen !== etaSuggestGen) return;
+      renderEtaRouteSuggest([], "Search failed", { status: "error" });
+    }
     return;
   }
+
   etaNearbyDirsByKey.clear();
-  renderEtaRouteSuggest([], "Loading nearby…");
-  await Promise.all([ensureKmbRouteBounds(), ensureKmbStops()]);
-  const { hits, hint } = await browseEtaRoutes();
-  if (String(els.inputEtaRoute?.value || "").trim().length >= 1) return;
-  if (getUiMode() !== "eta") return;
-  renderEtaRouteSuggest(hits, hint);
+  renderEtaRouteSuggest([], "Loading nearby routes…", { status: "loading" });
+  try {
+    await Promise.all([ensureKmbRouteBounds(), ensureKmbStops()]);
+    if (gen !== etaSuggestGen || getUiMode() !== "eta") return;
+    if (String(els.inputEtaRoute?.value || "").trim().length >= 1) return;
+    const { hits, hint } = await browseEtaRoutes();
+    if (gen !== etaSuggestGen || getUiMode() !== "eta") return;
+    if (String(els.inputEtaRoute?.value || "").trim().length >= 1) return;
+    if (!hits.length) {
+      renderEtaRouteSuggest([], hint || "No nearby routes", {
+        status: "empty",
+      });
+    } else {
+      renderEtaRouteSuggest(hits, hint);
+    }
+  } catch (e) {
+    console.warn("[eta] browse", e);
+    if (gen !== etaSuggestGen) return;
+    renderEtaRouteSuggest([], "Couldn’t load nearby routes", {
+      status: "error",
+    });
+  }
 }
 
 /** @type {EtaRouteEntry | null} */
