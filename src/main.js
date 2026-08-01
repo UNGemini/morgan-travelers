@@ -4960,38 +4960,57 @@ function ensureEtaUserGeo() {
 
 /**
  * Empty query browse list.
- * With location: nearby MTR lines + LRT (if near NT West) + bus from “1…”.
- * Without: LRT + bus starting at route 1 (numeric).
+ * Multi-operator catalog always (KMB/LWB/CTB/NLB/GMB/MTR/LRT by filter).
+ * With location: promote nearby KMB live ETAs + nearby MTR lines + LRT.
  * @param {number} [limit]
  * @returns {Promise<{ hits: EtaRouteEntry[], hint: string }>}
  */
-async function browseEtaRoutes(limit = 16) {
+async function browseEtaRoutes(limit = 28) {
   if (!etaRouteCatalog.length) buildEtaRouteCatalog();
   await ensureMtrStationLinesMap();
   const geo = await ensureEtaUserGeo();
   const filtered = etaRouteCatalog.filter(etaKindMatchesFilter);
 
+  /** @type {EtaRouteEntry[]} */
+  const out = [];
+  const seen = new Set();
+  const push = (r, hint) => {
+    if (!r || !etaKindMatchesFilter(r)) return;
+    const k = etaRouteKey(r);
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ ...r, nearbyHint: hint || r.nearbyHint });
+  };
+
+  // Catalog sorted by route id (multi-operator)
+  const catalogSorted = [...filtered].sort((a, b) => {
+    const ka = `${a.kind}|${a.co || ""}|${a.id}`;
+    const kb = `${b.kind}|${b.co || ""}|${b.id}`;
+    // Prefer numeric route order within same kind
+    const idCmp = a.id.localeCompare(b.id, undefined, { numeric: true });
+    if (a.kind === b.kind && a.co === b.co) return idCmp;
+    // Group: mtr, lrt, then bus companies
+    const order = { mtr: 0, lrt: 1, mtr_bus: 2, bus: 3 };
+    const oa = order[a.kind] ?? 9;
+    const ob = order[b.kind] ?? 9;
+    if (oa !== ob) return oa - ob;
+    if ((a.co || "") !== (b.co || ""))
+      return String(a.co || "").localeCompare(String(b.co || ""));
+    return idCmp;
+  });
+
   if (!geo) {
-    // From route 1… (no MTR dump when location off, unless filter=MTR)
-    let pool = filtered;
-    if (etaTrafficMode === "bus" || etaTrafficMode === "gmb" || etaTrafficMode === "lrt") {
-      /* already filtered */
-    } else if (etaTrafficMode === "all") {
-      pool = filtered.filter((r) => r.kind !== "mtr");
-    }
-    const hits = [...pool]
-      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
-      .slice(0, limit);
+    const hits = catalogSorted.slice(0, limit);
     return {
       hits,
       hint:
         etaTrafficMode === "mtr"
-          ? "MTR lines · allow location for nearby stations"
-          : "From route 1 · allow location for nearby MTR",
+          ? "All MTR lines · allow location for nearby"
+          : "All operators from route 1 · allow location for nearby ETAs",
     };
   }
 
-  // ── Nearby MTR lines via nearest stations ──
+  // ── Nearby MTR lines ──
   /** @type {Map<string, { dist: number, station: string }>} */
   const lineNear = new Map();
   for (const st of MTR_STATIONS) {
@@ -5009,97 +5028,90 @@ async function browseEtaRoutes(limit = 16) {
     }
   }
 
-  /** @type {EtaRouteEntry[]} */
-  const out = [];
-  const seen = new Set();
-  const push = (r, hint) => {
-    if (!r || !etaKindMatchesFilter(r)) return;
-    const k = `${r.kind}|${r.id}|${r.co || ""}`;
-    if (seen.has(k)) return;
-    seen.add(k);
-    out.push({ ...r, nearbyHint: hint || r.nearbyHint });
-  };
+  let nearLrt = false;
+  for (const st of LRT_STOPS) {
+    if (!Number.isFinite(st.lat)) continue;
+    if (haversineMEta(geo.lat, geo.lon, st.lat, st.lon) <= 4000) {
+      nearLrt = true;
+      break;
+    }
+  }
 
-  if (etaTrafficMode === "all" || etaTrafficMode === "mtr") {
+  if (etaTrafficMode === "mtr" || etaTrafficMode === "all") {
     const ranked = [...lineNear.entries()].sort((a, b) => a[1].dist - b[1].dist);
     for (const [code, info] of ranked) {
       const entry = filtered.find((r) => r.kind === "mtr" && r.id === code);
-      if (entry) {
-        push(
-          entry,
-          `~${Math.round(info.dist)} m · ${info.station}`,
-        );
-      }
-      if (out.length >= limit) break;
+      if (entry) push(entry, `~${Math.round(info.dist)} m · ${info.station}`);
     }
-    // Fallback: all MTR lines if none nearby
-    if (etaTrafficMode === "mtr" && !out.length) {
-      for (const r of filtered.filter((x) => x.kind === "mtr")) {
-        push(r);
-        if (out.length >= limit) break;
-      }
+    if (etaTrafficMode === "mtr") {
+      for (const r of filtered.filter((x) => x.kind === "mtr")) push(r);
+      return {
+        hits: out.slice(0, limit),
+        hint: lineNear.size
+          ? "Nearby MTR lines"
+          : "MTR lines (none within 2.5 km)",
+      };
     }
   }
 
-  // LRT if near any LRT stop (NT West)
-  let nearLrt = false;
-  if (etaTrafficMode === "all" || etaTrafficMode === "lrt") {
-    for (const st of LRT_STOPS) {
-      if (!Number.isFinite(st.lat)) continue;
-      if (haversineMEta(geo.lat, geo.lon, st.lat, st.lon) <= 4000) {
-        nearLrt = true;
-        break;
-      }
-    }
+  if (etaTrafficMode === "lrt" || etaTrafficMode === "all") {
     if (nearLrt || etaTrafficMode === "lrt") {
       for (const r of filtered.filter((x) => x.kind === "lrt")) {
         push(r, nearLrt ? "Near Light Rail" : undefined);
-        if (out.length >= limit) break;
       }
+    }
+    if (etaTrafficMode === "lrt") {
+      return {
+        hits: out.slice(0, limit),
+        hint: nearLrt ? "Light Rail routes (nearby)" : "All LRT routes",
+      };
     }
   }
 
-  // Bus / GMB: live nearby stop ETAs (KMB open data)
+  // Bus / GMB: merge live KMB nearby + full multi-op catalog (CTB/NLB/GMB/…)
   if (
     etaTrafficMode === "bus" ||
     etaTrafficMode === "gmb" ||
     etaTrafficMode === "all"
   ) {
-    const nearBus = await fetchNearbyKmbEtaHits(geo, limit);
+    const nearBus = await fetchNearbyKmbEtaHits(geo, Math.min(20, limit));
+    // Live first (soonest)
     for (const r of nearBus.hits) {
       if (etaTrafficMode === "gmb" && r.co !== "gmb") continue;
-      // KMB nearby is franchised — gmb filter gets little; still ok
       push(r, r.nearbyHint);
-      if (out.length >= limit) break;
     }
-    // Fallback catalog from “1…” if no nearby ETAs
-    if (!nearBus.hits.length && (etaTrafficMode === "bus" || etaTrafficMode === "all")) {
-      const buses = filtered
-        .filter((r) => r.kind === "bus" || r.kind === "mtr_bus")
-        .sort((a, b) =>
-          a.id.localeCompare(b.id, undefined, { numeric: true }),
-        );
-      for (const r of buses) {
-        push(r);
-        if (out.length >= limit) break;
-      }
+    // Then fill with CTB / NLB / GMB / KMB / MTR Bus from catalog (not only KMB)
+    for (const r of catalogSorted) {
+      if (r.kind !== "bus" && r.kind !== "mtr_bus") continue;
+      // Skip if already have same operator+route from live
+      const already = out.some(
+        (x) =>
+          x.id === r.id &&
+          (x.co || "") === (r.co || "") &&
+          (x.kind === "bus" || x.kind === "mtr_bus"),
+      );
+      if (already) continue;
+      // Also skip duplicate route id from different co if live KMB same number? keep both
+      push(r);
+      if (out.length >= limit) break;
     }
   }
 
   const stName = [...lineNear.values()].sort((a, b) => a.dist - b.dist)[0]
     ?.station;
   const hasLive = out.some((r) => etaLiveByKey.has(etaRouteKey(r)));
+  const cos = new Set(
+    out.map((r) => r.co || r.kind).filter(Boolean),
+  );
   return {
     hits: out.slice(0, limit),
     hint: hasLive
-      ? stName
-        ? `Near ${stName}` + (nearLrt ? " · LRT" : "") + " · live ETA"
-        : "Nearby stops · live ETA"
+      ? `Live KMB nearby · + CTB/NLB/GMB catalog${stName ? ` · MTR near ${stName}` : ""}`
       : stName
-        ? `Near ${stName}` + (nearLrt ? " · LRT area" : "")
+        ? `Near ${stName}${nearLrt ? " · LRT" : ""} · multi-operator list`
         : nearLrt
-          ? "Near Light Rail · bus from route 1"
-          : "Nearby · bus from route 1",
+          ? "Near Light Rail · multi-operator from route 1"
+          : "Multi-operator from route 1",
   };
 }
 

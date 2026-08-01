@@ -637,6 +637,7 @@ body.mobile-ui [data-acrylic]::before {
   gap: 10px;
   min-height: 0;
   flex: 1 1 auto;
+  height: 100%;
 }
 
 .eta-sidebar-panel[hidden] {
@@ -653,6 +654,18 @@ body.mobile-ui [data-acrylic]::before {
 
 .app-shell[data-ui-mode="eta"] .eta-sidebar-panel {
   display: flex !important;
+}
+
+.app-shell[data-ui-mode="eta"] #sidebar-page-search {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+.app-shell[data-ui-mode="eta"] .detail-sidebar-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* list scrolls inside */
 }
 
 .eta-mode-filter-sidebar {
@@ -727,40 +740,48 @@ body.mobile-ui [data-acrylic]::before {
   display: none !important;
 }
 
-/* Scrollable route cards */
+/* Scrollable route cards — fill remaining sidebar height */
 .eta-route-list-sidebar {
   list-style: none;
   margin: 0;
-  padding: 0 2px 8px;
+  padding: 4px 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 0;
-  max-height: min(48vh, 380px);
+  gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
 }
 
-/* Wheels-like ETA route card */
+/* Wheels-like ETA route card — rounded selection */
 .eta-route-list-sidebar li.eta-route-card {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 12px 6px 10px;
-  border: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0;
-  background: transparent;
+  padding: 12px 14px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
   cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .eta-route-list-sidebar li.eta-route-card:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 .eta-route-list-sidebar li.eta-route-card.is-active {
-  background: rgba(192, 174, 252, 0.1);
-  box-shadow: inset 3px 0 0 var(--accent);
+  background: rgba(192, 174, 252, 0.14);
+  border-color: rgba(192, 174, 252, 0.45);
+  box-shadow:
+    0 0 0 1px rgba(192, 174, 252, 0.2),
+    0 8px 20px rgba(0, 0, 0, 0.25);
 }
 
 .eta-route-card-body {
