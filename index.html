@@ -617,27 +617,47 @@
               hidden
               aria-label="ETA route browser"
             >
-              <div class="loc-label pref-label">
-                <span class="material-symbols-outlined" aria-hidden="true">directions_transit</span>
-                Traffic method
-              </div>
               <div
                 class="eta-mode-filter eta-mode-filter-sidebar"
                 role="group"
                 aria-label="Traffic method"
               >
-                <button type="button" class="eta-mode-chip is-active" data-eta-mode="all">All</button>
-                <button type="button" class="eta-mode-chip" data-eta-mode="mtr">MTR</button>
-                <button type="button" class="eta-mode-chip" data-eta-mode="lrt">LRT</button>
-                <button type="button" class="eta-mode-chip" data-eta-mode="bus">Bus</button>
+                <button type="button" class="eta-mode-chip is-active" data-eta-mode="bus" title="Bus">
+                  <span class="material-symbols-outlined" aria-hidden="true">directions_bus</span>
+                  <span>Bus</span>
+                </button>
+                <button type="button" class="eta-mode-chip" data-eta-mode="mtr" title="MTR">
+                  <span class="material-symbols-outlined" aria-hidden="true">subway</span>
+                  <span>MTR</span>
+                </button>
+                <button type="button" class="eta-mode-chip" data-eta-mode="gmb" title="GMB">
+                  <span class="material-symbols-outlined" aria-hidden="true">airport_shuttle</span>
+                  <span>GMB</span>
+                </button>
+                <button type="button" class="eta-mode-chip" data-eta-mode="lrt" title="LRT">
+                  <span class="material-symbols-outlined" aria-hidden="true">tram</span>
+                  <span>LRT</span>
+                </button>
               </div>
               <p id="eta-route-hint-sidebar" class="eta-route-hint-sidebar" hidden></p>
+
+              <!-- Wheels-style direction pager (2 dots) -->
+              <div id="eta-dir-pager" class="eta-dir-pager" hidden>
+                <div class="eta-dir-dots" role="tablist" aria-label="Direction">
+                  <button type="button" class="eta-dir-dot is-active" data-eta-dir="0" aria-label="Direction 1"></button>
+                  <button type="button" class="eta-dir-dot" data-eta-dir="1" aria-label="Direction 2"></button>
+                </div>
+              </div>
+
               <ul
                 id="eta-route-list-sidebar"
                 class="eta-route-list-sidebar"
                 role="listbox"
                 aria-label="Routes"
               ></ul>
+
+              <!-- Selected route hero card (Wheels-like) -->
+              <div id="eta-route-hero" class="eta-route-hero" hidden></div>
             </section>
 
             <!-- Trip Plan mode: origin / destination / prefs -->

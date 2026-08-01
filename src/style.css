@@ -630,11 +630,11 @@ body.mobile-ui [data-acrylic]::before {
   color: var(--text-muted);
 }
 
-/* ETA sidebar panel (visible when data-ui-mode=eta) */
+/* ETA sidebar panel (visible when data-ui-mode=eta) — Wheels-inspired cards */
 .eta-sidebar-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   min-height: 0;
   flex: 1 1 auto;
 }
@@ -655,38 +655,63 @@ body.mobile-ui [data-acrylic]::before {
   display: flex !important;
 }
 
-.eta-mode-filter,
 .eta-mode-filter-sidebar {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
+  justify-content: flex-start;
 }
 
 .eta-mode-chip {
   appearance: none;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.25);
-  color: var(--text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
   font: inherit;
   font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  padding: 7px 12px;
+  font-weight: 650;
+  padding: 8px 12px;
   border-radius: 999px;
   cursor: pointer;
-  line-height: 1.2;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.eta-mode-chip .material-symbols-outlined {
+  font-size: 18px !important;
+  width: 18px;
+  height: 18px;
+  line-height: 18px !important;
 }
 
 .eta-mode-chip:hover {
   border-color: rgba(192, 174, 252, 0.35);
-  color: var(--text-primary);
 }
 
 .eta-mode-chip.is-active {
-  background: rgba(192, 174, 252, 0.2);
-  border-color: rgba(192, 174, 252, 0.45);
-  color: #f0eaff;
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.28);
+}
+
+.eta-mode-chip[data-eta-mode="bus"].is-active {
+  background: rgba(255, 180, 50, 0.22);
+  border-color: rgba(255, 180, 50, 0.45);
+}
+.eta-mode-chip[data-eta-mode="mtr"].is-active {
+  background: rgba(0, 125, 197, 0.28);
+  border-color: rgba(0, 125, 197, 0.5);
+}
+.eta-mode-chip[data-eta-mode="gmb"].is-active {
+  background: rgba(60, 180, 90, 0.25);
+  border-color: rgba(60, 180, 90, 0.5);
+}
+.eta-mode-chip[data-eta-mode="lrt"].is-active {
+  background: rgba(211, 168, 9, 0.22);
+  border-color: rgba(211, 168, 9, 0.5);
 }
 
 .eta-route-hint-sidebar {
@@ -702,91 +727,214 @@ body.mobile-ui [data-acrylic]::before {
   display: none !important;
 }
 
+/* Direction dots (swipe pager) — Wheels style */
+.eta-dir-pager {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 4px;
+}
+
+.eta-dir-pager[hidden] {
+  display: none !important;
+}
+
+.eta-dir-dots {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.eta-dir-dot {
+  appearance: none;
+  border: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.22);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    transform 0.15s ease;
+}
+
+.eta-dir-dot.is-active {
+  background: rgba(255, 255, 255, 0.85);
+  transform: scale(1.15);
+}
+
+/* Scrollable route cards */
 .eta-route-list-sidebar {
   list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
+  margin: 0;
+  padding: 0 2px 8px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-height: min(52vh, 420px);
+  gap: 0;
+  max-height: min(48vh, 380px);
   overflow: auto;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
-.eta-route-list-sidebar li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 12px;
+/* Wheels-like ETA route card */
+.eta-route-list-sidebar li.eta-route-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  padding: 14px 4px 14px 2px;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0;
+  background: transparent;
   cursor: pointer;
-  font-size: 0.82rem;
-  color: var(--text-primary);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(0, 0, 0, 0.22);
+  align-items: start;
 }
 
-.eta-route-list-sidebar li:hover,
-.eta-route-list-sidebar li.is-active {
-  background: rgba(192, 174, 252, 0.12);
-  border-color: rgba(192, 174, 252, 0.28);
+.eta-route-list-sidebar li.eta-route-card:hover,
+.eta-route-list-sidebar li.eta-route-card.is-active {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 .eta-route-list-sidebar .eta-route-empty {
+  display: flex;
   cursor: default;
   color: var(--text-muted);
   justify-content: center;
   font-weight: 500;
-  border-style: dashed;
+  padding: 20px 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
 }
 
-.eta-route-list-sidebar .eta-route-empty:hover {
-  background: rgba(0, 0, 0, 0.22);
-  border-color: rgba(255, 255, 255, 0.06);
-}
-
-.eta-route-list-sidebar .eta-route-id {
-  flex-shrink: 0;
-  min-width: 2.8rem;
-  font-weight: 750;
-  letter-spacing: 0.02em;
-  color: var(--accent);
-}
-
-.eta-route-list-sidebar .eta-route-meta {
+.eta-card-main {
   min-width: 0;
-  flex: 1;
-  color: var(--text-secondary);
-  font-weight: 500;
-  line-height: 1.3;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
-.eta-route-list-sidebar .eta-route-badge {
+.eta-card-route {
+  font-size: 1.55rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: #ff4d4f;
+}
+
+.eta-card-route.is-mtr {
+  color: #3d9be9;
+}
+.eta-card-route.is-lrt {
+  color: #d4a40a;
+}
+.eta-card-route.is-gmb {
+  color: #3cb45a;
+}
+.eta-card-route.is-mtr_bus {
+  color: #5b8def;
+}
+
+.eta-card-dest {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 0.88rem;
+  font-weight: 650;
+  color: var(--text-primary);
+  line-height: 1.25;
+}
+
+.eta-card-dest .eta-card-arrow {
+  color: var(--text-muted);
+  font-size: 0.85rem;
   flex-shrink: 0;
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 3px 7px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.eta-card-stop {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.eta-card-eta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 2px;
+  padding-top: 2px;
+  min-width: 3.2rem;
+}
+
+.eta-card-eta-icon {
+  font-size: 16px !important;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
+.eta-card-eta-min {
+  font-size: 1.45rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+.eta-card-eta-unit {
+  font-size: 0.65rem;
+  font-weight: 600;
   color: var(--text-muted);
 }
 
-.eta-route-list-sidebar .eta-route-badge-mtr {
-  color: #7ec8f0;
-  border-color: rgba(0, 125, 197, 0.4);
+.eta-card-eta.is-live .eta-card-eta-icon {
+  color: #51cf66;
+  opacity: 1;
 }
 
-.eta-route-list-sidebar .eta-route-badge-lrt {
-  color: #e8c547;
-  border-color: rgba(211, 168, 9, 0.45);
+.eta-card-eta.is-soon .eta-card-eta-min {
+  color: #51cf66;
 }
 
-.eta-route-list-sidebar .eta-route-badge-bus {
-  color: #9ad4a0;
-  border-color: rgba(100, 180, 120, 0.4);
+/* Selected hero card */
+.eta-route-hero {
+  margin-top: 4px;
+  padding: 12px 14px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.eta-route-hero[hidden] {
+  display: none !important;
+}
+
+.eta-route-hero .eta-route-card {
+  border-bottom: none;
+  padding: 4px 0 8px;
+}
+
+.eta-hero-swipe {
+  touch-action: pan-y;
+  overflow: hidden;
+}
+
+.eta-hero-track {
+  display: flex;
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.eta-hero-page {
+  flex: 0 0 100%;
+  min-width: 100%;
 }
 
 .eta-route-suggest .eta-route-badge-bus {
