@@ -17,7 +17,7 @@ import { layers, namedFlavor } from "@protomaps/basemaps";
 import { initAcrylic } from "./acrylic.js";
 import { loadStaticOverrides } from "./overrides.js";
 import { createPathContributor } from "./contributePath.js";
-import { applyLrtStopOverrides } from "./lrtStops.js";
+
 import { applyAccessPinOverrides } from "./mtrStations.js";
 import {
   initRouter,
@@ -81,7 +81,12 @@ import {
   mergeStationDirectory,
   MTR_STATIONS,
 } from "./mtrStations.js";
-import { LRT_STOPS, matchLrtStop, lrtStopToHit } from "./lrtStops.js";
+import {
+  LRT_STOPS,
+  matchLrtStop,
+  lrtStopToHit,
+  applyLrtStopOverrides,
+} from "./lrtStops.js";
 import {
   loadMtrGeo,
   addMtrLayers,
