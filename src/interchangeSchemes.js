@@ -169,3 +169,71 @@ export function resetInterchangeSchemesCache() {
   compiledMtr = null;
   compiledBusBus = null;
 }
+
+/** @type {Record<string, number> | null} */
+let bbiPairs = null;
+/** @type {Promise<Record<string, number>> | null} */
+let bbiLoadPromise = null;
+
+/**
+ * Compact ordered first>second bus discounts (from offline summarize-bbi.mjs).
+ * Fetches public/fares/bbi-compact.json once.
+ * @returns {Promise<Record<string, number>>}
+ */
+export async function loadBbiCompactPairs() {
+  if (bbiPairs) return bbiPairs;
+  if (bbiLoadPromise) return bbiLoadPromise;
+  bbiLoadPromise = (async () => {
+    try {
+      const base =
+        (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) ||
+        "/";
+      const url = new URL(`${base}fares/bbi-compact.json`, window.location.href);
+      url.searchParams.set("v", "1");
+      const res = await fetch(url.href, { cache: "no-cache" });
+      if (!res.ok) throw new Error(`bbi-compact ${res.status}`);
+      const j = await res.json();
+      bbiPairs =
+        j && typeof j.pairs === "object" && j.pairs ? j.pairs : {};
+      console.info(
+        "[bbi] compact pairs",
+        Object.keys(bbiPairs).length,
+        j?.updated_at || "",
+      );
+    } catch (e) {
+      console.warn("[bbi] compact load failed", e?.message || e);
+      bbiPairs = {};
+    }
+    return bbiPairs;
+  })();
+  return bbiLoadPromise;
+}
+
+/** Sync getter (empty until loadBbiCompactPairs resolves). */
+export function getBbiCompactPairs() {
+  return bbiPairs || {};
+}
+
+/**
+ * Max HKD discount for consecutive bus routes (ordered first → second).
+ * @param {string} fromRoute
+ * @param {string} toRoute
+ */
+export function lookupBbiDiscount(fromRoute, toRoute) {
+  const a = String(fromRoute || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+  const b = String(toRoute || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+  if (!a || !b || a === b) return 0;
+  const map = getBbiCompactPairs();
+  const d1 = map[`${a}>${b}`];
+  const d2 = map[`${b}>${a}`];
+  // Prefer ordered first→second; fall back reverse if only other direction listed
+  if (d1 != null && d1 > 0) return Number(d1);
+  if (d2 != null && d2 > 0) return Number(d2);
+  return 0;
+}

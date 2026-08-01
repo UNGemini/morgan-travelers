@@ -334,8 +334,8 @@
     ]
   },
   "bus_bus": {
-    "enabled": false,
-    "note": "Citybus ~90 packages via API; KMB/LWB ~776 routes via static JSON (search UI only). Full pair matrices not applied until rules[] filled. npm run schemes:sync refreshes indexes.",
+    "enabled": true,
+    "note": "BBI discounts from offline summarize-bbi.mjs (KMB/LWB static JSON + optional Citybus dumps). Applied when consecutive bus legs match pairs in public/fares/bbi-compact.json.",
     "sources": [
       {
         "id": "citybus_bbi",
@@ -724,6 +724,10 @@
     "kmb_route_count": 776,
     "kmb_synced_at": "2026-08-01",
     "kmb_index_artifact": "artifacts/kmb-bbi-route-index.json",
-    "kmb_note": "Search UI only. Static data: storage/en.BBI_route{F1,F2,B1,B2}.js (~12MB each). Route index via schemes:sync → artifacts/kmb-bbi-route-index.json"
+    "kmb_note": "Search UI only. Static data: storage/en.BBI_route{F1,F2,B1,B2}.js (~12MB each). Route index via schemes:sync → artifacts/kmb-bbi-route-index.json",
+    "compact_file": "fares/bbi-compact.json",
+    "compact_pairs": 53785,
+    "compact_bytes": 779181,
+    "compact_updated_at": "2026-08-01"
   }
 }

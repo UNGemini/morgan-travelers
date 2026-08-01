@@ -20,3 +20,6 @@ artifacts/contributions/
 artifacts/citybus-*.json
 
 artifacts/kmb-bbi-*.json
+
+# Raw BBI dumps (~50MB); keep public/fares/bbi-compact.json
+artifacts/bbi/

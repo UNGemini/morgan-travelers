@@ -18,7 +18,8 @@ import {
   excludeIxAfterAelFreeMtr,
   isMtrInterchangeEnabled,
   getBusBusInterchangeRules,
-  isBusBusInterchangeEnabled,
+  loadBbiCompactPairs,
+  lookupBbiDiscount,
 } from "./interchangeSchemes.js";
 
 /**
@@ -448,6 +449,8 @@ export async function initFares() {
   if (pack) return pack;
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
+    // Bus–bus BBI compact map (KMB/LWB offline summary) — parallel with fares pack
+    void loadBbiCompactPairs();
     const base =
       (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) || "/";
     // Cache-bust so student/child matrices are not stuck on an old adult-only pack
@@ -1451,54 +1454,57 @@ function applyMtrInterchangeDiscounts(parts, legs, type) {
 }
 
 /**
- * Same-itinerary bus–bus BBI (optional; rules in interchange-schemes.json).
- * Applies discount to the *second* matching bus leg when enabled.
+ * Same-itinerary bus–bus BBI.
+ * Primary: compact pair map from offline KMB/LWB summarize (public/fares/bbi-compact.json).
+ * Secondary: hand rules in interchange-schemes.json bus_bus.rules.
+ * Applies discount to the *second* matching bus leg.
  * @param {FarePart[]} parts
  * @param {FareType} type
  */
 function applyBusBusInterchangeDiscounts(parts, type) {
-  if (!isBusBusInterchangeEnabled()) return;
-  const rules = getBusBusInterchangeRules();
-  if (!rules.length) return;
+  // Octopus / contactless family — cash single-ride skipped
+  if (
+    type === "single_ride" ||
+    (!octopusSupportsGmbInterchange(type) && !isAdultOctopusFamily(type))
+  ) {
+    return;
+  }
 
   const busParts = parts.filter(
     (p) =>
-      (p.kind === "bus" || p.kind === "gmb") &&
+      (p.kind === "bus" || p.kind === "gmb" || p.kind === "mtr_bus") &&
       p.amount != null &&
       p.amount > 0 &&
       !p._bbi_applied,
   );
   if (busParts.length < 2) return;
 
+  const handRules = getBusBusInterchangeRules();
+
   for (let i = 0; i < busParts.length - 1; i++) {
     const a = busParts[i];
     const b = busParts[i + 1];
     const aRoute = String(a.route || "").toUpperCase().replace(/\s+/g, "");
     const bRoute = String(b.route || "").toUpperCase().replace(/\s+/g, "");
+    if (!aRoute || !bRoute) continue;
+
+    let best = lookupBbiDiscount(aRoute, bRoute);
+
+    // Optional hand rules (Citybus curated, etc.)
     const aCos = a.companies || [];
     const bCos = b.companies || [];
-
-    let best = 0;
-    for (const rule of rules) {
+    for (const rule of handRules) {
       if (rule.adultOnly && !isAdultOctopusFamily(type)) continue;
       const fromOk =
-        aCos.some((c) => rule.fromCos.includes(c)) &&
-        (rule.fromRoutes.includes("*") ||
-          rule.fromRoutes.includes(aRoute));
+        (!rule.fromCos.length || aCos.some((c) => rule.fromCos.includes(c))) &&
+        (rule.fromRoutes.includes("*") || rule.fromRoutes.includes(aRoute));
       const toOk =
-        bCos.some((c) => rule.toCos.includes(c)) &&
+        (!rule.toCos.length || bCos.some((c) => rule.toCos.includes(c))) &&
         (rule.toRoutes.includes("*") || rule.toRoutes.includes(bRoute));
-      // Also allow reverse direction of the pair
-      const revFrom =
-        bCos.some((c) => rule.fromCos.includes(c)) &&
-        (rule.fromRoutes.includes("*") ||
-          rule.fromRoutes.includes(bRoute));
-      const revTo =
-        aCos.some((c) => rule.toCos.includes(c)) &&
-        (rule.toRoutes.includes("*") || rule.toRoutes.includes(aRoute));
-      if (!(fromOk && toOk) && !(revFrom && revTo)) continue;
+      if (!fromOk || !toOk) continue;
       if (rule.discount > best) best = rule.discount;
     }
+
     if (best <= 0) continue;
     // Apply to second leg (typical “next journey” discount)
     const target = b;
