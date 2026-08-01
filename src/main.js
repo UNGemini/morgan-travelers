@@ -7528,6 +7528,9 @@ async function showEtaRouteDetailsPanel() {
         <span class="rt-route-to">${escapeHtml(dest)}</span>
       </div>`,
     });
+    // Next departure wait for the board stop (replaces old BOARD / PASS BY / ALIGHT)
+    const boardWaitLabel = formatWaitCompact(slots[0]?.waitMins);
+
     for (let i = 0; i < named.length; i++) {
       const s = named[i];
       const isLast = i === named.length - 1;
@@ -7536,17 +7539,17 @@ async function showEtaRouteDetailsPanel() {
         ((s.stopId && boardStop.stopId && s.stopId === boardStop.stopId) ||
           s === boardStop ||
           (boardName && s.name === boardName));
+      // Role line under name — only on the stop the big ETA card is for
+      const roleHtml = isEtaStop
+        ? `<span class="rt-stop-role rt-stop-eta-mins">${escapeHtml(boardWaitLabel)}</span>`
+        : "";
       rows.push({
         kind: "stop",
         line: isLast ? "none" : "solid",
         color,
         last: isLast,
         extraClass: isEtaStop ? "rt-stop-eta-active" : "",
-        bodyHtml: `<span class="rt-stop-name${isEtaStop ? " is-eta-stop" : ""}">${escapeHtml(s.name)}</span>${
-          isEtaStop
-            ? `<span class="rt-stop-eta-hint">${hasLive ? "ETA stop" : "Showing ETA"}</span>`
-            : ""
-        }`,
+        bodyHtml: `<span class="rt-stop-name${isEtaStop ? " is-eta-stop" : ""}">${escapeHtml(s.name)}</span>${roleHtml}`,
       });
     }
     stopsHtml = `<div class="plan-timeline plan-route-line plan-route-line-full eta-route-line" aria-label="Stops on route">${rows

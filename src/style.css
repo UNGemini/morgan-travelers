@@ -1476,13 +1476,14 @@ body.mobile-ui [data-acrylic]::before {
   color: #fff;
 }
 
-.eta-route-line .rt-stop-eta-hint {
+/* Same slot as old BOARD/PASS BY/ALIGHT — now “+X Minutes” for the ETA stop */
+.eta-route-line .rt-stop-role.rt-stop-eta-mins {
   display: block;
   margin-top: 2px;
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  text-transform: none;
   color: var(--rt-color);
   opacity: 0.95;
 }
