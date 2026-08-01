@@ -1811,6 +1811,58 @@ export function formatHkd(amount) {
 }
 
 /**
+ * Section fare (HKD) if boarding a bus at `board` and riding to `alight`
+ * (defaults to last stop in `stops`). Rail / ferry → null.
+ * Uses TD FARE_BUS section table when available.
+ *
+ * @param {object} baseOpt  route option shell (route_short_name, agency, mode…)
+ * @param {object | null | undefined} board
+ * @param {object[] | null | undefined} stops full sequence
+ * @param {object | null | undefined} [alight]
+ * @param {FareType} [fareType]
+ * @returns {number | null}
+ */
+export function estimateBusBoardFare(
+  baseOpt,
+  board,
+  stops,
+  alight = null,
+  fareType = activeFareType,
+) {
+  if (!baseOpt || !board || !pack) return null;
+  if (isFerryOption(baseOpt) || isMtrTransitOption(baseOpt)) return null;
+  // Only bus / GMB / MTR Bus
+  const mode = String(baseOpt.mode || "").toLowerCase();
+  if (mode && mode !== "bus" && mode !== "trolleybus") {
+    if (!isBusTransitOption(baseOpt) && !isMtrBusRoute(baseOpt.route_short_name)) {
+      return null;
+    }
+  }
+  const seq =
+    Array.isArray(stops) && stops.length
+      ? stops
+      : [board, alight].filter(Boolean);
+  const to =
+    alight ||
+    (seq.length ? seq[seq.length - 1] : null) ||
+    baseOpt.to ||
+    null;
+  if (!to) return null;
+  const opt = {
+    ...baseOpt,
+    mode: baseOpt.mode || "bus",
+    from: board,
+    to,
+    stops: seq.length >= 2 ? seq : [board, to],
+  };
+  if (!isBusTransitOption(opt) && !isMtrBusRoute(opt.route_short_name)) {
+    // Still try TD section if agency looks like bus
+    if (!agencyCompanies(opt).length) return null;
+  }
+  return busOrFerryFare(opt, fareType);
+}
+
+/**
  * Display helper:
  *  - missing total / no data → "N/A"
  *  - walk-only or free → "$0.0"

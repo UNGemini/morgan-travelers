@@ -1517,17 +1517,20 @@ body.mobile-ui [data-acrylic]::before {
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.45);
 }
 
-/* Reach time under stop name (Wheels “5m” / “-3m”) — no row/name recolor */
+/* Reach time under stop name: “5 min” / “-3 min・$12.5” */
 .eta-route-line .rt-stop-role.rt-stop-eta-mins {
   display: block;
   margin-top: 2px;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
   text-transform: none;
   color: var(--rt-color);
   opacity: 0.95;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Stops before selected: grey rail already applied via --rt-color; mute labels */

@@ -74,6 +74,8 @@ import {
   setEalFirstClass,
   getEalFirstClass,
   getFarePack,
+  formatHkd,
+  estimateBusBoardFare,
 } from "./fares.js";
 import {
   searchMtrStationsLocal,
@@ -7401,8 +7403,7 @@ function selectEtaRoute(route, listIndex) {
 }
 
 /**
- * Compact wait / time-to-stop label (“5m”, “-3m”, “Now”, “N/A”) — Wheels-style.
- * Negative = vehicle already passed that stop relative to selected-stop ETA.
+ * Compact wait for big ETA card (“5m”, “Now”, “N/A”) — Wheels-style.
  * @param {number | null | undefined} mins
  */
 function formatWaitCompact(mins) {
@@ -7411,6 +7412,33 @@ function formatWaitCompact(mins) {
   if (n < 0) return `${n}m`;
   if (n === 0) return "Now";
   return `${n}m`;
+}
+
+/**
+ * Stop-list wait label — use “min” so it is not read as metres.
+ * e.g. “5 min”, “-3 min”, “Now”.
+ * @param {number | null | undefined} mins
+ */
+function formatWaitStopList(mins) {
+  if (mins == null || !Number.isFinite(Number(mins))) return "N/A";
+  const n = Math.round(Number(mins));
+  if (n < 0) return `${n} min`;
+  if (n === 0) return "Now";
+  if (n === 1) return "1 min";
+  return `${n} min`;
+}
+
+/**
+ * Stop-list label: “5 min” or bus “5 min・$12.5” (section fare board→terminus).
+ * @param {number | null | undefined} mins
+ * @param {number | null | undefined} [fareHkd]
+ */
+function formatStopReachLabel(mins, fareHkd = null) {
+  const wait = formatWaitStopList(mins);
+  if (fareHkd != null && Number.isFinite(Number(fareHkd))) {
+    return `${wait}・${formatHkd(Number(fareHkd))}`;
+  }
+  return wait;
 }
 
 /**
@@ -7663,22 +7691,71 @@ async function renderEtaRouteDetailBody(route, ctx) {
         <span class="rt-route-to">${escapeHtml(dest)}</span>
       </div>`,
     });
+    // Bus section fares: price to board here → ride to terminus (only bus family)
+    const isBusFamily =
+      route.kind === "bus" ||
+      route.kind === "mtr_bus" ||
+      ["kmb", "ctb", "nlb", "lwb", "gmb", "lrtfeeder"].includes(
+        String(route.co || "").toLowerCase(),
+      );
+    const fareBaseOpt = isBusFamily
+      ? etaRouteAsOption(route, named, dir, named[boardIndex] || null)
+      : null;
+    const farePts = fareBaseOpt?.stops || [];
+    const alightPt = farePts.length ? farePts[farePts.length - 1] : null;
+    const ticket = getFareType();
+
     const stopRows = named
       .map((s, i) => {
         const isLast = i === named.length - 1;
         const isEtaStop = i === boardIndex;
+        const isBefore = i < boardIndex;
         const reach = reachMins[i];
+        let fareHkd = null;
+        if (isBusFamily && fareBaseOpt && !isLast) {
+          // Section fare from this stop as board → route terminus
+          const boardPt =
+            farePts.find(
+              (p) =>
+                (s.stopId &&
+                  (String(p.stop_id) === String(s.stopId) ||
+                    String(p.id) === String(s.stopId))) ||
+                (s.name && (p.stop_name === s.name || p.name === s.name)),
+            ) || {
+              stop_id: s.stopId || String(i),
+              id: s.stopId || String(i),
+              stop_name: s.name || "",
+              name: s.name || "",
+              lon: s.lon,
+              lat: s.lat,
+              location: { lon: s.lon, lat: s.lat },
+            };
+          // Subsequence from board index to end for TD matching
+          const subStops = farePts.slice(i);
+          if (subStops.length < 2 && alightPt) {
+            subStops.push(alightPt);
+          }
+          fareHkd = estimateBusBoardFare(
+            fareBaseOpt,
+            boardPt,
+            subStops.length >= 2 ? subStops : farePts,
+            alightPt,
+            ticket,
+          );
+        }
         const roleHtml =
           reach != null
-            ? `<span class="rt-stop-role rt-stop-eta-mins">${escapeHtml(formatWaitCompact(reach))}</span>`
+            ? `<span class="rt-stop-role rt-stop-eta-mins${isBefore ? " is-past" : ""}">${escapeHtml(formatStopReachLabel(reach, fareHkd))}</span>`
             : "";
+        // Grey rail for stops already passed (before selected)
+        const stepColor = isBefore ? "rgba(255,255,255,0.28)" : color;
         let row = routeLineRowHtml({
           kind: "stop",
           line: isLast ? "none" : "solid",
-          color,
+          color: stepColor,
           last: isLast,
-          extraClass: `eta-pick-stop${isEtaStop ? " rt-stop-eta-active" : ""}`,
-          bodyHtml: `<span class="rt-stop-name${isEtaStop ? " is-eta-stop" : ""}">${escapeHtml(s.name)}</span>${roleHtml}`,
+          extraClass: `eta-pick-stop${isEtaStop ? " rt-stop-eta-active" : ""}${isBefore ? " eta-stop-before" : ""}`,
+          bodyHtml: `<span class="rt-stop-name${isEtaStop ? " is-eta-stop" : ""}${isBefore ? " is-past" : ""}">${escapeHtml(s.name)}</span>${roleHtml}`,
         });
         row = row.replace(
           "<div ",
