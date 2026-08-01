@@ -7489,7 +7489,7 @@ async function paintEtaRouteOnMap(route, stops) {
 
 /**
  * Select a route from the search list → open route detail for that stop.
- * Does not draw route shape on the map (stop/detail pages stay shape-free).
+ * Shape is drawn by showEtaRouteDetailsPanel after stops load.
  * @param {EtaRouteEntry | undefined} route
  * @param {number} [listIndex]
  */
@@ -7499,7 +7499,7 @@ function selectEtaRoute(route, listIndex) {
     etaRouteActive = listIndex;
   }
   etaSelectedForDetails = route;
-  // Invalidate any in-flight shape paint; clear geometry for detail page
+  // Invalidate any in-flight shape paint; detail page will redraw
   ++etaShapeGen;
   etaSelectedStops = [];
   clearRouteGeometry();
@@ -8048,13 +8048,17 @@ async function showEtaRouteDetailsPanel() {
     els.etaRouteDetailBody.innerHTML = `<p class="hint wheels-route-loading">Loading route…</p>`;
   }
 
-  // Load stops only — no route shape on the stop/detail page
-  clearRouteGeometry();
+  // Load stops + draw route path on map
   try {
     setMapRouteLoading(true, `Loading ${coLabel} ${route.id}…`);
     const stops = await loadEtaRouteStops(route);
     if (gen !== etaShapeGen) return;
     etaSelectedStops = stops;
+    if (stops.length >= 2) {
+      await paintEtaRouteOnMap(route, stops);
+    } else {
+      clearRouteGeometry();
+    }
   } catch (e) {
     if (gen !== etaShapeGen) return;
     console.warn("[eta] details load", e);
