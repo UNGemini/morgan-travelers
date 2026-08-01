@@ -6921,6 +6921,8 @@ async function loadEtaRouteStops(route) {
           stops.push({
             seq: Number(row.seq) || stops.length + 1,
             name: st.name_tc || st.name_en || sid,
+            nameEn: st.name_en || "",
+            nameTc: st.name_tc || "",
             stopId: sid,
             lon: st.lon,
             lat: st.lat,
@@ -6966,6 +6968,8 @@ async function loadEtaRouteStops(route) {
               stops.push({
                 seq: Number(row.seq) || 0,
                 name: d.name_tc || d.name_en || sid,
+                nameEn: d.name_en || "",
+                nameTc: d.name_tc || "",
                 stopId: sid,
                 lon,
                 lat,
@@ -7037,6 +7041,8 @@ async function loadEtaRouteStops(route) {
                     s.name_tc ||
                     s.name ||
                     "",
+                  nameEn: s.stopName_e || s.name_en || "",
+                  nameTc: s.stopName_c || s.name_tc || "",
                   stopId: String(s.stopId || s.stop || ""),
                   lon,
                   lat,
@@ -7691,7 +7697,7 @@ async function renderEtaRouteDetailBody(route, ctx) {
         <span class="rt-route-to">${escapeHtml(dest)}</span>
       </div>`,
     });
-    // Bus section fares: price to board here → ride to terminus (only bus family)
+    // Bus section fares: board here → terminus (TD section; index-map if zh names)
     const isBusFamily =
       route.kind === "bus" ||
       route.kind === "mtr_bus" ||
@@ -7701,8 +7707,6 @@ async function renderEtaRouteDetailBody(route, ctx) {
     const fareBaseOpt = isBusFamily
       ? etaRouteAsOption(route, named, dir, named[boardIndex] || null)
       : null;
-    const farePts = fareBaseOpt?.stops || [];
-    const alightPt = farePts.length ? farePts[farePts.length - 1] : null;
     const ticket = getFareType();
 
     const stopRows = named
@@ -7713,35 +7717,7 @@ async function renderEtaRouteDetailBody(route, ctx) {
         const reach = reachMins[i];
         let fareHkd = null;
         if (isBusFamily && fareBaseOpt && !isLast) {
-          // Section fare from this stop as board → route terminus
-          const boardPt =
-            farePts.find(
-              (p) =>
-                (s.stopId &&
-                  (String(p.stop_id) === String(s.stopId) ||
-                    String(p.id) === String(s.stopId))) ||
-                (s.name && (p.stop_name === s.name || p.name === s.name)),
-            ) || {
-              stop_id: s.stopId || String(i),
-              id: s.stopId || String(i),
-              stop_name: s.name || "",
-              name: s.name || "",
-              lon: s.lon,
-              lat: s.lat,
-              location: { lon: s.lon, lat: s.lat },
-            };
-          // Subsequence from board index to end for TD matching
-          const subStops = farePts.slice(i);
-          if (subStops.length < 2 && alightPt) {
-            subStops.push(alightPt);
-          }
-          fareHkd = estimateBusBoardFare(
-            fareBaseOpt,
-            boardPt,
-            subStops.length >= 2 ? subStops : farePts,
-            alightPt,
-            ticket,
-          );
+          fareHkd = estimateBusBoardFare(fareBaseOpt, named, i, ticket);
         }
         const roleHtml =
           reach != null
