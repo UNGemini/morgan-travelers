@@ -917,7 +917,7 @@ function matchTdStopIndex(tdStops, planStop) {
 }
 
 /**
- * Map a 0-based index on the plan sequence onto a TD stop list.
+ * Map a 0-based index on the plan sequence onto a TD stop list (uniform).
  * @param {number} planI
  * @param {number} planN
  * @param {number} tdN
@@ -930,6 +930,123 @@ function mapPlanIndexToTd(planI, planN, tdN) {
     tdN - 1,
     Math.max(0, Math.round((planI / (planN - 1)) * (tdN - 1))),
   );
+}
+
+/**
+ * Align every plan stop to a TD stop index.
+ * Uses name matches as anchors (monotonic), fills gaps by local interpolation.
+ * This keeps section-fare steps on the correct stops when EN/zh lists differ in length.
+ *
+ * @param {object[]} planStops
+ * @param {string[]} tdStops
+ * @returns {{ tdIndex: number[], anchors: number, score: number }}
+ */
+function alignPlanStopsToTd(planStops, tdStops) {
+  const planN = planStops?.length || 0;
+  const tdN = tdStops?.length || 0;
+  /** @type {(number | null)[]} */
+  const raw = Array(planN).fill(null);
+  if (!planN || !tdN) {
+    return { tdIndex: [], anchors: 0, score: 0 };
+  }
+
+  let anchorScore = 0;
+  let anchors = 0;
+  // Match each plan stop independently (prefer EN names via planStopLabelCandidates)
+  for (let i = 0; i < planN; i++) {
+    const hit = matchTdStopIndexScored(tdStops, planStops[i]);
+    // Require a solid match so “Garden”/short tokens don’t jump the alignment
+    if (hit && hit.score >= 600) {
+      raw[i] = hit.index;
+      anchors += 1;
+      anchorScore += hit.score;
+    }
+  }
+
+  // Force endpoints when missing (route start / terminus)
+  if (raw[0] == null) raw[0] = 0;
+  if (raw[planN - 1] == null) raw[planN - 1] = tdN - 1;
+
+  // Enforce non-decreasing TD indices (forward direction)
+  /** @type {number[]} */
+  const mono = raw.map((v) => (v == null ? -1 : v));
+  let last = 0;
+  for (let i = 0; i < planN; i++) {
+    if (mono[i] < 0) continue;
+    if (mono[i] < last) mono[i] = last;
+    last = mono[i];
+  }
+  // Pass backward so a late high anchor doesn’t leave early gaps inverted
+  let next = tdN - 1;
+  for (let i = planN - 1; i >= 0; i--) {
+    if (mono[i] < 0) continue;
+    if (mono[i] > next) mono[i] = next;
+    next = mono[i];
+  }
+
+  // Interpolate holes between anchors
+  /** @type {number[]} */
+  const out = Array(planN).fill(0);
+  let i = 0;
+  while (i < planN) {
+    if (mono[i] >= 0) {
+      out[i] = mono[i];
+      i += 1;
+      continue;
+    }
+    let j = i;
+    while (j < planN && mono[j] < 0) j += 1;
+    const leftI = i - 1;
+    const rightI = j;
+    const leftV = leftI >= 0 ? out[leftI] : 0;
+    const rightV = rightI < planN ? mono[rightI] : tdN - 1;
+    const span = Math.max(1, rightI - leftI);
+    for (let k = i; k < j; k++) {
+      const t = (k - leftI) / span;
+      out[k] = Math.round(leftV + (rightV - leftV) * t);
+      // Keep monotonic
+      if (k > 0 && out[k] < out[k - 1]) out[k] = out[k - 1];
+    }
+    i = j;
+  }
+  // Final clamp + monotonic fix
+  for (let k = 0; k < planN; k++) {
+    out[k] = Math.max(0, Math.min(tdN - 1, out[k]));
+    if (k > 0 && out[k] < out[k - 1]) out[k] = out[k - 1];
+  }
+  // Ensure last maps to terminus when riding to end of plan
+  if (planN >= 2) {
+    out[planN - 1] = Math.max(out[planN - 1], Math.min(tdN - 1, out[planN - 2] + 1));
+    out[planN - 1] = Math.min(tdN - 1, out[planN - 1]);
+  }
+
+  return { tdIndex: out, anchors, score: anchorScore };
+}
+
+/**
+ * Score how well a TD bound matches our plan sequence (for O vs I).
+ * @param {object[]} planStops
+ * @param {string[]} tdStops
+ */
+function scoreTdBoundForPlan(planStops, tdStops) {
+  if (!planStops?.length || !tdStops?.length) return 0;
+  const first = matchTdStopIndexScored(tdStops, planStops[0]);
+  const last = matchTdStopIndexScored(
+    tdStops,
+    planStops[planStops.length - 1],
+  );
+  let sc = 0;
+  if (first) sc += first.score + (first.index <= 2 ? 200 : 0);
+  if (last) {
+    sc += last.score;
+    if (last.index >= tdStops.length - 3) sc += 200;
+  }
+  // Prefer similar length
+  const ratio =
+    Math.min(planStops.length, tdStops.length) /
+    Math.max(planStops.length, tdStops.length);
+  sc += Math.round(ratio * 100);
+  return sc;
 }
 
 /**
@@ -1019,9 +1136,8 @@ function triFareCentsFlexible(tri, on, off, n) {
 
 /**
  * TD section fare (HKD) for a bus leg using FARE_BUS.mdb pack.
- * Matches company|route, board/alight → PRICE.
- * Uses index mapping when names are Chinese (ETA) vs English (TD).
- * Prefer strong name matches; otherwise index map (avoids bad partial matches).
+ * Aligns the full plan stop list onto TD stops (name anchors + monotonic
+ * interpolation) so section steps start on the correct boarding stop.
  *
  * Optional: opt.boardIndex / opt.alightIndex on the full `opt.stops` sequence.
  *
@@ -1067,10 +1183,6 @@ function tdBusSectionFare(opt) {
   if (alightIdx <= boardIdx) alightIdx = planN - 1;
   if (alightIdx <= boardIdx) return null;
 
-  const board = planStops[boardIdx] || opt.from || planStops[0];
-  const alight =
-    planStops[alightIdx] || opt.to || planStops[planStops.length - 1];
-
   let bestPrice = null;
   let bestScore = -1;
   let fullFallback = null;
@@ -1083,54 +1195,48 @@ function tdBusSectionFare(opt) {
         fullFallback = variant.full / 10;
       }
       const bounds = variant.b || {};
+      // Prefer the bound that best matches plan endpoints (correct O/I)
+      /** @type {Array<{ stops: string[], tri: number[], boundSc: number }>} */
+      const boundList = [];
       for (const bound of Object.values(bounds)) {
         const stops = bound.s || bound.stops || [];
         const tri = bound.t || bound.tri || [];
         if (stops.length < 2 || !tri.length) continue;
+        boundList.push({
+          stops,
+          tri,
+          boundSc: scoreTdBoundForPlan(planStops, stops),
+        });
+      }
+      boundList.sort((a, b) => b.boundSc - a.boundSc);
+
+      for (const { stops, tri, boundSc } of boundList) {
         const n = stops.length;
+        const align = alignPlanStopsToTd(planStops, stops);
+        if (!align.tdIndex.length) continue;
 
-        const onHit = matchTdStopIndexScored(stops, board);
-        const offHit = matchTdStopIndexScored(stops, alight);
-        const nameOn = onHit?.index ?? null;
-        const nameOff = offHit?.index ?? null;
-        const nameSc = (onHit?.score || 0) + (offHit?.score || 0);
-        // Strong name match only when both ends score well (avoid partial false hits)
-        const strongName =
-          nameOn != null &&
-          nameOff != null &&
-          nameOff > nameOn &&
-          (onHit?.score || 0) >= 600 &&
-          (offHit?.score || 0) >= 600;
+        let on = align.tdIndex[boardIdx] ?? mapPlanIndexToTd(boardIdx, planN, n);
+        let off =
+          align.tdIndex[alightIdx] ?? mapPlanIndexToTd(alightIdx, planN, n);
+        // Riding to end of this bound when alight is plan terminus
+        if (alightIdx >= planN - 1) off = n - 1;
+        if (off <= on) off = Math.min(n - 1, on + 1);
 
-        const onI = mapPlanIndexToTd(boardIdx, planN, n);
-        let offI = mapPlanIndexToTd(alightIdx, planN, n);
-        if (offI <= onI) offI = Math.min(n - 1, onI + 1);
+        const cents = triFareCentsFlexible(tri, on, off, n);
+        if (cents == null) continue;
 
-        /** @type {Array<{ on: number, off: number, sc: number }>} */
-        const candidates = [];
-        if (strongName) {
-          candidates.push({ on: nameOn, off: nameOff, sc: nameSc + 1000 });
+        // Score: bound fit + alignment anchors + prefer earlier board mapping consistency
+        const sc =
+          boundSc * 2 +
+          align.score +
+          align.anchors * 50 +
+          (align.anchors >= 2 ? 300 : 0);
+        if (sc > bestScore) {
+          bestScore = sc;
+          bestPrice = cents / 10;
         }
-        // Always consider index map (ETA zh names / length mismatch)
-        candidates.push({ on: onI, off: offI, sc: 50 });
-        // Weak name only as soft hint if one end matched well
-        if (
-          nameOn != null &&
-          nameOff != null &&
-          nameOff > nameOn &&
-          !strongName
-        ) {
-          candidates.push({ on: nameOn, off: nameOff, sc: nameSc });
-        }
-
-        for (const cand of candidates) {
-          const cents = triFareCentsFlexible(tri, cand.on, cand.off, n);
-          if (cents == null) continue;
-          if (cand.sc > bestScore) {
-            bestScore = cand.sc;
-            bestPrice = cents / 10;
-          }
-        }
+        // Top bound is enough when it scored well
+        if (boundSc >= 400 && align.anchors >= 1) break;
       }
     }
   }
@@ -1138,7 +1244,6 @@ function tdBusSectionFare(opt) {
   if (bestPrice != null) return bestPrice;
   if (fullFallback != null) return fullFallback;
 
-  // Last resort: any full on matching keys
   for (const key of keys) {
     const variants = pack.busSection[key];
     if (!variants?.length) continue;
