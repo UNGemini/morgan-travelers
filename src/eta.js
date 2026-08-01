@@ -197,17 +197,113 @@ export function waitMinsFromServiceClock(serviceIso, now = new Date()) {
 }
 
 /**
- * Build a single scheduled departure slot from a transit route option (timetable).
+ * Typical headway (minutes) when expanding a single timetable departure to 3.
+ * @param {object} [opt]
+ * @param {string} [operator]
+ */
+export function defaultHeadwayMins(opt, operator = "") {
+  const op = String(operator || etaOperator(opt) || "").toLowerCase();
+  const mode = String(opt?.mode || "").toLowerCase();
+  if (op === "mtr" || mode.includes("subway") || mode.includes("rail")) return 4;
+  if (op === "lrt" || mode.includes("tram") || mode.includes("light")) return 6;
+  if (op === "nlb") return 15;
+  if (op === "gmb") return 10;
+  if (op === "ctb") return 12;
+  return 12; // KMB / default bus
+}
+
+/**
+ * @param {string} clock HH:MM
+ * @param {number} addMins
+ */
+export function addMinutesToClock(clock, addMins) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(clock || "").trim());
+  if (!m) return null;
+  let total = Number(m[1]) * 60 + Number(m[2]) + Math.round(Number(addMins) || 0);
+  total = ((total % (24 * 60)) + 24 * 60) % (24 * 60);
+  const hh = Math.floor(total / 60);
+  const mm = total % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+/**
+ * Expand one scheduled board into up to `count` departures using headway.
+ * @param {EtaSlot} first
+ * @param {{ count?: number, headwayMins?: number, dest?: string }} [opts]
+ * @returns {EtaSlot[]}
+ */
+export function expandTimetableSlots(first, opts = {}) {
+  if (!first) return [];
+  const count = Math.max(1, Math.min(6, opts.count ?? 3));
+  const headway = Math.max(2, Math.min(60, opts.headwayMins ?? 12));
+  const dest = opts.dest ?? first.dest ?? "";
+  /** @type {EtaSlot[]} */
+  const out = [];
+  const baseWait =
+    first.waitMins != null && Number.isFinite(Number(first.waitMins))
+      ? Math.max(0, Math.round(Number(first.waitMins)))
+      : 0;
+  const baseClock = first.clock || null;
+  for (let i = 0; i < count; i++) {
+    const waitMins = baseWait + i * headway;
+    const clock =
+      (baseClock && addMinutesToClock(baseClock, i * headway)) ||
+      null;
+    out.push({
+      waitMins,
+      etaIso: first.etaIso && i === 0 ? first.etaIso : null,
+      clock: clock || undefined,
+      dest,
+      remark: first.remark || "",
+      platform: first.platform ?? null,
+      scheduled: true,
+    });
+  }
+  return out;
+}
+
+/**
+ * Merge live slots with timetable fillers up to `max` rows.
+ * Live first; scheduled only fills gaps (not within 2 min of an existing row).
+ * @param {EtaSlot[]} liveSlots
+ * @param {EtaSlot[]} schedSlots
+ * @param {number} [max]
+ * @returns {EtaSlot[]}
+ */
+export function mergeLiveWithTimetable(liveSlots, schedSlots, max = 3) {
+  /** @type {EtaSlot[]} */
+  const out = [];
+  for (const s of liveSlots || []) {
+    if (out.length >= max) break;
+    out.push({ ...s, scheduled: false });
+  }
+  for (const s of schedSlots || []) {
+    if (out.length >= max) break;
+    const w = s.waitMins;
+    if (w != null && Number.isFinite(w)) {
+      const tooClose = out.some(
+        (x) =>
+          x.waitMins != null &&
+          Number.isFinite(x.waitMins) &&
+          Math.abs(Number(x.waitMins) - Number(w)) < 2.5,
+      );
+      if (tooClose) continue;
+    }
+    out.push({ ...s, scheduled: true });
+  }
+  return out.slice(0, max);
+}
+
+/**
+ * Build scheduled departure ISO for a plan transit leg (service-day clock).
  * @param {object} [opt]
  * @param {object} [plan]
  * @param {number} [legIdx]
- * @param {Date} [now]
- * @returns {EtaSlot | null}
+ * @returns {string | null}
  */
-export function scheduledSlotFromPlanLeg(opt, plan = null, legIdx = 0, now = new Date()) {
+export function scheduledIsoFromPlanLeg(opt, plan = null, legIdx = 0) {
   let iso = opt?.start_time || null;
   if (!iso && plan?.start_time) {
-    // Accumulate prior leg durations onto plan depart (service clock arithmetic)
     let addSec = 0;
     const legs = plan.legs || [];
     for (let i = 0; i < legIdx && i < legs.length; i++) {
@@ -216,7 +312,6 @@ export function scheduledSlotFromPlanLeg(opt, plan = null, legIdx = 0, now = new
     const p = parseServiceDayIso(plan.start_time);
     if (p) {
       let total = p.hour * 3600 + p.minute * 60 + p.second + addSec;
-      // Wrap within day for display
       total = ((total % 86400) + 86400) % 86400;
       const hh = Math.floor(total / 3600);
       const mm = Math.floor((total % 3600) / 60);
@@ -225,6 +320,19 @@ export function scheduledSlotFromPlanLeg(opt, plan = null, legIdx = 0, now = new
       iso = `${p.date}T${pad(hh)}:${pad(mm)}:${pad(ss)}Z`;
     }
   }
+  return iso || null;
+}
+
+/**
+ * Build a single scheduled departure slot from a transit route option (timetable).
+ * @param {object} [opt]
+ * @param {object} [plan]
+ * @param {number} [legIdx]
+ * @param {Date} [now]
+ * @returns {EtaSlot | null}
+ */
+export function scheduledSlotFromPlanLeg(opt, plan = null, legIdx = 0, now = new Date()) {
+  const iso = scheduledIsoFromPlanLeg(opt, plan, legIdx);
   if (!iso) return null;
   const clock = formatServiceClock(iso);
   if (!clock || clock === "—") return null;
@@ -244,6 +352,63 @@ export function scheduledSlotFromPlanLeg(opt, plan = null, legIdx = 0, now = new
     scheduled: true,
     platform: null,
   };
+}
+
+/**
+ * Up to `count` scheduled slots for a plan leg (start_time + headway expansion).
+ * @param {object} [opt]
+ * @param {object} [plan]
+ * @param {number} [legIdx]
+ * @param {number} [count]
+ * @param {Date} [now]
+ * @returns {EtaSlot[]}
+ */
+export function scheduledSlotsFromPlanLeg(
+  opt,
+  plan = null,
+  legIdx = 0,
+  count = 3,
+  now = new Date(),
+) {
+  const first = scheduledSlotFromPlanLeg(opt, plan, legIdx, now);
+  if (!first) return [];
+  const headway = defaultHeadwayMins(opt);
+  return expandTimetableSlots(first, {
+    count,
+    headwayMins: headway,
+    dest: first.dest,
+  });
+}
+
+/**
+ * ETA-mode timetable when no live minutes: next departures on a headway grid.
+ * Aligns first trip to the next headway boundary after "now".
+ * @param {{ dest?: string, operator?: string, mode?: string, headwayMins?: number, count?: number }} [opts]
+ * @param {Date} [now]
+ * @returns {EtaSlot[]}
+ */
+export function headwayTimetableSlots(opts = {}, now = new Date()) {
+  const headway = Math.max(
+    2,
+    Math.min(60, opts.headwayMins ?? defaultHeadwayMins({ mode: opts.mode }, opts.operator)),
+  );
+  const count = Math.max(1, Math.min(6, opts.count ?? 3));
+  const hk = getHongKongParts(now);
+  const nowMins = hk.hour * 60 + hk.minute;
+  // Next departure on an even headway grid from midnight
+  const phase = nowMins % headway;
+  const firstWait = phase === 0 ? 0 : headway - phase;
+  const firstClockMins = (nowMins + firstWait) % (24 * 60);
+  const clock = `${String(Math.floor(firstClockMins / 60)).padStart(2, "0")}:${String(firstClockMins % 60).padStart(2, "0")}`;
+  return expandTimetableSlots(
+    {
+      waitMins: firstWait,
+      clock,
+      dest: opts.dest || "",
+      scheduled: true,
+    },
+    { count, headwayMins: headway, dest: opts.dest || "" },
+  );
 }
 
 /**
@@ -1154,21 +1319,77 @@ export function hasAnyEtaSlots(result) {
  * @returns {LegEtaResult}
  */
 export function withScheduledFallback(result, opt, plan, legIndex) {
-  if (hasLiveEtaSlots(result)) return result;
-  // Operator already returned arrivals (possibly all timetable / noGPS)
-  if (hasAnyEtaSlots(result)) {
+  const headway = defaultHeadwayMins(opt, result?.operator);
+  const raw = Array.isArray(result?.etas) ? result.etas : [];
+  const live = raw.filter(
+    (s) =>
+      !s?.scheduled &&
+      (s.waitMins != null || (s.etaIso && String(s.etaIso).length > 0)),
+  );
+  /** @type {EtaSlot[]} */
+  let sched = raw.filter((s) => s?.scheduled);
+
+  // Build / expand timetable pool (always aim for 3 for filling)
+  if (!sched.length) {
+    sched = scheduledSlotsFromPlanLeg(opt, plan, legIndex, 3);
+  }
+  if (sched.length === 1) {
+    sched = expandTimetableSlots(sched[0], {
+      count: 3,
+      headwayMins: headway,
+      dest: sched[0].dest,
+    });
+  } else if (sched.length === 2) {
+    const extra = expandTimetableSlots(sched[1], {
+      count: 2,
+      headwayMins: headway,
+      dest: sched[0].dest,
+    }).slice(1);
+    sched = [...sched, ...extra];
+  }
+
+  // Seed timetable from last live + headway when plan has no start_time
+  if (!sched.length && live.length) {
+    const last = live[live.length - 1];
+    sched = expandTimetableSlots(
+      {
+        waitMins: (last.waitMins ?? 0) + headway,
+        dest: last.dest || "",
+        scheduled: true,
+      },
+      { count: 3, headwayMins: headway, dest: last.dest || "" },
+    );
+  }
+
+  if (live.length) {
+    const merged = mergeLiveWithTimetable(live, sched, 3);
+    while (merged.length < 3) {
+      const last = merged[merged.length - 1];
+      const w = (last?.waitMins ?? 0) + headway;
+      merged.push({
+        waitMins: w,
+        clock: last?.clock ? addMinutesToClock(last.clock, headway) || undefined : undefined,
+        dest: last?.dest || "",
+        scheduled: true,
+        platform: null,
+      });
+    }
     return {
       ...result,
-      scheduled: result.scheduled || result.etas.every((s) => s?.scheduled),
+      etas: merged.slice(0, 3),
+      waitMins: merged[0]?.waitMins ?? result.waitMins,
+      etaIso: merged.find((s) => !s.scheduled)?.etaIso ?? null,
+      scheduled: merged.every((s) => s.scheduled),
       unsupported: false,
+      fetchedAt: result?.fetchedAt ?? Date.now(),
     };
   }
-  const sched = scheduledSlotFromPlanLeg(opt, plan, legIndex);
-  if (!sched) return result;
+
+  if (!sched.length) return result;
   return {
     ...result,
-    etas: [sched],
-    waitMins: sched.waitMins,
+    etas: sched.slice(0, 3),
+    waitMins: sched[0]?.waitMins ?? null,
     etaIso: null,
     scheduled: true,
     unsupported: false,

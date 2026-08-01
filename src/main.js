@@ -125,8 +125,13 @@ import {
   stationBaseName,
   etaOperatorShowsPlatform,
   scheduledSlotFromPlanLeg,
+  scheduledSlotsFromPlanLeg,
   etaOperator,
   hasLiveEtaSlots,
+  mergeLiveWithTimetable,
+  headwayTimetableSlots,
+  defaultHeadwayMins,
+  expandTimetableSlots,
 } from "./eta.js";
 import {
   mergeStopSequence,
@@ -274,8 +279,8 @@ let etaShapeGen = 0;
 /** @type {Map<string, number>} */
 const etaCardDirIndex = new Map();
 /**
- * Live ETA payload attached when browsing nearby stops.
- * @type {Map<string, { minutes: number | null, stopLabel: string, dest?: string, destZh?: string, bound?: string, stopId?: string }>}
+ * Live / scheduled ETA payload attached when browsing nearby stops.
+ * @type {Map<string, { minutes: number | null, stopLabel: string, dest?: string, destZh?: string, bound?: string, stopId?: string, scheduled?: boolean, clock?: string }>}
  */
 const etaLiveByKey = new Map();
 /**
@@ -3977,7 +3982,7 @@ function applyTripDetailEtaDom(plan, etaMap) {
     }
   });
 
-  // Board ETA card — live GPS, operator timetable (e.g. NLB noGPS), or plan GTFS
+  // Board ETA card — up to 3 rows: live first, then timetable fill
   root.querySelectorAll("[data-eta-card-leg]").forEach((card) => {
     const legIdx = Number(card.getAttribute("data-eta-card-leg"));
     const eta = etaMap?.get(legIdx);
@@ -3990,69 +3995,76 @@ function applyTripDetailEtaDom(plan, etaMap) {
 
     const opt = plan?.legs?.[legIdx]?.route_options?.[0] || {};
     const operator = eta?.operator || etaOperator(opt);
-    const allSlots = Array.isArray(eta?.etas) ? eta.etas.slice(0, 3) : [];
-    const liveSlots = allSlots.filter((s) => !s?.scheduled);
-    const useLive = hasLiveEtaSlots(eta) && liveSlots.length > 0;
+    const raw = Array.isArray(eta?.etas) ? eta.etas : [];
+    let liveSlots = raw.filter((s) => !s?.scheduled);
+    let schedSlots = raw.filter((s) => s?.scheduled);
 
-    if (useLive) {
+    // Ensure timetable pool has up to 3 (plan headway expand)
+    if (schedSlots.length < 3) {
+      const planSched = scheduledSlotsFromPlanLeg(opt, plan, legIdx, 3);
+      if (planSched.length) {
+        schedSlots = mergeLiveWithTimetable(schedSlots, planSched, 3);
+      }
+    }
+    if (!schedSlots.length && liveSlots.length && liveSlots.length < 3) {
+      const hw = defaultHeadwayMins(opt, operator);
+      const last = liveSlots[liveSlots.length - 1];
+      schedSlots = expandTimetableSlots(
+        {
+          waitMins: (last.waitMins ?? 0) + hw,
+          dest: last.dest || "",
+          scheduled: true,
+        },
+        { count: 3, headwayMins: hw, dest: last.dest || "" },
+      );
+    }
+
+    const slots = mergeLiveWithTimetable(liveSlots, schedSlots, 3);
+    const hasLive = slots.some((s) => !s.scheduled);
+    const hasSched = slots.some((s) => s.scheduled);
+
+    if (!slots.length) {
       if (head) head.textContent = formatLiveStatusHead(eta?.fetchedAt);
-      list.innerHTML = liveSlots
-        .map((slot, i) => {
-          const line = formatEtaCardLine(slot, { operator });
-          const nowArrived = slot.waitMins != null && slot.waitMins <= 0;
-          const dest = slot.dest
-            ? ` title="${escapeHtml(`To ${slot.dest}${slot.remark ? ` · ${slot.remark}` : ""}`)}"`
-            : slot.remark
-              ? ` title="${escapeHtml(slot.remark)}"`
-              : "";
-          return `<li class="rt-eta-card-row${nowArrived ? " is-due is-now" : ""}${i === 0 ? " is-next" : ""}"${dest}><span class="rt-eta-card-line">${escapeHtml(line)}</span></li>`;
-        })
-        .join("");
-      card.classList.add("is-live");
+      card.classList.add("is-empty");
+      list.innerHTML = `<li class="rt-eta-card-row is-empty">${escapeHtml(
+        eta?.error || "N/A",
+      )}</li>`;
       return;
     }
 
-    // Operator timetable (NLB noGPS estimatedArrivals) or RAPTOR/GTFS fallback
-    let slots = allSlots.filter((s) => s?.scheduled || s?.waitMins != null || s?.etaIso);
-    if (!slots.length) {
-      const sched = scheduledSlotFromPlanLeg(opt, plan, legIdx);
-      if (sched) slots = [sched];
+    if (head) {
+      head.textContent = hasLive
+        ? formatLiveStatusHead(eta?.fetchedAt)
+        : "Timetable";
     }
-    if (slots.length) {
-      const fromNlb = operator === "nlb";
-      if (head) {
-        head.textContent = fromNlb
-          ? formatLiveStatusHead(eta?.fetchedAt) || "Timetable"
-          : "Timetable";
-      }
-      list.innerHTML = slots
-        .map((slot, i) => {
-          const line = formatEtaCardLine(
-            { ...slot, scheduled: true },
-            { operator, showPlatform: false },
-          );
-          const nowArrived = slot.waitMins != null && slot.waitMins <= 0;
-          const dest = slot.dest
-            ? ` title="${escapeHtml(`To ${slot.dest} (scheduled)`)}"`
-            : ` title="Scheduled arrival"`;
-          return `<li class="rt-eta-card-row is-scheduled-row${nowArrived ? " is-due is-now" : ""}${i === 0 ? " is-next" : ""}"${dest}><span class="rt-eta-card-line">${escapeHtml(line)}</span></li>`;
-        })
-        .join("");
+    list.innerHTML = slots
+      .map((slot, i) => {
+        const line = formatEtaCardLine(slot, {
+          operator,
+          showPlatform: !slot.scheduled && etaOperatorShowsPlatform(operator),
+        });
+        const nowArrived = slot.waitMins != null && slot.waitMins <= 0;
+        const dest = slot.dest
+          ? ` title="${escapeHtml(`To ${slot.dest}${slot.scheduled ? " (scheduled)" : ""}${slot.remark ? ` · ${slot.remark}` : ""}`)}"`
+          : "";
+        return `<li class="rt-eta-card-row${nowArrived ? " is-due is-now" : ""}${slot.scheduled ? " is-scheduled-row" : ""}${i === 0 ? " is-next" : ""}"${dest}><span class="rt-eta-card-line">${escapeHtml(line)}</span></li>`;
+      })
+      .join("");
+
+    if (hasLive && !hasSched) {
+      card.classList.add("is-live");
+    } else if (hasLive && hasSched) {
+      card.classList.add("is-live", "is-scheduled");
+      card.insertAdjacentHTML(
+        "beforeend",
+        `<div class="rt-eta-card-badge" title="Live ETA filled with timetable">SCHEDULED</div>`,
+      );
+    } else {
       card.classList.add("is-scheduled");
       card.insertAdjacentHTML(
         "beforeend",
-        `<div class="rt-eta-card-badge" title="${fromNlb ? "NLB estimatedArrivals (no GPS / timetable)" : "Trip plan timetable (GTFS)"}">SCHEDULED</div>`,
+        `<div class="rt-eta-card-badge" title="Timetable (open-data noGPS or trip plan)">SCHEDULED</div>`,
       );
-      return;
-    }
-
-    if (head) head.textContent = formatLiveStatusHead(eta?.fetchedAt);
-    card.classList.add("is-empty");
-    list.innerHTML = `<li class="rt-eta-card-row is-empty">${escapeHtml(
-      eta?.error || "N/A",
-    )}</li>`;
-    if (eta?.unsupported) {
-      card.title = eta.error || "Live ETA not available for this operator";
     }
   });
 }
@@ -5965,7 +5977,7 @@ function searchEtaRoutes(query, limit = 16) {
  * Wheels-style card body (no wifi icon). Company color on route number.
  * @param {EtaRouteEntry} r
  * @param {{ dest: string, destZh?: string, bound?: string, orig?: string }} dir
- * @param {{ minutes?: number | null, stopLabel?: string }} [eta]
+ * @param {{ minutes?: number | null, stopLabel?: string, scheduled?: boolean, clock?: string }} [eta]
  */
 function etaRouteCardInnerHtml(r, dir, eta = {}) {
   const dest = dir.destZh || dir.dest || r.label || "—";
@@ -5973,16 +5985,34 @@ function etaRouteCardInnerHtml(r, dir, eta = {}) {
     eta.stopLabel ||
     r.nearbyHint ||
     (dir.orig ? dir.orig : "");
-  const mins = eta.minutes;
+  let mins = eta.minutes;
+  let scheduled = !!eta.scheduled;
+  let clock = eta.clock || "";
+
+  // No live minutes → headway timetable (ETA mode)
+  if ((mins == null || Number.isNaN(Number(mins))) && !clock) {
+    const slots = headwayTimetableSlots({
+      dest: dest === "—" ? "" : dest,
+      operator: r.co || r.kind,
+      mode: r.kind === "mtr" ? "subway" : r.kind === "lrt" ? "tram" : "bus",
+      count: 1,
+    });
+    if (slots[0]) {
+      mins = slots[0].waitMins;
+      clock = slots[0].clock || "";
+      scheduled = true;
+    }
+  }
+
   const waitLabel = formatWaitMins(mins);
-  // "N/A" / "Now" are full labels; numeric waits keep a separate "min" unit
   const isTextWait = waitLabel === "N/A" || waitLabel === "Now";
   const minsText = isTextWait
     ? waitLabel
     : String(Math.max(0, Math.round(Number(mins))));
   const unitText = isTextWait ? "" : "min";
-  const etaClass =
-    mins != null && !Number.isNaN(Number(mins)) && Number(mins) <= 0
+  const etaClass = scheduled
+    ? "is-scheduled"
+    : mins != null && !Number.isNaN(Number(mins)) && Number(mins) <= 0
       ? "is-live is-soon is-now"
       : mins != null && Number(mins) <= 3
         ? "is-live is-soon"
@@ -6002,6 +6032,8 @@ function etaRouteCardInnerHtml(r, dir, eta = {}) {
     <div class="eta-card-eta ${etaClass}">
       <span class="eta-card-eta-min">${escapeHtml(minsText)}</span>
       ${unitText ? `<span class="eta-card-eta-unit">${escapeHtml(unitText)}</span>` : ""}
+      ${clock && scheduled ? `<span class="eta-card-eta-clock">${escapeHtml(clock)}</span>` : ""}
+      ${scheduled ? `<span class="eta-card-eta-badge">SCHEDULED</span>` : ""}
     </div>`;
 }
 
@@ -6080,6 +6112,8 @@ function renderEtaRouteSuggest(hits, hint = "", opts = {}) {
           ${etaRouteCardInnerHtml(r, useDir, {
             minutes: live?.minutes,
             stopLabel: live?.stopLabel || r.nearbyHint,
+            scheduled: live?.scheduled,
+            clock: live?.clock,
           })}
         </div>
         ${etaCardDotsHtml(r, dirs.length, di)}

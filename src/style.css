@@ -969,6 +969,38 @@ body.mobile-ui [data-acrylic]::before {
   font-weight: 700;
 }
 
+.eta-card-eta.is-scheduled {
+  position: relative;
+  padding-bottom: 14px;
+  min-width: 3.6rem;
+}
+
+.eta-card-eta.is-scheduled .eta-card-eta-min {
+  color: var(--text-secondary);
+}
+
+.eta-card-eta-clock {
+  font-size: 0.62rem;
+  font-weight: 650;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.eta-card-eta-badge {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  font-size: 0.5rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(192, 174, 252, 0.85);
+}
+
+.rt-eta-card.is-live.is-scheduled {
+  padding-bottom: 22px;
+}
+
 /* Per-card direction dots */
 .eta-card-dots {
   display: flex;
