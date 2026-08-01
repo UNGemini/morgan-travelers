@@ -5,6 +5,11 @@
 
 import { LRT_STOPS } from "./lrtStops.js";
 import { isLightRailOption, detectMtrLineCode } from "./mtrColors.js";
+import {
+  formatServiceClock,
+  parseServiceDayIso,
+  getHongKongParts,
+} from "./preferences.js";
 
 /** Same-origin proxy prefix */
 const ETA_BASE = "/eta";
@@ -148,11 +153,13 @@ function normalizeEtaIso(raw) {
 
 /**
  * @typedef {{
- *   waitMins: number,
- *   etaIso: string,
+ *   waitMins: number | null,
+ *   etaIso?: string | null,
  *   dest?: string,
  *   remark?: string,
  *   platform?: string | null,
+ *   scheduled?: boolean,
+ *   clock?: string,
  * }} EtaSlot
  * @typedef {{
  *   operator: string,
@@ -166,8 +173,78 @@ function normalizeEtaIso(raw) {
  *   servingPlatforms?: string[],
  *   multiPlatform?: boolean,
  *   fetchedAt?: number,
+ *   scheduled?: boolean,
  * }} LegEtaResult
  */
+
+/**
+ * Wait minutes from a RAPTOR/GTFS service-day ISO clock vs Hong Kong "now".
+ * @param {string | null | undefined} serviceIso
+ * @param {Date} [now]
+ * @returns {number | null}
+ */
+export function waitMinsFromServiceClock(serviceIso, now = new Date()) {
+  const p = parseServiceDayIso(serviceIso || "");
+  if (!p) return null;
+  const hk = getHongKongParts(now);
+  const scheduled = p.hour * 60 + p.minute + (p.second || 0) / 60;
+  const current = hk.hour * 60 + hk.minute + (hk.second || 0) / 60;
+  let diff = scheduled - current;
+  // Overnight / next service day
+  if (diff < -6 * 60) diff += 24 * 60;
+  if (diff < 0) return 0;
+  return Math.round(diff);
+}
+
+/**
+ * Build a single scheduled departure slot from a transit route option (timetable).
+ * @param {object} [opt]
+ * @param {object} [plan]
+ * @param {number} [legIdx]
+ * @param {Date} [now]
+ * @returns {EtaSlot | null}
+ */
+export function scheduledSlotFromPlanLeg(opt, plan = null, legIdx = 0, now = new Date()) {
+  let iso = opt?.start_time || null;
+  if (!iso && plan?.start_time) {
+    // Accumulate prior leg durations onto plan depart (service clock arithmetic)
+    let addSec = 0;
+    const legs = plan.legs || [];
+    for (let i = 0; i < legIdx && i < legs.length; i++) {
+      addSec += legDurationSeconds(legs[i]);
+    }
+    const p = parseServiceDayIso(plan.start_time);
+    if (p) {
+      let total = p.hour * 3600 + p.minute * 60 + p.second + addSec;
+      // Wrap within day for display
+      total = ((total % 86400) + 86400) % 86400;
+      const hh = Math.floor(total / 3600);
+      const mm = Math.floor((total % 3600) / 60);
+      const ss = Math.floor(total % 60);
+      const pad = (n) => String(n).padStart(2, "0");
+      iso = `${p.date}T${pad(hh)}:${pad(mm)}:${pad(ss)}Z`;
+    }
+  }
+  if (!iso) return null;
+  const clock = formatServiceClock(iso);
+  if (!clock || clock === "—") return null;
+  const waitMins = waitMinsFromServiceClock(iso, now);
+  const dest =
+    opt?.headsign ||
+    opt?.to?.stop_name ||
+    (opt?.stops?.length
+      ? opt.stops[opt.stops.length - 1]?.stop_name
+      : "") ||
+    "";
+  return {
+    waitMins,
+    etaIso: null,
+    clock,
+    dest: String(dest || "").trim(),
+    scheduled: true,
+    platform: null,
+  };
+}
 
 /**
  * Normalize platform token to short id ("1", "2", "A").
@@ -1176,16 +1253,25 @@ export function etaOperatorShowsPlatform(operator) {
  * One line in the trip-detail ETA card:
  *   Rail: Platform 1 · 3 min · 18:16
  *   Bus/GMB: 3 min · 18:16  (no Platform)
+ *   Scheduled: 12 min · 18:30  (or just 18:30)
  * @param {EtaSlot} slot
  * @param {{ fallbackPlatform?: string | null, operator?: string, showPlatform?: boolean }} [opts]
  */
 export function formatEtaCardLine(slot, opts = {}) {
   const waitText = formatWaitMins(slot?.waitMins);
-  const clock = formatHkClock(slot?.etaIso);
+  const clock = slot?.clock || formatHkClock(slot?.etaIso);
   const showPlat =
-    opts.showPlatform != null
+    !slot?.scheduled &&
+    (opts.showPlatform != null
       ? !!opts.showPlatform
-      : etaOperatorShowsPlatform(opts.operator);
+      : etaOperatorShowsPlatform(opts.operator));
+
+  if (slot?.scheduled) {
+    if (waitText === "N/A") return clock && clock !== "—" ? clock : "N/A";
+    if (clock && clock !== "—") return `${waitText} · ${clock}`;
+    return waitText;
+  }
+
   if (!showPlat) {
     return clock && clock !== "—" ? `${waitText} · ${clock}` : waitText;
   }
@@ -1193,7 +1279,8 @@ export function formatEtaCardLine(slot, opts = {}) {
     formatPlatformLabel(slot?.platform) ||
     formatPlatformLabel(opts.fallbackPlatform) ||
     null;
-  if (plat) return `${plat} · ${waitText}${clock && clock !== "—" ? ` · ${clock}` : ""}`;
+  if (plat)
+    return `${plat} · ${waitText}${clock && clock !== "—" ? ` · ${clock}` : ""}`;
   return clock && clock !== "—" ? `${waitText} · ${clock}` : waitText;
 }
 

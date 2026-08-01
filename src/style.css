@@ -2833,6 +2833,7 @@ body.contrib-submitting .bg-orb {
 
 /* Live ETA card at board stop (trip detail) — up to 3 buses/trains */
 .rt-eta-card {
+  position: relative;
   margin-top: 6px;
   padding: 8px 10px;
   border-radius: 12px;
@@ -2847,6 +2848,12 @@ body.contrib-submitting .bg-orb {
   border-color: rgba(192, 174, 252, 0.38);
 }
 
+.rt-eta-card.is-scheduled {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+  padding-bottom: 22px;
+}
+
 .rt-eta-card.is-empty {
   opacity: 0.75;
 }
@@ -2858,6 +2865,23 @@ body.contrib-submitting .bg-orb {
   text-transform: uppercase;
   color: var(--text-muted);
   margin-bottom: 6px;
+}
+
+.rt-eta-card-badge {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.rt-eta-card.is-scheduled .rt-eta-card-badge {
+  color: rgba(192, 174, 252, 0.85);
 }
 
 .rt-eta-card-list {
