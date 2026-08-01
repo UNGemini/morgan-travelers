@@ -4047,25 +4047,17 @@ function applyTripDetailEtaDom(plan, etaMap) {
         const dest = slot.dest
           ? ` title="${escapeHtml(`To ${slot.dest}${slot.scheduled ? " (scheduled)" : ""}${slot.remark ? ` · ${slot.remark}` : ""}`)}"`
           : "";
-        return `<li class="rt-eta-card-row${nowArrived ? " is-due is-now" : ""}${slot.scheduled ? " is-scheduled-row" : ""}${i === 0 ? " is-next" : ""}"${dest}><span class="rt-eta-card-line">${escapeHtml(line)}</span></li>`;
+        // Per-row SCHEDULED on the right when this departure is from timetable
+        const tag = slot.scheduled
+          ? `<span class="rt-eta-card-tag" title="From timetable">SCHEDULED</span>`
+          : `<span class="rt-eta-card-tag rt-eta-card-tag-live" title="Live ETA">LIVE</span>`;
+        return `<li class="rt-eta-card-row${nowArrived ? " is-due is-now" : ""}${slot.scheduled ? " is-scheduled-row" : " is-live-row"}${i === 0 ? " is-next" : ""}"${dest}><span class="rt-eta-card-line">${escapeHtml(line)}</span>${tag}</li>`;
       })
       .join("");
 
-    if (hasLive && !hasSched) {
-      card.classList.add("is-live");
-    } else if (hasLive && hasSched) {
-      card.classList.add("is-live", "is-scheduled");
-      card.insertAdjacentHTML(
-        "beforeend",
-        `<div class="rt-eta-card-badge" title="Live ETA filled with timetable">SCHEDULED</div>`,
-      );
-    } else {
-      card.classList.add("is-scheduled");
-      card.insertAdjacentHTML(
-        "beforeend",
-        `<div class="rt-eta-card-badge" title="Timetable (open-data noGPS or trip plan)">SCHEDULED</div>`,
-      );
-    }
+    if (hasLive && hasSched) card.classList.add("is-live", "is-mixed");
+    else if (hasLive) card.classList.add("is-live");
+    else card.classList.add("is-scheduled");
   });
 }
 

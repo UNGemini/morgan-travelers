@@ -997,9 +997,7 @@ body.mobile-ui [data-acrylic]::before {
   color: rgba(192, 174, 252, 0.85);
 }
 
-.rt-eta-card.is-live.is-scheduled {
-  padding-bottom: 22px;
-}
+
 
 /* Per-card direction dots */
 .eta-card-dots {
@@ -2883,7 +2881,11 @@ body.contrib-submitting .bg-orb {
 .rt-eta-card.is-scheduled {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.12);
-  padding-bottom: 22px;
+}
+
+.rt-eta-card.is-mixed {
+  /* live + timetable rows in one card */
+  border-color: rgba(192, 174, 252, 0.32);
 }
 
 .rt-eta-card.is-empty {
@@ -2899,21 +2901,9 @@ body.contrib-submitting .bg-orb {
   margin-bottom: 6px;
 }
 
+/* Legacy card-level badge (unused; tags are per-row now) */
 .rt-eta-card-badge {
-  position: absolute;
-  right: 8px;
-  bottom: 6px;
-  font-size: 0.55rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  opacity: 0.9;
-  pointer-events: none;
-}
-
-.rt-eta-card.is-scheduled .rt-eta-card-badge {
-  color: rgba(192, 174, 252, 0.85);
+  display: none;
 }
 
 .rt-eta-card-list {
@@ -2926,6 +2916,10 @@ body.contrib-submitting .bg-orb {
 }
 
 .rt-eta-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   margin: 0;
   padding: 4px 0;
   font-size: 0.78rem;
@@ -2960,9 +2954,37 @@ body.contrib-submitting .bg-orb {
 
 .rt-eta-card-line {
   display: block;
+  min-width: 0;
+  flex: 1 1 auto;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Per-departure source tag (right side of each bus row) */
+.rt-eta-card-tag {
+  flex: 0 0 auto;
+  font-size: 0.52rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(192, 174, 252, 0.9);
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: rgba(192, 174, 252, 0.1);
+  border: 1px solid rgba(192, 174, 252, 0.22);
+}
+
+.rt-eta-card-tag-live {
+  color: rgba(125, 206, 160, 0.95);
+  background: rgba(125, 206, 160, 0.08);
+  border-color: rgba(125, 206, 160, 0.22);
+}
+
+.rt-eta-card-row.is-scheduled-row .rt-eta-card-line {
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 
 .rt-stop-has-eta .rt-body {
