@@ -1561,75 +1561,15 @@ body.mobile-ui [data-acrylic]::before {
   display: none;
 }
 
-.wheels-stop-timeline {
-  list-style: none;
-  margin: 0;
-  padding: 0 0 8px 0;
-  position: relative;
+/* Full-route list reuses trip-detail .plan-timeline.plan-route-line */
+.wheels-stop-panel .plan-timeline.plan-route-line {
+  margin-top: 0;
+  padding: 0 2px 8px;
 }
 
-.wheels-stop {
-  display: grid;
-  grid-template-columns: 22px 1fr;
-  gap: 10px;
-  align-items: start;
-  position: relative;
-  padding: 0 0 18px;
-  min-height: 36px;
-}
-
-.wheels-stop:last-child {
-  padding-bottom: 4px;
-}
-
-/* Vertical connector line */
-.wheels-stop:not(.is-last)::before {
-  content: "";
-  position: absolute;
-  left: 9px;
-  top: 16px;
-  bottom: -2px;
-  width: 2px;
-  background: rgba(255, 255, 255, 0.14);
-  border-radius: 1px;
-}
-
-.wheels-stop-dot {
-  width: 12px;
-  height: 12px;
-  margin: 4px 0 0 4px;
-  border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.45);
-  background: var(--surface, #1a1b1f);
-  box-sizing: border-box;
-  z-index: 1;
-}
-
-.wheels-stop.is-board .wheels-stop-dot {
-  border-color: var(--accent);
-  background: var(--accent);
-  box-shadow: 0 0 0 3px rgba(192, 174, 252, 0.25);
-}
-
-.wheels-stop.is-first .wheels-stop-dot,
-.wheels-stop.is-last .wheels-stop-dot {
-  border-color: rgba(255, 255, 255, 0.65);
-}
-
-.wheels-stop-main {
-  min-width: 0;
-  padding-top: 1px;
-}
-
-.wheels-stop-name {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  line-height: 1.3;
-}
-
-.wheels-stop.is-board .wheels-stop-name {
-  color: #fff;
+.wheels-stop-panel .eta-route-line .rt-step-stop .rt-marker-dot {
+  /* Operator/route colour already via --rt-color */
+  background: var(--rt-color);
 }
 
 /* Wheels-like ETA route card — rounded selection */

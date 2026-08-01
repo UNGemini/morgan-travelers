@@ -7502,21 +7502,55 @@ async function showEtaRouteDetailsPanel() {
   } else if (!named.length) {
     stopsHtml = `<p class="hint">No stop list for ${escapeHtml(coLabel)} ${escapeHtml(route.id)}.</p>`;
   } else {
-    stopsHtml = `<ol class="wheels-stop-timeline" aria-label="Stops on route">
-      ${named
-        .map((s, i) => {
-          const isBoard =
-            boardStop &&
-            ((s.stopId && s.stopId === boardStop.stopId) || s === boardStop);
-          return `<li class="wheels-stop${isBoard ? " is-board" : ""}${i === 0 ? " is-first" : ""}${i === named.length - 1 ? " is-last" : ""}">
-            <span class="wheels-stop-dot" aria-hidden="true"></span>
-            <div class="wheels-stop-main">
-              <span class="wheels-stop-name">${escapeHtml(s.name)}</span>
-            </div>
-          </li>`;
-        })
-        .join("")}
-    </ol>`;
+    // Reuse trip-detail route-line rail: coloured ○ — | — ○
+    /** @type {Array<{ kind: string, line: 'solid'|'dotted'|'none', color?: string, icon?: string, bodyHtml: string, last?: boolean, extraClass?: string }>} */
+    const rows = [];
+    const modeIcon =
+      route.kind === "mtr"
+        ? "subway"
+        : route.kind === "lrt"
+          ? "tram"
+          : route.kind === "mtr_bus"
+            ? "directions_bus"
+            : "directions_bus";
+    rows.push({
+      kind: "transit",
+      line: "solid",
+      color,
+      icon: modeIcon,
+      bodyHtml: `<div class="rt-transit-head">
+        <span class="rt-route-id">${escapeHtml(route.id)}</span>
+        <span class="rt-route-to">${escapeHtml(dest)}</span>
+      </div>`,
+    });
+    for (let i = 0; i < named.length; i++) {
+      const s = named[i];
+      const isFirst = i === 0;
+      const isLast = i === named.length - 1;
+      const isBoard =
+        boardStop &&
+        ((s.stopId && s.stopId === boardStop.stopId) || s === boardStop);
+      let roleClass = " rt-stop-passby";
+      let roleLabel = "PASS BY";
+      if (isBoard || isFirst) {
+        roleClass = " rt-stop-board";
+        roleLabel = "BOARD";
+      } else if (isLast) {
+        roleClass = " rt-stop-alight";
+        roleLabel = "ALIGHT";
+      }
+      rows.push({
+        kind: "stop",
+        line: isLast ? "none" : "solid",
+        color,
+        last: isLast,
+        extraClass: isBoard ? "rt-stop-has-eta" : "",
+        bodyHtml: `<span class="rt-stop-name${roleClass}">${escapeHtml(s.name)}</span><span class="rt-stop-role">${escapeHtml(roleLabel)}</span>`,
+      });
+    }
+    stopsHtml = `<div class="plan-timeline plan-route-line plan-route-line-full eta-route-line" aria-label="Stops on route">${rows
+      .map((r) => routeLineRowHtml(r))
+      .join("")}</div>`;
   }
 
   if (els.etaRouteDetailBody) {
