@@ -4853,7 +4853,8 @@ async function bootstrapRouter() {
 bootstrapRouter();
 
 // Multi-type MTR fare tables (adult / student / child / QR / contactless)
-initFares()
+/** @type {Promise<unknown>} */
+const faresReadyPromise = initFares()
   .then(() => {
     buildEtaRouteCatalog();
     // Re-price any results that were planned before tables finished loading
@@ -7853,6 +7854,13 @@ async function showEtaRouteDetailsPanel() {
   const gen = ++etaShapeGen;
   setDetailOpen(true);
   setSidebarPage("eta-route");
+
+  // Ensure fare pack is ready so section prices aren’t blank on first open
+  try {
+    await faresReadyPromise;
+  } catch {
+    /* tables optional */
+  }
 
   const co = String(route.co || "").toLowerCase();
   if (co === "ctb") await ensureCtbRouteBound(route.id);

@@ -950,27 +950,78 @@ function triFareIndex(on, off, n) {
 function tdBusSectionKeys(opt, route) {
   const cos = agencyCompanies(opt);
   const keys = [];
-  for (const co of cos) keys.push(`${co}|${route}`);
-  // Explicit agency id (eta options use CTB/KMB uppercase)
-  const hint = String(opt?.agency?.id || opt?.agency?.name || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
-  if (hint && hint !== "bus") {
-    const k = `${hint}|${route}`;
-    if (!keys.includes(k)) keys.unshift(k);
+  const push = (co) => {
+    const c = String(co || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+    if (!c || c === "bus") return;
+    // LWB shares KMB TD tables often under kmb
+    const list = c === "lwb" ? ["lwb", "kmb"] : [c];
+    for (const x of list) {
+      const k = `${x}|${route}`;
+      if (!keys.includes(k)) keys.push(k);
+    }
+  };
+  for (const co of cos) push(co);
+  push(opt?.agency?.id);
+  push(opt?.agency?.name);
+  // Scan pack for any company with this route number (covers missing agency)
+  if (pack?.busSection) {
+    const suf = `|${route}`;
+    for (const k of Object.keys(pack.busSection)) {
+      if (k.endsWith(suf) && !keys.includes(k)) keys.push(k);
+    }
   }
   if (!keys.length) {
     for (const co of ["kmb", "ctb", "nlb", "lrtfeeder", "gmb", "lwb"]) {
-      keys.push(`${co}|${route}`);
+      push(co);
     }
   }
   return keys;
 }
 
 /**
+ * Read triangular fare cell; if missing, walk toward terminus / origin for a value.
+ * @param {number[]} tri
+ * @param {number} on
+ * @param {number} off
+ * @param {number} n
+ * @returns {number | null} cents
+ */
+function triFareCentsFlexible(tri, on, off, n) {
+  if (!tri?.length || n < 2) return null;
+  let i = Math.max(0, Math.min(n - 2, on));
+  let j = Math.max(i + 1, Math.min(n - 1, off));
+  const tryCell = (a, b) => {
+    if (a < 0 || b <= a || b >= n) return null;
+    const idx = triFareIndex(a, b, n);
+    const c = tri[idx];
+    return c != null && c >= 0 ? c : null;
+  };
+  let c = tryCell(i, j);
+  if (c != null) return c;
+  // Prefer ride to terminus from this board
+  for (let b = n - 1; b > i; b--) {
+    c = tryCell(i, b);
+    if (c != null) return c;
+  }
+  // Soften board index slightly
+  for (let a = i; a >= 0; a--) {
+    c = tryCell(a, n - 1);
+    if (c != null) return c;
+  }
+  for (let a = i; a < n - 1; a++) {
+    c = tryCell(a, n - 1);
+    if (c != null) return c;
+  }
+  return null;
+}
+
+/**
  * TD section fare (HKD) for a bus leg using FARE_BUS.mdb pack.
- * Matches company|route, board/alight stop names → ON_SEQ/OFF_SEQ → PRICE.
- * Falls back to index mapping when names are Chinese (ETA) vs English (TD).
+ * Matches company|route, board/alight → PRICE.
+ * Uses index mapping when names are Chinese (ETA) vs English (TD).
+ * Prefer strong name matches; otherwise index map (avoids bad partial matches).
  *
  * Optional: opt.boardIndex / opt.alightIndex on the full `opt.stops` sequence.
  *
@@ -1002,7 +1053,6 @@ function tdBusSectionFare(opt) {
     typeof opt.alightIndex === "number" && Number.isFinite(opt.alightIndex)
       ? Math.max(0, Math.min(planN - 1, Math.round(opt.alightIndex)))
       : planN - 1;
-  // When only board→terminus subsequence is passed without indices, board is [0]
   if (opt.boardIndex == null && opt.from) {
     const fi = planStops.findIndex(
       (s) =>
@@ -1014,6 +1064,8 @@ function tdBusSectionFare(opt) {
     );
     if (fi >= 0) boardIdx = fi;
   }
+  if (alightIdx <= boardIdx) alightIdx = planN - 1;
+  if (alightIdx <= boardIdx) return null;
 
   const board = planStops[boardIdx] || opt.from || planStops[0];
   const alight =
@@ -1021,11 +1073,15 @@ function tdBusSectionFare(opt) {
 
   let bestPrice = null;
   let bestScore = -1;
+  let fullFallback = null;
 
   for (const key of keys) {
     const variants = pack.busSection[key];
     if (!variants?.length) continue;
     for (const variant of variants) {
+      if (fullFallback == null && variant.full != null) {
+        fullFallback = variant.full / 10;
+      }
       const bounds = variant.b || {};
       for (const bound of Object.values(bounds)) {
         const stops = bound.s || bound.stops || [];
@@ -1035,39 +1091,54 @@ function tdBusSectionFare(opt) {
 
         const onHit = matchTdStopIndexScored(stops, board);
         const offHit = matchTdStopIndexScored(stops, alight);
-        let on = onHit?.index ?? null;
-        let off = offHit?.index ?? null;
-        let sc =
-          (onHit?.score || 0) + (offHit?.score || 0);
+        const nameOn = onHit?.index ?? null;
+        const nameOff = offHit?.index ?? null;
+        const nameSc = (onHit?.score || 0) + (offHit?.score || 0);
+        // Strong name match only when both ends score well (avoid partial false hits)
+        const strongName =
+          nameOn != null &&
+          nameOff != null &&
+          nameOff > nameOn &&
+          (onHit?.score || 0) >= 600 &&
+          (offHit?.score || 0) >= 600;
 
-        // Index fallback (ETA often uses Chinese names; TD is English)
-        if (on == null || off == null || off <= on) {
-          const onI = mapPlanIndexToTd(boardIdx, planN, n);
-          const offI = mapPlanIndexToTd(alightIdx, planN, n);
-          if (offI > onI) {
-            if (on == null) on = onI;
-            if (off == null || off <= on) off = Math.max(offI, on + 1);
-            sc = Math.max(sc, 40); // prefer real name matches when present
-          }
+        const onI = mapPlanIndexToTd(boardIdx, planN, n);
+        let offI = mapPlanIndexToTd(alightIdx, planN, n);
+        if (offI <= onI) offI = Math.min(n - 1, onI + 1);
+
+        /** @type {Array<{ on: number, off: number, sc: number }>} */
+        const candidates = [];
+        if (strongName) {
+          candidates.push({ on: nameOn, off: nameOff, sc: nameSc + 1000 });
+        }
+        // Always consider index map (ETA zh names / length mismatch)
+        candidates.push({ on: onI, off: offI, sc: 50 });
+        // Weak name only as soft hint if one end matched well
+        if (
+          nameOn != null &&
+          nameOff != null &&
+          nameOff > nameOn &&
+          !strongName
+        ) {
+          candidates.push({ on: nameOn, off: nameOff, sc: nameSc });
         }
 
-        if (on == null || off == null || off <= on) continue;
-
-        const idx = triFareIndex(on, off, n);
-        const cents = tri[idx];
-        if (cents == null || cents < 0) continue;
-
-        if (sc > bestScore) {
-          bestScore = sc;
-          bestPrice = cents / 10;
+        for (const cand of candidates) {
+          const cents = triFareCentsFlexible(tri, cand.on, cand.off, n);
+          if (cents == null) continue;
+          if (cand.sc > bestScore) {
+            bestScore = cand.sc;
+            bestPrice = cents / 10;
+          }
         }
       }
     }
   }
 
   if (bestPrice != null) return bestPrice;
+  if (fullFallback != null) return fullFallback;
 
-  // Full fare from TD variant when section cell missing
+  // Last resort: any full on matching keys
   for (const key of keys) {
     const variants = pack.busSection[key];
     if (!variants?.length) continue;
@@ -1964,8 +2035,13 @@ export function estimateBusBoardFare(
   }
   const seq = Array.isArray(stops) ? stops : [];
   if (seq.length < 2) return null;
-  const bi = Math.max(0, Math.min(seq.length - 1, Math.round(Number(boardIndex) || 0)));
-  if (bi >= seq.length - 1) return null; // already at terminus
+  const bi = Math.max(
+    0,
+    Math.min(seq.length - 1, Math.round(Number(boardIndex) || 0)),
+  );
+  // Terminus: show full journey fare from first stop when possible, else null
+  const alightI = seq.length - 1;
+  const boardI = bi >= alightI ? Math.max(0, alightI - 1) : bi;
 
   const pts = seq.map((s, i) => ({
     stop_id: s.stopId || s.stop_id || s.id || String(i),
@@ -1982,16 +2058,37 @@ export function estimateBusBoardFare(
   const opt = {
     ...baseOpt,
     mode: baseOpt.mode || "bus",
-    from: pts[bi],
-    to: pts[pts.length - 1],
+    from: pts[boardI],
+    to: pts[alightI],
     stops: pts,
-    boardIndex: bi,
-    alightIndex: pts.length - 1,
+    boardIndex: boardI,
+    alightIndex: alightI,
   };
   // Prefer scaled TD section (incl. index fallback) over generic bus table
   const section = tdBusSectionFare(opt);
   if (section != null) return scaleAdultFare(section, fareType);
-  return busOrFerryFare(opt, fareType);
+  const generic = busOrFerryFare(opt, fareType);
+  if (generic != null) return generic;
+  // Absolute last resort: full fare for route without stop pairing
+  const route = String(baseOpt.route_short_name || baseOpt.route_name || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+  if (route && pack?.busSection) {
+    for (const key of tdBusSectionKeys(opt, route)) {
+      const variants = pack.busSection[key];
+      const full = variants?.find((v) => v.full != null)?.full;
+      if (full != null) return scaleAdultFare(full / 10, fareType);
+    }
+  }
+  if (route && pack?.bus?.byCoRoute) {
+    for (const key of tdBusSectionKeys(opt, route)) {
+      if (pack.bus.byCoRoute[key] != null) {
+        return scaleAdultFare(pack.bus.byCoRoute[key], fareType);
+      }
+    }
+  }
+  return null;
 }
 
 /**
