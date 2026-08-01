@@ -677,22 +677,41 @@ body.mobile-ui [data-acrylic]::before {
   backdrop-filter: var(--lg-blur);
 }
 
+/* Shape morph timing (tab capsule ↔ circle + search expand) */
+.eta-sidebar-bottom-chrome {
+  --eta-morph-dur: 0.34s;
+  --eta-morph-ease: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
 /* One continuous glass capsule holding all mode tabs */
 .eta-mode-tabs {
   flex: 1 1 auto;
   min-width: 0;
+  width: auto;
+  height: auto;
   display: flex;
   align-items: stretch;
+  justify-content: stretch;
   gap: 0;
   padding: 4px;
   border-radius: 999px;
   box-sizing: border-box;
+  overflow: hidden;
+  transition:
+    flex 0.34s var(--eta-morph-ease),
+    width 0.34s var(--eta-morph-ease),
+    min-width 0.34s var(--eta-morph-ease),
+    height 0.34s var(--eta-morph-ease),
+    padding 0.34s var(--eta-morph-ease),
+    border-radius 0.34s var(--eta-morph-ease),
+    gap 0.34s var(--eta-morph-ease);
 }
 
 .eta-mode-tab {
   appearance: none;
   flex: 1 1 0;
   min-width: 0;
+  max-width: 100%;
   min-height: 44px;
   margin: 0;
   padding: 6px 8px;
@@ -710,23 +729,44 @@ body.mobile-ui [data-acrylic]::before {
   align-items: center;
   justify-content: center;
   gap: 2px;
+  opacity: 1;
+  overflow: hidden;
   transition:
     background 0.2s ease,
     color 0.2s ease,
-    box-shadow 0.2s ease;
+    box-shadow 0.2s ease,
+    flex 0.34s var(--eta-morph-ease),
+    width 0.34s var(--eta-morph-ease),
+    min-width 0.34s var(--eta-morph-ease),
+    max-width 0.34s var(--eta-morph-ease),
+    min-height 0.34s var(--eta-morph-ease),
+    padding 0.34s var(--eta-morph-ease),
+    border-radius 0.34s var(--eta-morph-ease),
+    opacity 0.22s ease,
+    gap 0.22s ease;
 }
 
 .eta-mode-tab .material-symbols-outlined {
   font-size: 22px !important;
   line-height: 1 !important;
   font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+  transition:
+    color 0.2s ease,
+    font-size 0.22s ease,
+    font-variation-settings 0.2s ease;
 }
 
 .eta-mode-tab-label {
   max-width: 100%;
+  max-height: 1.2em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  opacity: 1;
+  transition:
+    opacity 0.18s ease,
+    max-height 0.28s var(--eta-morph-ease),
+    max-width 0.28s var(--eta-morph-ease);
 }
 
 /* Active tab: soft glass highlight + accent (like Home in the ref) */
@@ -752,6 +792,7 @@ body.mobile-ui [data-acrylic]::before {
 .eta-search-toggle {
   flex: 0 0 auto;
   width: 48px;
+  min-width: 48px;
   height: 48px;
   margin: 0;
   padding: 0;
@@ -761,14 +802,24 @@ body.mobile-ui [data-acrylic]::before {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+  opacity: 1;
+  transform: scale(1);
   transition:
     background 0.2s ease,
-    transform 0.15s ease,
-    box-shadow 0.2s ease;
+    transform 0.28s var(--eta-morph-ease),
+    box-shadow 0.2s ease,
+    width 0.34s var(--eta-morph-ease),
+    min-width 0.34s var(--eta-morph-ease),
+    opacity 0.22s ease,
+    margin 0.34s var(--eta-morph-ease),
+    border-color 0.22s ease,
+    padding 0.34s var(--eta-morph-ease);
 }
 
 .eta-search-toggle .material-symbols-outlined {
   font-size: 22px !important;
+  transition: opacity 0.18s ease, transform 0.28s var(--eta-morph-ease);
 }
 
 .eta-search-toggle:hover {
@@ -780,20 +831,45 @@ body.mobile-ui [data-acrylic]::before {
   transform: scale(0.96);
 }
 
-/* Expanded liquid-glass search pill */
+/*
+ * Search field: always in layout so width/opacity can morph.
+ * Closed: collapsed to 0; open: expands into a glass pill.
+ */
 .eta-sidebar-search {
-  display: none;
+  display: flex;
   align-items: center;
-  gap: 8px;
-  flex: 1 1 auto;
+  gap: 0;
+  flex: 0 1 0;
+  width: 0;
   min-width: 0;
+  max-width: 0;
   margin: 0;
-  padding: 0 8px 0 14px;
+  padding: 0;
   min-height: 48px;
   height: 48px;
   border-radius: 999px;
   background: var(--lg-fill-strong);
   box-sizing: border-box;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  border-color: transparent;
+  box-shadow: none;
+  transition:
+    flex 0.34s var(--eta-morph-ease),
+    width 0.34s var(--eta-morph-ease),
+    max-width 0.34s var(--eta-morph-ease),
+    min-width 0.34s var(--eta-morph-ease),
+    padding 0.34s var(--eta-morph-ease),
+    gap 0.28s var(--eta-morph-ease),
+    opacity 0.24s ease,
+    border-color 0.28s ease,
+    box-shadow 0.28s ease;
+}
+
+.eta-sidebar-search[hidden] {
+  /* Keep layout for morph; a11y via aria-hidden + inert-like pointer-events */
+  display: flex !important;
 }
 
 .eta-sidebar-search:focus-within {
@@ -804,6 +880,12 @@ body.mobile-ui [data-acrylic]::before {
   color: rgba(255, 255, 255, 0.55);
   font-size: 20px !important;
   flex-shrink: 0;
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    color 0.2s ease,
+    opacity 0.22s ease 0.06s,
+    transform 0.28s var(--eta-morph-ease) 0.04s;
 }
 
 .eta-sidebar-search:focus-within .eta-sidebar-search-icon {
@@ -825,6 +907,8 @@ body.mobile-ui [data-acrylic]::before {
   margin: 0 !important;
   outline: none;
   box-shadow: none !important;
+  opacity: 0;
+  transition: opacity 0.22s ease 0.08s;
 }
 
 .eta-sidebar-search-input::placeholder {
@@ -832,41 +916,18 @@ body.mobile-ui [data-acrylic]::before {
   font-weight: 500;
 }
 
-.eta-search-close {
-  flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
-  margin: 0;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.55);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.eta-search-close:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.eta-search-close .material-symbols-outlined {
-  font-size: 20px !important;
-}
-
 /*
  * Search open (ref image 2):
- * only the active mode stays as a circular glass icon on the left;
+ * capsule shrinks to a circular mode icon on the left;
  * search pill expands to fill the rest.
+ * Left icon exits search (no close button).
  */
 .eta-sidebar-bottom-chrome.is-search-open .eta-mode-tabs {
-  flex: 0 0 auto;
+  flex: 0 0 48px;
   width: 48px;
   height: 48px;
   min-width: 48px;
+  max-width: 48px;
   padding: 0;
   border-radius: 50%;
   justify-content: center;
@@ -874,20 +935,31 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 .eta-sidebar-bottom-chrome.is-search-open .eta-mode-tab:not(.is-active) {
-  display: none;
+  flex: 0 0 0;
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  min-height: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  gap: 0;
 }
 
 .eta-sidebar-bottom-chrome.is-search-open .eta-mode-tab.is-active {
-  flex: 0 0 auto;
+  flex: 0 0 48px;
   width: 48px;
   height: 48px;
   min-width: 48px;
+  max-width: 48px;
   min-height: 48px;
   padding: 0;
   border-radius: 50%;
   background: transparent;
   box-shadow: none;
   color: #fff;
+  /* Afford clicking as “back to tab switcher” */
+  cursor: pointer;
 }
 
 .eta-sidebar-bottom-chrome.is-search-open .eta-mode-tab.is-active .material-symbols-outlined {
@@ -897,19 +969,58 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 .eta-sidebar-bottom-chrome.is-search-open .eta-mode-tab-label {
-  display: none;
+  max-width: 0;
+  max-height: 0;
+  opacity: 0;
 }
 
 .eta-sidebar-bottom-chrome.is-search-open .eta-search-toggle {
-  display: none;
+  width: 0;
+  min-width: 0;
+  opacity: 0;
+  padding: 0;
+  margin: 0;
+  border-color: transparent;
+  pointer-events: none;
+  transform: scale(0.6);
+}
+
+.eta-sidebar-bottom-chrome.is-search-open .eta-search-toggle .material-symbols-outlined {
+  opacity: 0;
 }
 
 .eta-sidebar-bottom-chrome.is-search-open .eta-sidebar-search {
-  display: flex;
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 12px 0 14px;
+  gap: 8px;
+  opacity: 1;
+  pointer-events: auto;
+  border-color: var(--lg-border);
+  box-shadow: var(--lg-highlight), var(--lg-shadow);
 }
 
-.eta-sidebar-bottom-chrome.is-search-open .eta-sidebar-search[hidden] {
-  display: flex !important;
+.eta-sidebar-bottom-chrome.is-search-open .eta-sidebar-search-icon,
+.eta-sidebar-bottom-chrome.is-search-open .eta-sidebar-search-input {
+  opacity: 1;
+  transform: scale(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eta-mode-tabs,
+  .eta-mode-tab,
+  .eta-mode-tab .material-symbols-outlined,
+  .eta-mode-tab-label,
+  .eta-search-toggle,
+  .eta-search-toggle .material-symbols-outlined,
+  .eta-sidebar-search,
+  .eta-sidebar-search-icon,
+  .eta-sidebar-search-input {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+  }
 }
 
 .app-shell[data-ui-mode="eta"] .trip-plan-sidebar-panel {
@@ -946,17 +1057,22 @@ body.mobile-ui [data-acrylic]::before {
   height: 100%;
 }
 
-/* Pinned route page — plan-card style */
+/* Pinned routes page — plan-card style (multiple cards stack) */
 .pinned-route-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   padding: 4px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   -webkit-overflow-scrolling: touch;
 }
 
 .pinned-route-card {
   cursor: default;
+  flex: 0 0 auto;
+  margin: 0;
 }
 
 .pinned-route-card .plan-head {

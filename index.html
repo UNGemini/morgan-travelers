@@ -735,15 +735,6 @@
                     aria-autocomplete="list"
                     aria-controls="eta-route-list-sidebar"
                   />
-                  <button
-                    type="button"
-                    class="eta-search-close"
-                    id="btn-eta-search-close"
-                    title="Close search"
-                    aria-label="Close search"
-                  >
-                    <span class="material-symbols-outlined" aria-hidden="true">close</span>
-                  </button>
                 </div>
               </div>
             </section>
@@ -1077,7 +1068,7 @@
               <div id="eta-route-detail-body" class="eta-route-detail-body"></div>
             </div>
 
-            <!-- Page: Pinned route (planned-style card + live/scheduled ETA) -->
+            <!-- Page: Pinned routes (plan-style cards + live/scheduled ETA) -->
             <div id="sidebar-page-pinned" class="sidebar-page" hidden>
               <div class="trip-detail-bar">
                 <button
@@ -1092,7 +1083,7 @@
                   </span>
                 </button>
               </div>
-              <div id="pinned-route-body" class="pinned-route-body"></div>
+              <div id="pinned-route-body" class="pinned-route-body" role="list" aria-label="Pinned routes"></div>
             </div>
           </div>
         </aside>
@@ -1145,8 +1136,8 @@
               id="btn-eta-pinned"
               class="toolbar-pinned-btn"
               disabled
-              title="Open pinned route"
-              aria-label="Open pinned route"
+              title="Open pinned routes"
+              aria-label="Open pinned routes"
             >
               <span class="material-symbols-outlined toolbar-mid-icon" aria-hidden="true">push_pin</span>
               <span class="toolbar-pinned-label" id="toolbar-pinned-label">Pinned Route</span>

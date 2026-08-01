@@ -238,88 +238,154 @@ const els = {
   etaBottomChrome: document.getElementById("eta-sidebar-bottom-chrome"),
   etaSidebarSearch: document.getElementById("eta-sidebar-search"),
   btnEtaSearchToggle: document.getElementById("btn-eta-search-toggle"),
-  btnEtaSearchClose: document.getElementById("btn-eta-search-close"),
   modeButtons: () =>
     Array.from(document.querySelectorAll(".toolbar-mode-btn[data-ui-mode]")),
 };
 
-const ETA_PINNED_KEY = "morgan.etaPinnedRoute";
+const ETA_PINNED_KEY = "morgan.etaPinnedRoutes";
+/** @deprecated old single-route key — migrated on load */
+const ETA_PINNED_KEY_LEGACY = "morgan.etaPinnedRoute";
 
 /**
- * @returns {EtaRouteEntry | null}
+ * @param {EtaRouteEntry} a
+ * @param {EtaRouteEntry} b
  */
-function loadPinnedEtaRoute() {
-  try {
-    const raw = localStorage.getItem(ETA_PINNED_KEY);
-    if (!raw) return null;
-    const o = JSON.parse(raw);
-    if (!o?.id) return null;
-    return {
-      id: String(o.id),
-      label: String(o.label || o.id),
-      kind: o.kind || "bus",
-      co: o.co || undefined,
-    };
-  } catch {
-    return null;
-  }
+function pinnedRouteSame(a, b) {
+  if (!a || !b) return false;
+  return (
+    a.id === b.id &&
+    a.kind === b.kind &&
+    String(a.co || "") === String(b.co || "")
+  );
 }
 
 /**
- * @param {EtaRouteEntry | null} route
+ * @returns {EtaRouteEntry[]}
  */
-function savePinnedEtaRoute(route) {
+function loadPinnedEtaRoutes() {
   try {
-    if (!route) {
+    const raw = localStorage.getItem(ETA_PINNED_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        return arr
+          .filter((o) => o?.id)
+          .map((o) => ({
+            id: String(o.id),
+            label: String(o.label || o.id),
+            kind: o.kind || "bus",
+            co: o.co || undefined,
+          }));
+      }
+    }
+    // Migrate legacy single pin
+    const leg = localStorage.getItem(ETA_PINNED_KEY_LEGACY);
+    if (leg) {
+      const o = JSON.parse(leg);
+      if (o?.id) {
+        const one = {
+          id: String(o.id),
+          label: String(o.label || o.id),
+          kind: o.kind || "bus",
+          co: o.co || undefined,
+        };
+        savePinnedEtaRoutes([one]);
+        localStorage.removeItem(ETA_PINNED_KEY_LEGACY);
+        return [one];
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return [];
+}
+
+/**
+ * @param {EtaRouteEntry[]} routes
+ */
+function savePinnedEtaRoutes(routes) {
+  try {
+    if (!routes?.length) {
       localStorage.removeItem(ETA_PINNED_KEY);
       return;
     }
     localStorage.setItem(
       ETA_PINNED_KEY,
-      JSON.stringify({
-        id: route.id,
-        label: route.label,
-        kind: route.kind,
-        co: route.co || "",
-      }),
+      JSON.stringify(
+        routes.map((r) => ({
+          id: r.id,
+          label: r.label,
+          kind: r.kind,
+          co: r.co || "",
+        })),
+      ),
     );
   } catch {
     /* ignore quota */
   }
 }
 
+/**
+ * @param {EtaRouteEntry} route
+ * @returns {boolean} true if now pinned
+ */
+function togglePinnedEtaRoute(route) {
+  if (!route) return false;
+  const list = loadPinnedEtaRoutes();
+  const i = list.findIndex((r) => pinnedRouteSame(r, route));
+  if (i >= 0) {
+    list.splice(i, 1);
+    savePinnedEtaRoutes(list);
+    return false;
+  }
+  list.push({
+    id: route.id,
+    label: route.label,
+    kind: route.kind,
+    co: route.co,
+  });
+  savePinnedEtaRoutes(list);
+  return true;
+}
+
+/**
+ * @param {EtaRouteEntry} route
+ */
+function isRoutePinned(route) {
+  return loadPinnedEtaRoutes().some((r) => pinnedRouteSame(r, route));
+}
+
 function syncPinnedRouteToolbar() {
-  const pinned = loadPinnedEtaRoute();
+  const list = loadPinnedEtaRoutes();
   const btn = els.btnEtaPinned;
   const label = els.toolbarPinnedLabel;
   if (!btn) return;
-  if (pinned) {
+  if (list.length) {
     btn.disabled = false;
-    const co =
-      pinned.kind === "mtr"
-        ? "MTR"
-        : pinned.kind === "lrt"
-          ? "LRT"
-          : String(pinned.co || "bus").toUpperCase();
-    const text = `${pinned.id}`;
-    if (label) label.textContent = text;
-    btn.title = `Pinned: ${co} ${pinned.id} · ${pinned.label}`;
-    btn.setAttribute("aria-label", `Open pinned route ${pinned.id}`);
+    if (label) {
+      label.textContent =
+        list.length === 1 ? String(list[0].id) : `${list.length} pinned`;
+    }
+    btn.title =
+      list.length === 1
+        ? `Pinned: ${list[0].id} · ${list[0].label}`
+        : `Pinned routes (${list.length})`;
+    btn.setAttribute(
+      "aria-label",
+      list.length === 1
+        ? `Open pinned route ${list[0].id}`
+        : `Open ${list.length} pinned routes`,
+    );
   } else {
     btn.disabled = true;
     if (label) label.textContent = "Pinned Route";
-    btn.title = "Pin a route from the ETA list";
-    btn.setAttribute("aria-label", "No pinned route");
+    btn.title = "Pin routes from the ETA list";
+    btn.setAttribute("aria-label", "No pinned routes");
   }
-  // Sync pin button in actions if selection matches
   const pinBtn = els.btnEtaPinRoute;
   if (pinBtn && etaSelectedForDetails) {
-    const on =
-      pinned &&
-      pinned.id === etaSelectedForDetails.id &&
-      (pinned.co || "") === (etaSelectedForDetails.co || "") &&
-      pinned.kind === etaSelectedForDetails.kind;
-    pinBtn.classList.toggle("is-pinned", !!on);
+    const on = isRoutePinned(etaSelectedForDetails);
+    pinBtn.classList.toggle("is-pinned", on);
     const row = pinBtn.querySelector(".btn-row span:last-child");
     if (row) row.textContent = on ? "Pinned" : "Pin route";
   }
@@ -343,49 +409,73 @@ function resolvePinnedRouteEntry(pinned) {
 }
 
 /**
- * Open dedicated Pinned Route page (plan-style card + live/scheduled ETAs).
+ * Open dedicated Pinned Routes page (plan-style cards).
  */
 async function openPinnedRoutePage() {
   if (getUiMode() !== "eta") setUiMode("eta");
   setDetailOpen(true);
-  const pinned = loadPinnedEtaRoute();
-  if (!pinned) {
-    setSidebarPage("pinned");
-    if (els.pinnedRouteBody) {
-      els.pinnedRouteBody.innerHTML = `
-        <div class="pinned-empty">
-          <span class="material-symbols-outlined" aria-hidden="true">push_pin</span>
-          <p>No pinned route yet</p>
-          <p class="hint">Select a route in the list and tap <strong>Pin route</strong>.</p>
-        </div>`;
-    }
-    return;
-  }
   setSidebarPage("pinned");
   await renderPinnedRoutePage();
 }
 
 /**
- * Render plan-card-style pinned route with up to 3 live/scheduled departures.
+ * Build one pinned route card HTML + attach data later via dataset key.
+ * @param {EtaRouteEntry} route
+ * @param {object} ctx
  */
-async function renderPinnedRoutePage() {
-  const body = els.pinnedRouteBody;
-  if (!body) return;
-  const pinned = loadPinnedEtaRoute();
-  if (!pinned) {
-    body.innerHTML = `
-      <div class="pinned-empty">
-        <span class="material-symbols-outlined" aria-hidden="true">push_pin</span>
-        <p>No pinned route yet</p>
-        <p class="hint">Select a route in the list and tap <strong>Pin route</strong>.</p>
-      </div>`;
-    return;
-  }
+function pinnedRouteCardHtml(route, ctx) {
+  const {
+    dest,
+    coLabel,
+    color,
+    boardName,
+    dirDots,
+    etaRows,
+    hasLive,
+    headText,
+    key,
+  } = ctx;
+  return `
+    <article class="plan-card pinned-route-card active" role="listitem" data-pinned-key="${escapeHtml(key)}" aria-label="Pinned route ${escapeHtml(route.id)}">
+      <div class="plan-head">
+        <span class="duration">
+          <span class="eta-card-route ${etaCompanyColorClass(route)}" style="color:${escapeHtml(color)};font-size:1.35rem">${escapeHtml(route.id)}</span>
+          <span class="pinned-co">${escapeHtml(coLabel)}</span>
+        </span>
+        <span class="material-symbols-outlined pinned-badge-icon" aria-hidden="true">push_pin</span>
+      </div>
+      <div class="pinned-dest-row">
+        <span class="eta-card-arrow" aria-hidden="true">→</span>
+        <strong>${escapeHtml(dest)}</strong>
+      </div>
+      ${boardName ? `<p class="pinned-board-stop">${escapeHtml(boardName)}</p>` : ""}
+      ${dirDots}
+      <div class="rt-eta-card ${hasLive ? "is-live" : "is-scheduled"}" style="margin-top:10px">
+        <div class="rt-eta-card-head">${escapeHtml(headText)}</div>
+        <ul class="rt-eta-card-list">${etaRows}</ul>
+      </div>
+      <div class="pinned-actions">
+        <button type="button" class="btn eta-route-details-btn" data-pinned-details data-acrylic>
+          <span class="btn-row">
+            <span class="material-symbols-outlined" aria-hidden="true">route</span>
+            Show route details
+          </span>
+        </button>
+        <button type="button" class="btn eta-route-pin-btn is-pinned" data-pinned-unpin data-acrylic>
+          <span class="btn-row">
+            <span class="material-symbols-outlined" aria-hidden="true">keep_off</span>
+            Unpin
+          </span>
+        </button>
+      </div>
+    </article>`;
+}
 
-  const route = resolvePinnedRouteEntry(pinned);
-  body.innerHTML = `<p class="hint" style="padding:12px">Loading ${escapeHtml(route.id)}…</p>`;
-
-  // Prefetch OD for correct destination labels
+/**
+ * Load ETA + stops for one pinned route and return render context.
+ * @param {EtaRouteEntry} route
+ */
+async function buildPinnedRouteCardContext(route) {
   const co = String(route.co || "").toLowerCase();
   if (co === "ctb") await ensureCtbRouteBound(route.id);
   if (co === "nlb") await ensureNlbRouteBounds();
@@ -407,18 +497,13 @@ async function renderPinnedRoutePage() {
           ? "MTR Bus"
           : String(route.co || "bus").toUpperCase();
 
-  // Load stops + paint path
   let stops = [];
   try {
     stops = await loadEtaRouteStops(route);
-    etaSelectedForDetails = route;
-    etaSelectedStops = stops;
-    if (stops.length >= 2) await paintEtaRouteOnMap(route, stops);
   } catch (e) {
     console.warn("[pinned] stops", e);
   }
 
-  // Live ETA from board stop (first stop with id) + timetable fill to 3
   const boardStop = stops.find((s) => s.stopId && !s._polylineOnly) || stops[0];
   const opt = etaRouteAsOption(route, stops, dir);
   let etaResult = null;
@@ -455,7 +540,6 @@ async function renderPinnedRoutePage() {
     etaLiveByKey.get(etaRouteKey(route))?.stopLabel ||
     dir.orig ||
     "";
-
   const etaRows = slots.length
     ? slots
         .map((slot, i) => {
@@ -476,62 +560,114 @@ async function renderPinnedRoutePage() {
   const dirDots =
     dirs.length >= 2
       ? `<div class="eta-card-dots pinned-dir-dots" role="tablist" aria-label="Direction">
-          <button type="button" class="eta-dir-dot ${di === 0 ? "is-active" : ""}" data-pinned-dir="0" aria-label="Direction 1"></button>
-          <button type="button" class="eta-dir-dot ${di === 1 ? "is-active" : ""}" data-pinned-dir="1" aria-label="Direction 2"></button>
+          <button type="button" class="eta-dir-dot ${di === 0 ? "is-active" : ""}" data-pinned-dir="0" data-pinned-key="${escapeHtml(etaRouteKey(route))}" aria-label="Direction 1"></button>
+          <button type="button" class="eta-dir-dot ${di === 1 ? "is-active" : ""}" data-pinned-dir="1" data-pinned-key="${escapeHtml(etaRouteKey(route))}" aria-label="Direction 2"></button>
         </div>`
       : "";
 
-  body.innerHTML = `
-    <article class="plan-card pinned-route-card active" aria-label="Pinned route ${escapeHtml(route.id)}">
-      <div class="plan-head">
-        <span class="duration">
-          <span class="eta-card-route ${etaCompanyColorClass(route)}" style="color:${escapeHtml(color)};font-size:1.35rem">${escapeHtml(route.id)}</span>
-          <span class="pinned-co">${escapeHtml(coLabel)}</span>
-        </span>
-        <span class="material-symbols-outlined pinned-badge-icon" aria-hidden="true">push_pin</span>
-      </div>
-      <div class="pinned-dest-row">
-        <span class="eta-card-arrow" aria-hidden="true">→</span>
-        <strong>${escapeHtml(dest)}</strong>
-      </div>
-      ${boardName ? `<p class="pinned-board-stop">${escapeHtml(boardName)}</p>` : ""}
-      ${dirDots}
-      <div class="rt-eta-card ${hasLive ? "is-live" : "is-scheduled"}" style="margin-top:10px">
-        <div class="rt-eta-card-head">${hasLive ? formatLiveStatusHead(etaResult.fetchedAt) : "Timetable"}</div>
-        <ul class="rt-eta-card-list">${etaRows}</ul>
-      </div>
-      <div class="pinned-actions">
-        <button type="button" class="btn eta-route-details-btn" id="btn-pinned-details" data-acrylic>
-          <span class="btn-row">
-            <span class="material-symbols-outlined" aria-hidden="true">route</span>
-            Show route details
-          </span>
-        </button>
-        <button type="button" class="btn eta-route-pin-btn is-pinned" id="btn-pinned-unpin" data-acrylic>
-          <span class="btn-row">
-            <span class="material-symbols-outlined" aria-hidden="true">keep_off</span>
-            Unpin
-          </span>
-        </button>
-      </div>
-    </article>
-    <p class="hint pinned-foot">Pinned route · ${escapeHtml(route.label || route.id)}</p>
-  `;
+  return {
+    route,
+    stops,
+    dest,
+    coLabel,
+    color,
+    boardName,
+    dirDots,
+    etaRows,
+    hasLive,
+    headText: hasLive
+      ? formatLiveStatusHead(etaResult.fetchedAt)
+      : "Timetable",
+    key: etaRouteKey(route),
+  };
+}
 
-  body.querySelector("#btn-pinned-details")?.addEventListener("click", () => {
-    etaSelectedForDetails = route;
-    void showEtaRouteDetailsPanel();
+/**
+ * Render all pinned routes as plan-style cards.
+ */
+async function renderPinnedRoutePage() {
+  const body = els.pinnedRouteBody;
+  if (!body) return;
+  const list = loadPinnedEtaRoutes();
+  if (!list.length) {
+    body.innerHTML = `
+      <div class="pinned-empty">
+        <span class="material-symbols-outlined" aria-hidden="true">push_pin</span>
+        <p>No pinned routes yet</p>
+        <p class="hint">Select a route in the list and tap <strong>Pin route</strong>.</p>
+      </div>`;
+    return;
+  }
+
+  body.innerHTML = `<p class="hint" style="padding:12px">Loading ${list.length} pinned route${list.length > 1 ? "s" : ""}…</p>`;
+
+  const resolved = list.map((p) => resolvePinnedRouteEntry(p)).filter(Boolean);
+  /** @type {Array<Awaited<ReturnType<typeof buildPinnedRouteCardContext>>>} */
+  const contexts = [];
+  for (const route of resolved) {
+    // Sequential so we don't stampede operator APIs
+    // eslint-disable-next-line no-await-in-loop
+    contexts.push(await buildPinnedRouteCardContext(route));
+  }
+
+  // Paint map for first card with path
+  const firstWithStops = contexts.find((c) => c.stops?.length >= 2);
+  if (firstWithStops) {
+    etaSelectedForDetails = firstWithStops.route;
+    etaSelectedStops = firstWithStops.stops;
+    try {
+      await paintEtaRouteOnMap(firstWithStops.route, firstWithStops.stops);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  body.innerHTML =
+    contexts.map((ctx) => pinnedRouteCardHtml(ctx.route, ctx)).join("") +
+    `<p class="hint pinned-foot">${contexts.length} pinned route${contexts.length > 1 ? "s" : ""}</p>`;
+
+  body.querySelectorAll("[data-pinned-details]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const card = btn.closest("[data-pinned-key]");
+      const key = card?.getAttribute("data-pinned-key");
+      const ctx = contexts.find((c) => c.key === key);
+      if (!ctx) return;
+      etaSelectedForDetails = ctx.route;
+      etaSelectedStops = ctx.stops || [];
+      void showEtaRouteDetailsPanel();
+    });
   });
-  body.querySelector("#btn-pinned-unpin")?.addEventListener("click", () => {
-    savePinnedEtaRoute(null);
-    syncPinnedRouteToolbar();
-    showToast("Unpinned route", 1600);
-    void renderPinnedRoutePage();
+  body.querySelectorAll("[data-pinned-unpin]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const card = btn.closest("[data-pinned-key]");
+      const key = card?.getAttribute("data-pinned-key");
+      const ctx = contexts.find((c) => c.key === key);
+      if (!ctx) return;
+      togglePinnedEtaRoute(ctx.route);
+      syncPinnedRouteToolbar();
+      showToast(`Unpinned ${ctx.route.id}`, 1600);
+      void renderPinnedRoutePage();
+    });
   });
   body.querySelectorAll("[data-pinned-dir]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      setCardDir(route, Number(btn.getAttribute("data-pinned-dir")) || 0);
+      const key = btn.getAttribute("data-pinned-key");
+      const ctx = contexts.find((c) => c.key === key);
+      if (!ctx) return;
+      setCardDir(ctx.route, Number(btn.getAttribute("data-pinned-dir")) || 0);
       void renderPinnedRoutePage();
+    });
+  });
+  // Tap card to draw path
+  body.querySelectorAll(".pinned-route-card").forEach((card) => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      const key = card.getAttribute("data-pinned-key");
+      const ctx = contexts.find((c) => c.key === key);
+      if (!ctx?.stops?.length) return;
+      etaSelectedForDetails = ctx.route;
+      etaSelectedStops = ctx.stops;
+      void paintEtaRouteOnMap(ctx.route, ctx.stops);
     });
   });
 }
@@ -7283,16 +7419,57 @@ function setEtaSearchOpen(open) {
   const chrome = els.etaBottomChrome;
   const field = els.etaSidebarSearch;
   const toggle = els.btnEtaSearchToggle;
-  if (chrome) chrome.classList.toggle("is-search-open", !!open);
-  if (field) field.hidden = !open;
-  if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  if (open) {
-    requestAnimationFrame(() => {
-      els.inputEtaRoute?.focus?.();
-    });
-  } else if (els.inputEtaRoute && !String(els.inputEtaRoute.value || "").trim()) {
-    // keep value if user typed; only clear when empty close
+  const want = !!open;
+  const wasOpen = !!chrome?.classList.contains("is-search-open");
+
+  if (field) {
+    // Always in layout for shape animation; [hidden] no longer forces display:none
+    field.hidden = false;
+    field.setAttribute("aria-hidden", want ? "false" : "true");
+    if (want) field.removeAttribute("inert");
+    else field.setAttribute("inert", "");
   }
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", want ? "true" : "false");
+    toggle.tabIndex = want ? -1 : 0;
+  }
+
+  // Left mode icon becomes “exit search → full tab switcher”
+  document.querySelectorAll(".eta-mode-tab.is-active").forEach((btn) => {
+    if (want) {
+      btn.setAttribute("title", "Back to modes");
+      btn.setAttribute("aria-label", "Close search and show all modes");
+    } else {
+      const mode = btn.getAttribute("data-eta-mode") || "";
+      const label =
+        mode === "mtr"
+          ? "MTR"
+          : mode === "lrt"
+            ? "LRT"
+            : mode === "gmb"
+              ? "GMB"
+              : "Bus";
+      btn.setAttribute("title", label);
+      btn.removeAttribute("aria-label");
+    }
+  });
+
+  if (!chrome) return;
+
+  if (wasOpen === want) {
+    if (want) els.inputEtaRoute?.focus?.();
+    return;
+  }
+
+  // Paint closed/open from-state, then toggle so CSS transitions run
+  requestAnimationFrame(() => {
+    chrome.classList.toggle("is-search-open", want);
+    if (want) {
+      requestAnimationFrame(() => els.inputEtaRoute?.focus?.());
+    } else {
+      els.inputEtaRoute?.blur?.();
+    }
+  });
 }
 
 function collapseEtaSearchIfEmpty() {
@@ -7316,19 +7493,8 @@ function initEtaRouteSearchUi() {
       showToast("Select a route first", 1600);
       return;
     }
-    const pinned = loadPinnedEtaRoute();
-    const same =
-      pinned &&
-      pinned.id === route.id &&
-      (pinned.co || "") === (route.co || "") &&
-      pinned.kind === route.kind;
-    if (same) {
-      savePinnedEtaRoute(null);
-      showToast("Unpinned route", 1600);
-    } else {
-      savePinnedEtaRoute(route);
-      showToast(`Pinned ${route.id}`, 1800);
-    }
+    const nowPinned = togglePinnedEtaRoute(route);
+    showToast(nowPinned ? `Pinned ${route.id}` : `Unpinned ${route.id}`, 1600);
     syncPinnedRouteToolbar();
   });
 
@@ -7341,6 +7507,24 @@ function initEtaRouteSearchUi() {
 
   document.querySelectorAll(".eta-mode-tab[data-eta-mode], .eta-mode-chip[data-eta-mode]").forEach((btn) => {
     btn.addEventListener("click", () => {
+      // When search is open, the left icon exits search (back to full tab switcher)
+      if (els.etaBottomChrome?.classList.contains("is-search-open")) {
+        if (els.inputEtaRoute) els.inputEtaRoute.value = "";
+        setEtaSearchOpen(false);
+        etaRouteActive = -1;
+        // Still apply mode if user tapped a different tab (hidden ones not visible)
+        const mode = btn.getAttribute("data-eta-mode") || "bus";
+        if (mode !== etaTrafficMode) {
+          etaTrafficMode =
+            mode === "mtr" || mode === "lrt" || mode === "gmb" || mode === "bus"
+              ? mode
+              : "bus";
+        }
+        syncEtaModeChips();
+        void refreshEtaRouteSuggest();
+        return;
+      }
+
       const mode = btn.getAttribute("data-eta-mode") || "bus";
       etaTrafficMode =
         mode === "mtr" || mode === "lrt" || mode === "gmb" || mode === "bus"
@@ -7365,12 +7549,6 @@ function initEtaRouteSearchUi() {
   els.btnEtaSearchToggle?.addEventListener("click", () => {
     setDetailOpen(true);
     setEtaSearchOpen(true);
-    void refreshEtaRouteSuggest();
-  });
-  els.btnEtaSearchClose?.addEventListener("click", () => {
-    if (els.inputEtaRoute) els.inputEtaRoute.value = "";
-    setEtaSearchOpen(false);
-    etaRouteActive = -1;
     void refreshEtaRouteSuggest();
   });
 
@@ -7418,15 +7596,6 @@ function initEtaRouteSearchUi() {
       setDetailOpen(true);
       setEtaSearchOpen(true);
       void refreshEtaRouteSuggest();
-    });
-
-    input.addEventListener("blur", () => {
-      // Delay so close button / tab clicks still fire
-      window.setTimeout(() => {
-        if (document.activeElement === els.inputEtaRoute) return;
-        if (els.etaBottomChrome?.contains(document.activeElement)) return;
-        collapseEtaSearchIfEmpty();
-      }, 150);
     });
   }
 
