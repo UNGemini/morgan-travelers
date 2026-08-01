@@ -117,6 +117,53 @@
                 <code>hk.wheelsrouter</code>
               </p>
             </section>
+            <section class="panel-section" id="settings-fare-section">
+              <h3>Fare</h3>
+              <p class="hint">
+                Ticket type used for trip plans and bus boarding prices on route
+                details.
+              </p>
+              <div class="pref-field fare-type-field settings-fare-field" id="fare-type-field">
+                <label class="loc-label pref-label" for="select-fare-type">
+                  <span class="material-symbols-outlined" aria-hidden="true">payments</span>
+                  Ticket type
+                </label>
+                <select
+                  id="select-fare-type"
+                  class="fare-type-select"
+                  aria-label="Ticket / fare type"
+                >
+                  <option value="octopus_adult">Octopus Adult/Elderly</option>
+                  <option value="octopus_child">Octopus Child</option>
+                  <option value="octopus_student">Octopus Student</option>
+                  <option
+                    value="octopus_joyyou_65"
+                    title="Concessionary fare on domestic routes; excl. AEL, EAL First Class, Lo Wu &amp; Lok Ma Chau"
+                  >
+                    Octopus JoyYou Cards (65+)
+                  </option>
+                  <option
+                    value="octopus_joyyou_60"
+                    title="JoyYou $2/20% scheme; full adult for AEL, Lo Wu, Lok Ma Chau &amp; Racecourse"
+                  >
+                    Octopus JoyYou Cards (60–64)
+                  </option>
+                  <option value="qr_adult" title="Same rates as Octopus Adult/Elderly">
+                    QR Code Adult/Elderly
+                  </option>
+                  <option value="qr_child" title="Same rates as Octopus Child">
+                    QR Code Child
+                  </option>
+                  <option value="single_ride">Single Ride Ticket/Cash</option>
+                  <option value="contactless" title="Same rates as Octopus Adult">
+                    Contactless Bank Cards
+                  </option>
+                  <option value="china_tunion" title="Treated as adult Octopus rates">
+                    China T-Union Cards
+                  </option>
+                </select>
+              </div>
+            </section>
           </div>
         </div>
       </div>
@@ -961,47 +1008,6 @@
                 <p class="pref-field-note" id="traffic-method-note">
                   *You might still need short station access if you disabled Walk. Plans to a stop/station itself stay listed.
                 </p>
-              </div>
-
-              <div class="pref-field fare-type-field" id="fare-type-field">
-                <label class="loc-label pref-label" for="select-fare-type">
-                  <span class="material-symbols-outlined" aria-hidden="true">payments</span>
-                  Fare
-                </label>
-                <select
-                  id="select-fare-type"
-                  class="fare-type-select"
-                  aria-label="Ticket / fare type"
-                >
-                  <option value="octopus_adult">Octopus Adult/Elderly</option>
-                  <option value="octopus_child">Octopus Child</option>
-                  <option value="octopus_student">Octopus Student</option>
-                  <option
-                    value="octopus_joyyou_65"
-                    title="Concessionary fare on domestic routes; excl. AEL, EAL First Class, Lo Wu &amp; Lok Ma Chau"
-                  >
-                    Octopus JoyYou Cards (65+)
-                  </option>
-                  <option
-                    value="octopus_joyyou_60"
-                    title="JoyYou $2/20% scheme; full adult for AEL, Lo Wu, Lok Ma Chau &amp; Racecourse"
-                  >
-                    Octopus JoyYou Cards (60–64)
-                  </option>
-                  <option value="qr_adult" title="Same rates as Octopus Adult/Elderly">
-                    QR Code Adult/Elderly
-                  </option>
-                  <option value="qr_child" title="Same rates as Octopus Child">
-                    QR Code Child
-                  </option>
-                  <option value="single_ride">Single Ride Ticket/Cash</option>
-                  <option value="contactless" title="Same rates as Octopus Adult">
-                    Contactless Bank Cards
-                  </option>
-                  <option value="china_tunion" title="Treated as adult Octopus rates">
-                    China T-Union Cards
-                  </option>
-                </select>
               </div>
 
               <div class="pref-field" id="eal-first-class-field">

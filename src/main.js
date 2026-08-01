@@ -1409,10 +1409,19 @@ function initFareTypeUi() {
     if (!isFareType(v)) return;
     fareType = setFareType(v);
     showToast(`Fare · ${formatFareTypeLabel(fareType)}`, 1800);
-    // Always re-estimate visible plans with the new ticket type
-    if (repricePlansForFareType()) return;
-    if (origin && destination && isRouterReady()) {
+    // Reprice open trip plans
+    if (repricePlansForFareType()) {
+      // still refresh ETA detail fares if that page is open
+    } else if (origin && destination && isRouterReady()) {
       runPlan();
+    }
+    // Refresh route-detail stop fares (same global ticket type)
+    if (
+      typeof sidebarPage !== "undefined" &&
+      sidebarPage === "eta-route" &&
+      etaSelectedForDetails
+    ) {
+      void showEtaRouteDetailsPanel();
     }
   });
 }

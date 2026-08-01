@@ -3446,6 +3446,16 @@ body.contrib-submitting .bg-orb {
   margin-bottom: 14px;
 }
 
+/* Fare selector lives in Settings (global for plans + ETA) */
+#settings-fare-section .settings-fare-field {
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+
+#settings-fare-section .pref-label {
+  margin-bottom: 8px;
+}
+
 /* Departure reuses From/To (.loc-field / .loc-input / .btn-icon) layout */
 .depart-time-input {
   color-scheme: dark;
