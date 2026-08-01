@@ -3,9 +3,13 @@
  *  - MTR heavy rail / AEL / LRT / MTR Bus (official multi-type matrices)
  *  - Franchised bus, GMB, ferry (full-journey adult via hk-bus-crawling pack)
  *  - Free AEL↔MTR domestic connection (Octopus / QR / contactless)
+ *  - MTR↔GMB / designated bus-ferry Octopus interchange discounts ($0.5+)
  *  - Optional East Rail Line First Class premium
  *
  * Ticket types — see FARE_TYPES / FARE_TYPE_LABELS.
+ *
+ * MTR interchange discounts are a simplified model of the official scheme
+ * (same plan = same “card”; no 1.5h wall-clock check; no Early Bird / Monthly Pass).
  */
 import { detectMtrLineCode, isLightRailOption } from "./mtrColors.js";
 import { LRT_STOPS, matchLrtStop } from "./lrtStops.js";
@@ -1227,11 +1231,368 @@ function applyLrtMtrFreeInterchange(parts, legs, type) {
 }
 
 /**
+ * Official MTR Octopus interchange discounts (GMB $0.5 network-wide + designated
+ * higher savings). Source: MTR “Interchange discount for Green Minibus / other PT”.
+ *
+ * Modelled: same itinerary has MTR heavy rail + eligible bus/ferry.
+ * Not modelled: 1.5h timer, other rides voiding discount, Early Bird, Monthly Pass,
+ * Fare Saver stack, positive Octopus balance.
+ *
+ * @typedef {{
+ *   cos: string[],
+ *   routes: string[],
+ *   stations: RegExp[] | null,
+ *   adult: number,
+ *   other: number | null,
+ *   student?: number | null,
+ *   adultOnly?: boolean,
+ *   fareBands?: { minAdultFare: number, adult: number }[],
+ * }} MtrIxRule
+ */
+
+/** @type {MtrIxRule[]} */
+const MTR_INTERCHANGE_RULES = [
+  // ── Designated higher discounts (checked before default GMB $0.5) ──
+  {
+    cos: ["gmb"],
+    routes: ["52"],
+    stations: [/ocean\s*park|海洋公園/i],
+    adult: 0.5,
+    other: 0.5,
+    fareBands: [
+      { minAdultFare: 8.1, adult: 1.0 },
+      { minAdultFare: 0, adult: 0.5 },
+    ],
+  },
+  {
+    cos: ["gmb"],
+    routes: ["4M", "5M"],
+    stations: [/wong\s*chuk\s*hang|黃竹坑/i],
+    adult: 0.7,
+    other: 0.5,
+  },
+  {
+    cos: ["gmb"],
+    routes: ["8M"],
+    stations: [/ho\s*man\s*tin|何文田/i],
+    adult: 1.0,
+    other: 0.5,
+  },
+  {
+    cos: ["gmb"],
+    routes: ["78", "78A"],
+    stations: [/kam\s*sheung\s*road|錦上路/i],
+    adult: 2.5,
+    other: 1.5,
+    student: 2.5,
+  },
+  {
+    cos: ["gmb"],
+    routes: ["508"],
+    stations: [/sheung\s*shui|上水/i],
+    adult: 0.6,
+    other: 0.5,
+  },
+  // Citybus — Adult Octopus only
+  {
+    cos: ["ctb"],
+    routes: ["1M"],
+    stations: [/exhibition\s*centre|會展/i],
+    adult: 2.0,
+    other: null,
+    adultOnly: true,
+  },
+  {
+    cos: ["ctb"],
+    routes: ["22", "22M"],
+    stations: [/kai\s*tak|sung\s*wong\s*toi|啟德|宋皇臺/i],
+    adult: 0.6,
+    other: null,
+    adultOnly: true,
+  },
+  {
+    cos: ["ctb"],
+    routes: ["581"],
+    stations: [/ma\s*on\s*shan|wu\s*kai\s*sha|馬鞍山|烏溪沙/i],
+    adult: 0.6,
+    other: null,
+    adultOnly: true,
+  },
+  {
+    cos: ["ctb"],
+    routes: ["56", "56A"],
+    stations: [/sheung\s*shui|上水/i],
+    adult: 1.0,
+    other: null,
+    adultOnly: true,
+  },
+  {
+    cos: ["ctb"],
+    routes: ["792M"],
+    stations: [/tiu\s*keng\s*leng|tseung\s*kwan\s*o|調景嶺|將軍澳/i],
+    adult: 1.0,
+    other: null,
+    student: 0.5,
+    adultOnly: true,
+  },
+  // KMB
+  {
+    cos: ["kmb"],
+    routes: ["19"],
+    stations: [/diamond\s*hill|鑽石山/i],
+    adult: 1.0,
+    other: null,
+    adultOnly: true,
+  },
+  {
+    cos: ["kmb"],
+    routes: ["72K"],
+    stations: [/tai\s*wo|太和/i],
+    adult: 1.0,
+    other: null,
+    adultOnly: true,
+  },
+  // NLB Tung Chung
+  {
+    cos: ["nlb"],
+    routes: ["37", "37P", "37H", "37M", "38", "38X", "N38"],
+    stations: [/tung\s*chung|東涌/i],
+    adult: 1.0,
+    other: null,
+    adultOnly: true,
+  },
+  {
+    cos: ["nlb"],
+    routes: ["37A", "39M", "N37"],
+    stations: [/tung\s*chung|東涌/i],
+    adult: 1.0,
+    other: null,
+    adultOnly: true,
+  },
+  // Kaito — Lei Tung / Aberdeen–Ap Lei Chau
+  {
+    cos: ["hkkf", "fortuneferry", "sunferry"],
+    routes: ["*"],
+    stations: [/lei\s*tung|利東/i],
+    adult: 0.5,
+    other: null,
+    adultOnly: true,
+  },
+  // Default: most GMB routes · $0.5 · any MTR except LRT / AEL
+  {
+    cos: ["gmb"],
+    routes: ["*"],
+    stations: null,
+    adult: 0.5,
+    other: 0.5,
+  },
+];
+
+function isGmbOption(opt) {
+  if (!opt) return false;
+  if (agencyCompanies(opt).includes("gmb")) return true;
+  const blob = `${opt.agency?.id || ""} ${opt.agency?.name || ""} ${opt.route_long_name || ""}`;
+  return /\bgmb\b|green\s*mini|minibus|專線小巴|專線/i.test(blob);
+}
+
+/** Octopus-family tickets that can receive GMB $0.5 (all Octopus per T&C). */
+function octopusSupportsGmbInterchange(type) {
+  return (
+    type === "octopus_adult" ||
+    type === "octopus_child" ||
+    type === "octopus_student" ||
+    type === "octopus_joyyou_65" ||
+    type === "octopus_joyyou_60" ||
+    type === "qr_adult" ||
+    type === "qr_child" ||
+    type === "contactless" ||
+    type === "china_tunion"
+  );
+}
+
+function isAdultOctopusFamily(type) {
+  return (
+    type === "octopus_adult" ||
+    type === "qr_adult" ||
+    type === "contactless" ||
+    type === "china_tunion"
+  );
+}
+
+function isStudentOctopus(type) {
+  return type === "octopus_student";
+}
+
+/**
+ * Domestic heavy-rail MTR station names touched by the plan (board + alight).
+ * Excludes AEL / LRT stops.
+ * @param {object[]} legs
+ * @returns {string[]}
+ */
+function domesticMtrStationNames(legs) {
+  /** @type {string[]} */
+  const names = [];
+  for (const leg of legs || []) {
+    if (leg.type !== "transit") continue;
+    const opt = leg.route_options?.[0];
+    if (!opt) continue;
+    if (!isMtrTransitOption(opt) || isAel(opt) || isLrt(opt)) continue;
+    for (const n of [opt.from?.stop_name, opt.to?.stop_name]) {
+      if (n && String(n).trim()) names.push(String(n));
+    }
+  }
+  return names;
+}
+
+/**
+ * @param {string[]} stationNames
+ * @param {RegExp[] | null} patterns
+ */
+function mtrStationsMatch(stationNames, patterns) {
+  if (!patterns) return true; // any domestic MTR
+  const blob = stationNames.join(" · ");
+  return patterns.some((re) => re.test(blob));
+}
+
+/**
+ * @param {string} route
+ * @param {string[]} cos
+ * @param {MtrIxRule} rule
+ */
+function routeMatchesIxRule(route, cos, rule) {
+  const r = String(route || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+  const coOk = cos.some((c) => rule.cos.includes(c));
+  if (!coOk) return false;
+  if (rule.routes.includes("*")) return true;
+  if (!r) return false;
+  return rule.routes.some(
+    (rr) => rr.toUpperCase().replace(/\s+/g, "") === r,
+  );
+}
+
+/**
+ * Discount HKD for this ticket type under a rule (null = not eligible).
+ * @param {MtrIxRule} rule
+ * @param {FareType} type
+ * @param {number | null} adultFareHint
+ */
+function discountForIxRule(rule, type, adultFareHint) {
+  // Student-specific rate (e.g. Kam Sheung 78 / 792M)
+  if (isStudentOctopus(type) && rule.student != null) {
+    return rule.student;
+  }
+  if (isAdultOctopusFamily(type)) {
+    if (rule.fareBands?.length && adultFareHint != null) {
+      const bands = [...rule.fareBands].sort(
+        (a, b) => b.minAdultFare - a.minAdultFare,
+      );
+      for (const b of bands) {
+        if (adultFareHint >= b.minAdultFare) return b.adult;
+      }
+    }
+    return rule.adult;
+  }
+  // Adult-only franchised / kaito offers
+  if (rule.adultOnly) return null;
+  // Other Octopus (child / JoyYou / etc.) — GMB network $0.5 and GMB “other”
+  if (rule.other == null) return null;
+  if (!octopusSupportsGmbInterchange(type)) return null;
+  return rule.other;
+}
+
+/**
+ * Apply MTR↔GMB / designated PT Octopus interchange discounts to bus/ferry parts.
+ * Skipped when AEL free MTR connection already zeroed all MTR fares (T&C).
+ *
+ * @param {FarePart[]} parts
+ * @param {object[]} legs
+ * @param {FareType} type
+ */
+function applyMtrInterchangeDiscounts(parts, legs, type) {
+  if (!octopusSupportsGmbInterchange(type) && !isAdultOctopusFamily(type)) {
+    return;
+  }
+  const mtrStations = domesticMtrStationNames(legs);
+  if (!mtrStations.length) return;
+
+  // T&C: not eligible right after AEL free MTR connection
+  const mtrParts = parts.filter((p) => p.kind === "mtr");
+  const aelParts = parts.filter((p) => p.kind === "ael");
+  if (
+    aelParts.length &&
+    mtrParts.length &&
+    mtrParts.every((p) => p.amount === 0)
+  ) {
+    return;
+  }
+
+  // Need a paid domestic MTR component (or at least MTR present if incomplete)
+  const hasPaidOrUnknownMtr = mtrParts.some(
+    (p) => p.amount == null || p.amount > 0,
+  );
+  if (!hasPaidOrUnknownMtr && mtrParts.length) return;
+  if (!mtrParts.length) return;
+
+  for (const p of parts) {
+    if (p.amount == null || p.amount <= 0) continue;
+    if (p.kind !== "bus" && p.kind !== "gmb" && p.kind !== "ferry") continue;
+    if (p._mtr_ix_applied) continue;
+
+    const route = String(p.route || "")
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, "");
+    const cos = Array.isArray(p.companies) && p.companies.length
+      ? p.companies
+      : p.kind === "gmb"
+        ? ["gmb"]
+        : p.kind === "ferry"
+          ? ["hkkf", "fortuneferry", "sunferry"]
+          : [];
+    if (!route && p.kind !== "ferry") continue;
+
+    let best = 0;
+    /** @type {MtrIxRule | null} */
+    let bestRule = null;
+    for (const rule of MTR_INTERCHANGE_RULES) {
+      if (!routeMatchesIxRule(route || "*", cos, rule)) continue;
+      if (!mtrStationsMatch(mtrStations, rule.stations)) continue;
+      // Adult fare hint for GMB 52 bands: use pre-discount amount
+      const adultHint =
+        p.adult_amount != null ? Number(p.adult_amount) : Number(p.amount);
+      const d = discountForIxRule(rule, type, adultHint);
+      if (d == null || d <= 0) continue;
+      if (d > best) {
+        best = d;
+        bestRule = rule;
+      }
+    }
+    if (best <= 0 || !bestRule) continue;
+
+    // Cap: discount ≤ fare of this leg (and not higher than remaining amount)
+    const before = Number(p.amount);
+    const save = Math.min(best, before);
+    if (save <= 0) continue;
+    if (p.adult_amount == null) p.adult_amount = before;
+    p.amount = Math.round((before - save) * 10) / 10;
+    p._mtr_ix_applied = true;
+    p.mtr_ix_discount = save;
+    if (!/MTR\s*ix|interchange\s*−|−\$/i.test(p.label)) {
+      p.label = `${p.label} · −$${save.toFixed(1)} MTR ix`;
+    }
+  }
+}
+
+/**
  * Estimate fare for a planned journey using the active (or given) ticket type.
  * Continuous MTR heavy-rail legs share one OD fare (network pricing).
  * Continuous LRT legs share one OD fare. AEL / bus / ferry are separate legs.
  * LRT is free when interchanging with MTR at Tuen Mun / Siu Hong /
  * Tin Shui Wai / Yuen Long (Octopus free-interchange scheme).
+ * GMB (and designated CTB/KMB/NLB/ferry) get MTR Octopus interchange discounts.
  *
  * JoyYou Card: priced from adult Octopus via {@link joyYouPayableFromAdult}
  * (≤$10 → $2; &gt;$10 → 20% rounded to 10¢), applied per leg after free legs.
@@ -1396,29 +1757,39 @@ export function estimatePlanFare(plan, fareType = activeFareType) {
       continue;
     }
 
-    // ── Bus / MTR Bus / Ferry ──
+    // ── Bus / GMB / MTR Bus / Ferry ──
     if (isBusTransitOption(opt) || isFerryOption(opt)) {
       const code = String(opt.route_short_name || opt.route_name || "")
         .trim()
-        .toUpperCase();
+        .toUpperCase()
+        .replace(/\s+/g, "");
       const amount = busOrFerryFare(opt, lookupType);
+      const cos = agencyCompanies(opt);
+      const gmb = isGmbOption(opt) || cos.includes("gmb");
       const kind = isFerryOption(opt)
         ? "ferry"
         : isMtrBusRoute(code)
           ? "mtr_bus"
-          : "bus";
+          : gmb
+            ? "gmb"
+            : "bus";
       const labelPrefix =
-        kind === "ferry" ? "Ferry" : kind === "mtr_bus" ? "MTR Bus" : "Bus";
+        kind === "ferry"
+          ? "Ferry"
+          : kind === "mtr_bus"
+            ? "MTR Bus"
+            : kind === "gmb"
+              ? "GMB"
+              : "Bus";
       parts.push({
         kind,
         label: `${labelPrefix} ${code || opt.route_name || ""}`.trim(),
         amount,
+        route: code,
+        companies: cos.length ? cos : gmb ? ["gmb"] : [],
       });
       // Bus fares are full-journey estimates (not section OD) — mark soft incomplete
       if (amount == null) incomplete = true;
-      else if (kind === "bus" || kind === "ferry") {
-        // still show total; note is soft via incomplete only when unknown
-      }
       i += 1;
       continue;
     }
@@ -1455,10 +1826,14 @@ export function estimatePlanFare(plan, fareType = activeFareType) {
   // Free domestic MTR when also riding Airport Express (same card privilege)
   applyAelFreeMtrConnection(parts, legs, type);
 
+  // MTR↔GMB $0.5+ / designated CTB·KMB·NLB·ferry Octopus interchange discounts
+  // (after free AEL so those journeys are excluded per T&C)
+  applyMtrInterchangeDiscounts(parts, legs, type);
+
   // EAL First Class premium (after free connection so premium still applies)
   applyEalFirstClassPremium(parts, legs, type, ealFirstClassOn);
 
-  // JoyYou 60–64: per-leg formula on adult fares (after free legs / $0)
+  // JoyYou 60–64: per-leg formula on adult fares (after free legs / discounts)
   // Does not re-discount AEL (already adult) or free $0 legs
   if (type === "octopus_joyyou_60") {
     applyJoyYouToParts(parts);
