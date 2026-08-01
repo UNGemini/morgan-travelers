@@ -75,8 +75,13 @@ import {
   getEalFirstClass,
   getFarePack,
 } from "./fares.js";
-import { searchMtrStationsLocal, snapToMtrStation, mergeStationDirectory } from "./mtrStations.js";
-import { matchLrtStop, lrtStopToHit } from "./lrtStops.js";
+import {
+  searchMtrStationsLocal,
+  snapToMtrStation,
+  mergeStationDirectory,
+  MTR_STATIONS,
+} from "./mtrStations.js";
+import { LRT_STOPS, matchLrtStop, lrtStopToHit } from "./lrtStops.js";
 import {
   loadMtrGeo,
   addMtrLayers,
@@ -191,19 +196,37 @@ const els = {
   tripDetailTimeline: document.getElementById("trip-detail-timeline"),
   inputEtaRoute: document.getElementById("input-eta-route"),
   etaRouteSuggest: document.getElementById("eta-route-suggest"),
+  etaRouteDropdown: document.getElementById("eta-route-dropdown"),
+  etaRouteHint: document.getElementById("eta-route-hint"),
   toolbarEtaSearch: document.getElementById("toolbar-eta-search"),
   modeButtons: () =>
     Array.from(document.querySelectorAll(".toolbar-mode-btn[data-ui-mode]")),
 };
 
 /**
- * @typedef {{ id: string, label: string, kind: "mtr"|"lrt"|"bus"|"mtr_bus", co?: string }} EtaRouteEntry
+ * @typedef {{
+ *   id: string,
+ *   label: string,
+ *   kind: "mtr"|"lrt"|"bus"|"mtr_bus",
+ *   co?: string,
+ *   aliases?: string[],
+ *   nearbyHint?: string,
+ * }} EtaRouteEntry
  */
 /** @type {EtaRouteEntry[]} */
 let etaRouteCatalog = [];
 /** @type {EtaRouteEntry[]} */
 let etaRouteHits = [];
 let etaRouteActive = -1;
+/** ETA-only traffic filter (not trip-plan prefs). */
+/** @type {"all"|"mtr"|"lrt"|"bus"} */
+let etaTrafficMode = "all";
+/** @type {{ lat: number, lon: number, at: number } | null} */
+let etaUserGeo = null;
+/** @type {Promise<{ lat: number, lon: number } | null> | null} */
+let etaGeoPromise = null;
+/** @type {Map<string, string[]> | null} station name_en lower → line codes */
+let mtrStationLinesMap = null;
 
 /** Sidebar stack: "search" | "trip" */
 let sidebarPage = "search";
@@ -4461,21 +4484,25 @@ function setUiMode(mode) {
   if (next !== "eta") hideEtaRouteSuggest();
   // Do NOT re-measure dock width on mode switch — mid slot is fixed size;
   // re-measuring while locked was shrinking the sidebar each toggle.
+  if (next === "eta") {
+    // Warm nearby/browse data
+    void ensureMtrStationLinesMap();
+  }
 }
 
 // ── ETA mode: bus / MTR / LRT route search ──────────────────────────────────
 
 const MTR_ETA_LINES = [
-  { id: "AEL", label: "Airport Express" },
-  { id: "TCL", label: "Tung Chung Line" },
-  { id: "TWL", label: "Tsuen Wan Line" },
-  { id: "ISL", label: "Island Line" },
-  { id: "KTL", label: "Kwun Tong Line" },
-  { id: "TKL", label: "Tseung Kwan O Line" },
-  { id: "EAL", label: "East Rail Line" },
-  { id: "TML", label: "Tuen Ma Line" },
-  { id: "SIL", label: "South Island Line" },
-  { id: "DRL", label: "Disneyland Resort Line" },
+  { id: "AEL", label: "Airport Express", aliases: ["機場快線", "機場快綫", "ael"] },
+  { id: "TCL", label: "Tung Chung Line", aliases: ["東涌綫", "東涌線", "tung chung"] },
+  { id: "TWL", label: "Tsuen Wan Line", aliases: ["荃灣綫", "荃灣線", "tsuen wan"] },
+  { id: "ISL", label: "Island Line", aliases: ["港島綫", "港島線", "island"] },
+  { id: "KTL", label: "Kwun Tong Line", aliases: ["觀塘綫", "觀塘線", "kwun tong"] },
+  { id: "TKL", label: "Tseung Kwan O Line", aliases: ["將軍澳綫", "將軍澳線", "tseung kwan o", "tko"] },
+  { id: "EAL", label: "East Rail Line", aliases: ["東鐵綫", "東鐵線", "east rail"] },
+  { id: "TML", label: "Tuen Ma Line", aliases: ["屯馬綫", "屯馬線", "tuen ma"] },
+  { id: "SIL", label: "South Island Line", aliases: ["南港島綫", "南港島線", "south island"] },
+  { id: "DRL", label: "Disneyland Resort Line", aliases: ["迪士尼綫", "迪士尼線", "disneyland"] },
 ];
 
 const LRT_ETA_ROUTES = [
@@ -4493,6 +4520,40 @@ const LRT_ETA_ROUTES = [
   "761P",
 ];
 
+function haversineMEta(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toR = (d) => (d * Math.PI) / 180;
+  const dLat = toR(lat2 - lat1);
+  const dLon = toR(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toR(lat1)) * Math.cos(toR(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/** Load station→lines map from public/mtr/stations.geojson (once). */
+async function ensureMtrStationLinesMap() {
+  if (mtrStationLinesMap) return mtrStationLinesMap;
+  mtrStationLinesMap = new Map();
+  try {
+    const base =
+      (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) || "/";
+    const url = new URL(`${base}mtr/stations.geojson`, window.location.href);
+    const res = await fetch(url.href);
+    if (!res.ok) return mtrStationLinesMap;
+    const gj = await res.json();
+    for (const f of gj.features || []) {
+      const p = f.properties || {};
+      const name = String(p.name_en || "").toLowerCase();
+      const lines = Array.isArray(p.lines) ? p.lines.map(String) : [];
+      if (name && lines.length) mtrStationLinesMap.set(name, lines);
+    }
+  } catch (e) {
+    console.warn("[eta] station lines", e);
+  }
+  return mtrStationLinesMap;
+}
+
 function buildEtaRouteCatalog() {
   /** @type {Map<string, EtaRouteEntry>} */
   const map = new Map();
@@ -4502,24 +4563,31 @@ function buildEtaRouteCatalog() {
   };
 
   for (const line of MTR_ETA_LINES) {
-    add({ id: line.id, label: line.label, kind: "mtr" });
+    add({
+      id: line.id,
+      label: line.label,
+      kind: "mtr",
+      aliases: line.aliases || [],
+    });
   }
   for (const id of LRT_ETA_ROUTES) {
     add({ id, label: `Light Rail ${id}`, kind: "lrt" });
   }
 
   const pack = getFarePack();
-  // MTR Bus (K-routes)
   const mtrBus =
     pack?.mtrBus?.byType?.octopus_adult ||
     (pack?.mtrBus && !pack.mtrBus.byType ? pack.mtrBus : null);
   if (mtrBus && typeof mtrBus === "object") {
     for (const id of Object.keys(mtrBus)) {
       if (id === "byType" || id === "byId" || id === "byName") continue;
-      add({ id: String(id).toUpperCase(), label: `MTR Bus ${id}`, kind: "mtr_bus" });
+      add({
+        id: String(id).toUpperCase(),
+        label: `MTR Bus ${id}`,
+        kind: "mtr_bus",
+      });
     }
   }
-  // Franchised / GMB from fare pack
   const byCo = pack?.bus?.byCoRoute || {};
   for (const key of Object.keys(byCo)) {
     const [co, route] = key.split("|");
@@ -4552,12 +4620,169 @@ function buildEtaRouteCatalog() {
   console.info("[eta] route catalog", etaRouteCatalog.length);
 }
 
+/** @param {EtaRouteEntry} r */
+function etaKindMatchesFilter(r) {
+  if (etaTrafficMode === "all") return true;
+  if (etaTrafficMode === "mtr") return r.kind === "mtr";
+  if (etaTrafficMode === "lrt") return r.kind === "lrt";
+  if (etaTrafficMode === "bus") return r.kind === "bus" || r.kind === "mtr_bus";
+  return true;
+}
+
 /**
+ * Soft geo for ETA browse (cached, low urgency).
+ * @returns {Promise<{ lat: number, lon: number } | null>}
+ */
+function ensureEtaUserGeo() {
+  if (etaUserGeo && Date.now() - etaUserGeo.at < 120_000) {
+    return Promise.resolve({ lat: etaUserGeo.lat, lon: etaUserGeo.lon });
+  }
+  if (etaGeoPromise) return etaGeoPromise;
+  etaGeoPromise = getCurrentPosition({
+    enableHighAccuracy: false,
+    timeout: 6000,
+    maximumAge: 120_000,
+  })
+    .then((pos) => {
+      etaUserGeo = { lat: pos.lat, lon: pos.lon, at: Date.now() };
+      return { lat: pos.lat, lon: pos.lon };
+    })
+    .catch(() => null)
+    .finally(() => {
+      etaGeoPromise = null;
+    });
+  return etaGeoPromise;
+}
+
+/**
+ * Empty query browse list.
+ * With location: nearby MTR lines + LRT (if near NT West) + bus from “1…”.
+ * Without: LRT + bus starting at route 1 (numeric).
+ * @param {number} [limit]
+ * @returns {Promise<{ hits: EtaRouteEntry[], hint: string }>}
+ */
+async function browseEtaRoutes(limit = 16) {
+  if (!etaRouteCatalog.length) buildEtaRouteCatalog();
+  await ensureMtrStationLinesMap();
+  const geo = await ensureEtaUserGeo();
+  const filtered = etaRouteCatalog.filter(etaKindMatchesFilter);
+
+  if (!geo) {
+    // LRT + Bus from “1” upward (no MTR dump when location off, unless filter=MTR)
+    let pool = filtered;
+    if (etaTrafficMode === "all") {
+      pool = filtered.filter((r) => r.kind !== "mtr");
+    }
+    const hits = [...pool]
+      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+      .slice(0, limit);
+    return {
+      hits,
+      hint:
+        etaTrafficMode === "mtr"
+          ? "MTR lines · allow location for nearby stations"
+          : "LRT / Bus from route 1 · allow location for nearby MTR",
+    };
+  }
+
+  // ── Nearby MTR lines via nearest stations ──
+  /** @type {Map<string, { dist: number, station: string }>} */
+  const lineNear = new Map();
+  for (const st of MTR_STATIONS) {
+    if (!Number.isFinite(st.lat) || !Number.isFinite(st.lon)) continue;
+    const d = haversineMEta(geo.lat, geo.lon, st.lat, st.lon);
+    if (d > 2500) continue;
+    const lines =
+      mtrStationLinesMap?.get(String(st.name_en || "").toLowerCase()) || [];
+    for (const code of lines) {
+      const c = String(code).toUpperCase();
+      const prev = lineNear.get(c);
+      if (!prev || d < prev.dist) {
+        lineNear.set(c, { dist: d, station: st.name_en });
+      }
+    }
+  }
+
+  /** @type {EtaRouteEntry[]} */
+  const out = [];
+  const seen = new Set();
+  const push = (r, hint) => {
+    if (!r || !etaKindMatchesFilter(r)) return;
+    const k = `${r.kind}|${r.id}|${r.co || ""}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ ...r, nearbyHint: hint || r.nearbyHint });
+  };
+
+  if (etaTrafficMode === "all" || etaTrafficMode === "mtr") {
+    const ranked = [...lineNear.entries()].sort((a, b) => a[1].dist - b[1].dist);
+    for (const [code, info] of ranked) {
+      const entry = filtered.find((r) => r.kind === "mtr" && r.id === code);
+      if (entry) {
+        push(
+          entry,
+          `~${Math.round(info.dist)} m · ${info.station}`,
+        );
+      }
+      if (out.length >= limit) break;
+    }
+    // Fallback: all MTR lines if none nearby
+    if (etaTrafficMode === "mtr" && !out.length) {
+      for (const r of filtered.filter((x) => x.kind === "mtr")) {
+        push(r);
+        if (out.length >= limit) break;
+      }
+    }
+  }
+
+  // LRT if near any LRT stop (NT West)
+  let nearLrt = false;
+  if (etaTrafficMode === "all" || etaTrafficMode === "lrt") {
+    for (const st of LRT_STOPS) {
+      if (!Number.isFinite(st.lat)) continue;
+      if (haversineMEta(geo.lat, geo.lon, st.lat, st.lon) <= 4000) {
+        nearLrt = true;
+        break;
+      }
+    }
+    if (nearLrt || etaTrafficMode === "lrt") {
+      for (const r of filtered.filter((x) => x.kind === "lrt")) {
+        push(r, nearLrt ? "Near Light Rail" : undefined);
+        if (out.length >= limit) break;
+      }
+    }
+  }
+
+  // Bus / MTR Bus — list from “1” (no stop-level geo in catalog)
+  if (etaTrafficMode === "all" || etaTrafficMode === "bus") {
+    const buses = filtered
+      .filter((r) => r.kind === "bus" || r.kind === "mtr_bus")
+      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+    for (const r of buses) {
+      push(r);
+      if (out.length >= limit) break;
+    }
+  }
+
+  const stName = [...lineNear.values()].sort((a, b) => a.dist - b.dist)[0]
+    ?.station;
+  return {
+    hits: out.slice(0, limit),
+    hint: stName
+      ? `Near ${stName}` + (nearLrt ? " · LRT area" : "")
+      : nearLrt
+        ? "Near Light Rail · bus from route 1"
+        : "Nearby · bus from route 1",
+  };
+}
+
+/**
+ * Typed search: Bus/LRT match id contains query; MTR matches id or line name.
  * @param {string} query
  * @param {number} [limit]
  * @returns {EtaRouteEntry[]}
  */
-function searchEtaRoutes(query, limit = 12) {
+function searchEtaRoutes(query, limit = 16) {
   const q = String(query || "")
     .trim()
     .toLowerCase()
@@ -4567,55 +4792,88 @@ function searchEtaRoutes(query, limit = 12) {
 
   const scored = [];
   for (const r of etaRouteCatalog) {
+    if (!etaKindMatchesFilter(r)) continue;
     const id = r.id.toLowerCase();
     const label = r.label.toLowerCase();
+    const aliases = (r.aliases || []).map((a) => String(a).toLowerCase());
     let score = 0;
-    if (id === q) score = 1000;
-    else if (id.startsWith(q)) score = 800 - id.length;
-    else if (id.includes(q)) score = 400;
-    else if (label.includes(q)) score = 200;
-    else continue;
-    // Prefer rail slightly when query looks like a line code
-    if (r.kind === "mtr" && /^[a-z]{2,3}$/.test(q)) score += 50;
-    if (r.kind === "lrt" && /^\d/.test(q)) score += 30;
+
+    if (r.kind === "mtr") {
+      // MTR: route id AND line name / aliases
+      if (id === q) score = 1000;
+      else if (id.startsWith(q)) score = 900;
+      else if (id.includes(q)) score = 700;
+      else if (label === q) score = 950;
+      else if (label.startsWith(q)) score = 850;
+      else if (label.includes(q)) score = 600;
+      else if (aliases.some((a) => a === q)) score = 920;
+      else if (aliases.some((a) => a.startsWith(q))) score = 820;
+      else if (aliases.some((a) => a.includes(q))) score = 550;
+      else continue;
+      if (/^[a-z]{2,4}$/.test(q)) score += 40;
+    } else {
+      // Bus / LRT / MTR Bus: id contains numbers/letters of query
+      if (id === q) score = 1000;
+      else if (id.startsWith(q)) score = 850 - Math.min(id.length, 40);
+      else if (id.includes(q)) score = 500;
+      else if (label.includes(q)) score = 250;
+      else continue;
+      if (r.kind === "lrt" && /^\d/.test(q)) score += 30;
+    }
     scored.push({ r, score });
   }
-  scored.sort((a, b) => b.score - a.score || a.r.id.localeCompare(b.r.id));
+  scored.sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.r.id.localeCompare(b.r.id, undefined, { numeric: true }),
+  );
   return scored.slice(0, limit).map((s) => s.r);
 }
 
 function hideEtaRouteSuggest() {
-  if (els.etaRouteSuggest) {
-    els.etaRouteSuggest.hidden = true;
-    els.etaRouteSuggest.innerHTML = "";
+  if (els.etaRouteDropdown) {
+    els.etaRouteDropdown.hidden = true;
+  }
+  if (els.etaRouteSuggest) els.etaRouteSuggest.innerHTML = "";
+  if (els.etaRouteHint) {
+    els.etaRouteHint.hidden = true;
+    els.etaRouteHint.textContent = "";
   }
   etaRouteHits = [];
   etaRouteActive = -1;
 }
 
+function showEtaRouteDropdown() {
+  if (els.etaRouteDropdown) els.etaRouteDropdown.hidden = false;
+}
+
 /**
  * @param {EtaRouteEntry[]} hits
+ * @param {string} [hint]
  */
-function renderEtaRouteSuggest(hits) {
+function renderEtaRouteSuggest(hits, hint = "") {
   const list = els.etaRouteSuggest;
   if (!list) return;
+  showEtaRouteDropdown();
+  if (els.etaRouteHint) {
+    if (hint) {
+      els.etaRouteHint.hidden = false;
+      els.etaRouteHint.textContent = hint;
+    } else {
+      els.etaRouteHint.hidden = true;
+      els.etaRouteHint.textContent = "";
+    }
+  }
   etaRouteHits = hits;
   etaRouteActive = hits.length ? 0 : -1;
   if (!hits.length) {
     list.innerHTML = `<li class="eta-route-empty" role="presentation">No matching routes</li>`;
-    list.hidden = false;
     return;
   }
   list.innerHTML = hits
     .map((r, i) => {
       const badge =
-        r.kind === "mtr"
-          ? "mtr"
-          : r.kind === "lrt"
-            ? "lrt"
-            : r.kind === "mtr_bus"
-              ? "bus"
-              : "bus";
+        r.kind === "mtr" ? "mtr" : r.kind === "lrt" ? "lrt" : "bus";
       const badgeLabel =
         r.kind === "mtr"
           ? "MTR"
@@ -4624,14 +4882,16 @@ function renderEtaRouteSuggest(hits) {
             : r.kind === "mtr_bus"
               ? "MTR Bus"
               : "Bus";
+      const meta = r.nearbyHint
+        ? `${r.label} · ${r.nearbyHint}`
+        : r.label;
       return `<li role="option" data-idx="${i}" class="${i === 0 ? "is-active" : ""}" aria-selected="${i === 0}">
         <span class="eta-route-id">${escapeHtml(r.id)}</span>
-        <span class="eta-route-meta">${escapeHtml(r.label)}</span>
+        <span class="eta-route-meta">${escapeHtml(meta)}</span>
         <span class="eta-route-badge eta-route-badge-${badge}">${badgeLabel}</span>
       </li>`;
     })
     .join("");
-  list.hidden = false;
   list.querySelectorAll("li[data-idx]").forEach((li) => {
     li.addEventListener("mousedown", (e) => e.preventDefault());
     li.addEventListener("click", () => {
@@ -4639,6 +4899,21 @@ function renderEtaRouteSuggest(hits) {
       selectEtaRoute(etaRouteHits[idx]);
     });
   });
+}
+
+/** Refresh list from current input + filter (async for empty browse). */
+async function refreshEtaRouteSuggest() {
+  if (getUiMode() !== "eta") return;
+  const q = String(els.inputEtaRoute?.value || "").trim();
+  if (q.length >= 1) {
+    renderEtaRouteSuggest(searchEtaRoutes(q));
+    return;
+  }
+  renderEtaRouteSuggest([], "Loading…");
+  const { hits, hint } = await browseEtaRoutes();
+  // Still empty query?
+  if (String(els.inputEtaRoute?.value || "").trim().length >= 1) return;
+  renderEtaRouteSuggest(hits, hint);
 }
 
 /**
@@ -4657,7 +4932,6 @@ function selectEtaRoute(route) {
           ? "MTR Bus"
           : "Bus";
   showToast(`${kindLabel} ${route.id} · ${route.label}`, 2800);
-  // Show selection in the expanded detail panel
   setDetailOpen(true);
   setSidebarPage("search");
   if (els.planResults) {
@@ -4670,32 +4944,47 @@ function selectEtaRoute(route) {
           <span class="plan-fare">${escapeHtml(kindLabel)}</span>
         </div>
         <p class="hint" style="margin:8px 0 0;text-transform:none;letter-spacing:0">
-          ${escapeHtml(route.label)}. Set an origin pin for live departures / ETA (coming next).
+          ${escapeHtml(route.label)}${route.nearbyHint ? ` · ${escapeHtml(route.nearbyHint)}` : ""}.
+          Live stop ETA for this route is next.
         </p>
       </article>`;
   }
+}
+
+function syncEtaModeChips() {
+  document.querySelectorAll(".eta-mode-chip[data-eta-mode]").forEach((btn) => {
+    const on = btn.getAttribute("data-eta-mode") === etaTrafficMode;
+    btn.classList.toggle("is-active", on);
+  });
 }
 
 function initEtaRouteSearchUi() {
   const input = els.inputEtaRoute;
   if (!input) return;
 
+  document.querySelectorAll(".eta-mode-chip[data-eta-mode]").forEach((btn) => {
+    btn.addEventListener("mousedown", (e) => e.preventDefault());
+    btn.addEventListener("click", () => {
+      const mode = btn.getAttribute("data-eta-mode") || "all";
+      etaTrafficMode =
+        mode === "mtr" || mode === "lrt" || mode === "bus" ? mode : "all";
+      syncEtaModeChips();
+      void refreshEtaRouteSuggest();
+    });
+  });
+  syncEtaModeChips();
+
   let timer = 0;
   input.addEventListener("input", () => {
     clearTimeout(timer);
-    const q = input.value;
     timer = window.setTimeout(() => {
       if (getUiMode() !== "eta") return;
-      if (q.trim().length < 1) {
-        hideEtaRouteSuggest();
-        return;
-      }
-      renderEtaRouteSuggest(searchEtaRoutes(q));
+      void refreshEtaRouteSuggest();
     }, 120);
   });
 
   input.addEventListener("keydown", (e) => {
-    if (els.etaRouteSuggest?.hidden) {
+    if (els.etaRouteDropdown?.hidden) {
       if (e.key === "Escape") input.blur();
       return;
     }
@@ -4716,15 +5005,20 @@ function initEtaRouteSearchUi() {
   });
 
   input.addEventListener("blur", () => {
-    // Delay so click on suggestion still fires
-    setTimeout(() => hideEtaRouteSuggest(), 150);
+    setTimeout(() => {
+      // Keep open if focus moved to filter chips inside dropdown
+      const ae = document.activeElement;
+      if (ae && els.etaRouteDropdown?.contains(ae)) return;
+      hideEtaRouteSuggest();
+    }, 160);
   });
 
   input.addEventListener("focus", () => {
-    if (input.value.trim().length >= 1) {
-      renderEtaRouteSuggest(searchEtaRoutes(input.value));
-    }
+    void refreshEtaRouteSuggest();
   });
+
+  // Warm catalog + station lines
+  void ensureMtrStationLinesMap();
 }
 
 function syncEtaActive() {

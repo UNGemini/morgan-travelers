@@ -630,26 +630,85 @@ body.mobile-ui [data-acrylic]::before {
   color: var(--text-muted);
 }
 
-.eta-route-suggest {
+/* ETA dropdown: mode filter (ETA-only, not trip plan) + route list */
+.eta-route-dropdown {
   position: absolute;
   left: 0;
   right: 0;
   bottom: calc(100% + 6px);
   z-index: 8;
-  margin: 0;
-  padding: 4px;
-  list-style: none;
-  max-height: min(240px, 40vh);
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  max-height: min(320px, 48vh);
   border-radius: 16px;
   background: rgba(18, 18, 22, 0.96);
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
-  -webkit-overflow-scrolling: touch;
+  overflow: hidden;
 }
 
-.eta-route-suggest[hidden] {
+.eta-route-dropdown[hidden] {
   display: none !important;
+}
+
+.eta-mode-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 8px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.eta-mode-chip {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.eta-mode-chip:hover {
+  border-color: rgba(192, 174, 252, 0.35);
+  color: var(--text-primary);
+}
+
+.eta-mode-chip.is-active {
+  background: rgba(192, 174, 252, 0.2);
+  border-color: rgba(192, 174, 252, 0.45);
+  color: #f0eaff;
+}
+
+.eta-route-hint {
+  margin: 0;
+  padding: 4px 12px 2px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.eta-route-hint[hidden] {
+  display: none !important;
+}
+
+.eta-route-suggest {
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
 }
 
 .eta-route-suggest li {
@@ -666,6 +725,17 @@ body.mobile-ui [data-acrylic]::before {
 .eta-route-suggest li:hover,
 .eta-route-suggest li.is-active {
   background: rgba(192, 174, 252, 0.14);
+}
+
+.eta-route-suggest .eta-route-empty {
+  cursor: default;
+  color: var(--text-muted);
+  justify-content: center;
+  font-weight: 500;
+}
+
+.eta-route-suggest .eta-route-empty:hover {
+  background: transparent;
 }
 
 .eta-route-suggest .eta-route-id {
@@ -706,6 +776,11 @@ body.mobile-ui [data-acrylic]::before {
 .eta-route-suggest .eta-route-badge-lrt {
   color: #e8c547;
   border-color: rgba(211, 168, 9, 0.45);
+}
+
+.eta-route-suggest .eta-route-badge-bus {
+  color: #9ad4a0;
+  border-color: rgba(100, 180, 120, 0.4);
 }
 
 .eta-route-suggest .eta-route-badge-bus {

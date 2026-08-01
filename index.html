@@ -971,18 +971,34 @@
                 enterkeyhint="search"
                 autocomplete="off"
                 spellcheck="false"
-                placeholder="Bus / MTR / LRT route"
+                placeholder="Route no. or MTR line"
                 aria-label="Search bus, MTR or LRT route"
                 aria-autocomplete="list"
                 aria-controls="eta-route-suggest"
               />
-              <ul
-                id="eta-route-suggest"
-                class="eta-route-suggest"
+              <div
+                id="eta-route-dropdown"
+                class="eta-route-dropdown"
                 hidden
-                role="listbox"
-                aria-label="Route suggestions"
-              ></ul>
+              >
+                <div
+                  class="eta-mode-filter"
+                  role="group"
+                  aria-label="Traffic method"
+                >
+                  <button type="button" class="eta-mode-chip is-active" data-eta-mode="all">All</button>
+                  <button type="button" class="eta-mode-chip" data-eta-mode="mtr">MTR</button>
+                  <button type="button" class="eta-mode-chip" data-eta-mode="lrt">LRT</button>
+                  <button type="button" class="eta-mode-chip" data-eta-mode="bus">Bus</button>
+                </div>
+                <p id="eta-route-hint" class="eta-route-hint" hidden></p>
+                <ul
+                  id="eta-route-suggest"
+                  class="eta-route-suggest"
+                  role="listbox"
+                  aria-label="Route suggestions"
+                ></ul>
+              </div>
             </div>
             <button
               type="button"
