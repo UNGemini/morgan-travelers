@@ -633,13 +633,18 @@ body.mobile-ui [data-acrylic]::before {
 
 /* ETA sidebar panel (visible when data-ui-mode=eta) — Wheels-inspired cards */
 .eta-sidebar-panel {
+  /* Tab row (~48) + chrome padding (~20) + safe area */
+  --eta-toolbar-h: calc(68px + env(safe-area-inset-bottom, 0px));
+  --eta-list-fade-h: calc(var(--eta-toolbar-h) + 12px);
+
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 10px;
   min-height: 0;
   flex: 1 1 auto;
   height: 100%;
-  padding-bottom: 4px;
+  padding-bottom: 0;
 }
 
 .eta-sidebar-panel[hidden] {
@@ -664,6 +669,20 @@ body.mobile-ui [data-acrylic]::before {
   margin: 0;
   border-top: none;
   background: transparent;
+}
+
+/* Search page: float chrome over the list so cards fade behind it */
+.eta-sidebar-panel > .eta-sidebar-bottom-chrome {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  pointer-events: none; /* let list scroll; buttons re-enable below */
+}
+
+.eta-sidebar-panel > .eta-sidebar-bottom-chrome > * {
+  pointer-events: auto;
 }
 
 /* Shared liquid-glass surface */
@@ -1241,19 +1260,22 @@ body.mobile-ui [data-acrylic]::before {
   display: none !important;
 }
 
-/* Scrollable route cards — fill remaining sidebar height */
+/* Scrollable route cards — fill panel (including under floating toolbar) */
 .eta-route-list-wrap {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  /* Fill under absolute chrome */
+  margin-bottom: 0;
 }
 
 .eta-route-list-sidebar {
   list-style: none;
   margin: 0;
-  padding: 4px 8px 48px;
+  /* Extra scroll room so last card clears the solid→fade zone above toolbar */
+  padding: 4px 8px var(--eta-list-fade-h, 80px);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1263,23 +1285,33 @@ body.mobile-ui [data-acrylic]::before {
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
   /*
-   * Soft edge fade only at the very bottom — keep card content (esp. Opposite
-   * control) fully solid while scrolling. Long fade (56px) was washing buttons.
+   * Fade extends through the toolbar height so cards dissolve behind the
+   * liquid-glass chrome. Solid until fade starts just above the bar.
    */
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - 20px),
-    rgba(0, 0, 0, 0.55) calc(100% - 8px),
+    #000 calc(100% - var(--eta-list-fade-h, 80px)),
+    rgba(0, 0, 0, 0.75) calc(100% - var(--eta-list-fade-h, 80px) + 16px),
+    rgba(0, 0, 0, 0.35) calc(100% - 28px),
     transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - 20px),
-    rgba(0, 0, 0, 0.55) calc(100% - 8px),
+    #000 calc(100% - var(--eta-list-fade-h, 80px)),
+    rgba(0, 0, 0, 0.75) calc(100% - var(--eta-list-fade-h, 80px) + 16px),
+    rgba(0, 0, 0, 0.35) calc(100% - 28px),
     transparent 100%
   );
+}
+
+/* When legacy pin/details actions show, keep them above the floating chrome */
+.eta-sidebar-panel .eta-route-actions:not([hidden]) {
+  position: relative;
+  z-index: 3;
+  margin-bottom: var(--eta-toolbar-h, 68px);
+  padding-bottom: 4px;
 }
 
 /* Route detail: only the stop list scrolls */
