@@ -15,3 +15,6 @@ public/data/*.wheelsrouter
 
 # Local serverless contribute-path drafts (vite dev)
 artifacts/contributions/
+
+# Citybus BBI dumps (schemes:sync)
+artifacts/citybus-*.json

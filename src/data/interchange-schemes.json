@@ -1,0 +1,700 @@
+{
+  "schema": "morgan.travelers.interchange-schemes.v1",
+  "updated_at": "2026-08-01",
+  "note": "Hand-maintained interchange discounts. Edit THIS file when operators change schemes — not fares.js. Client models same-itinerary only (no wall-clock 90/1.5h timer).",
+  "sources": [
+    {
+      "id": "mtr_intermodal",
+      "title": "MTR Interchange Discount (GMB + designated PT)",
+      "url": "https://www.mtr.com.hk/en/customer/tickets/intermodal.html"
+    },
+    {
+      "id": "citybus_mtr_txt",
+      "title": "Citybus MTR–Bus Interchange Scheme",
+      "url": "https://www.citybus.com.hk/en/uploadedFiles/concession/railway_e_txt.html",
+      "window_minutes": 90,
+      "note": "Adult Octopus (student where listed). Same Octopus within 90 minutes."
+    },
+    {
+      "id": "citybus_bbi_ui",
+      "title": "Citybus Fare Concession (BBI SPA)",
+      "url": "https://www.citybus.com.hk/concession/en/scheme",
+      "api": "https://www.citybus.com.hk/concessionApi/public/bbi/api/v1/scheme/{lang}",
+      "api_detail": "https://www.citybus.com.hk/concessionApi/public/bbi/api/v1/scheme/{lang}/{packageId}",
+      "note": "SPA loads packages via concessionApi. Full bus–bus matrices not bundled; use npm run schemes:sync when API reachable."
+    }
+  ],
+  "mtr_pt": {
+    "enabled": true,
+    "exclude_after_ael_free_mtr": true,
+    "exclude_lrt_as_mtr": true,
+    "exclude_ael_as_mtr": true,
+    "default_window_minutes": 90,
+    "rules": [
+      {
+        "id": "gmb_52_ocean_park",
+        "cos": [
+          "gmb"
+        ],
+        "routes": [
+          "52"
+        ],
+        "stations": [
+          "ocean\\s*park|海洋公園"
+        ],
+        "adult": 0.5,
+        "other": 0.5,
+        "fare_bands": [
+          {
+            "min_adult_fare": 8.1,
+            "adult": 1
+          },
+          {
+            "min_adult_fare": 0,
+            "adult": 0.5
+          }
+        ],
+        "source": "mtr_intermodal"
+      },
+      {
+        "id": "gmb_4m_5m_wch",
+        "cos": [
+          "gmb"
+        ],
+        "routes": [
+          "4M",
+          "5M"
+        ],
+        "stations": [
+          "wong\\s*chuk\\s*hang|黃竹坑"
+        ],
+        "adult": 0.7,
+        "other": 0.5,
+        "source": "mtr_intermodal"
+      },
+      {
+        "id": "gmb_8m_hmt",
+        "cos": [
+          "gmb"
+        ],
+        "routes": [
+          "8M"
+        ],
+        "stations": [
+          "ho\\s*man\\s*tin|何文田"
+        ],
+        "adult": 1,
+        "other": 0.5,
+        "source": "mtr_intermodal"
+      },
+      {
+        "id": "gmb_78_ksr",
+        "cos": [
+          "gmb"
+        ],
+        "routes": [
+          "78",
+          "78A"
+        ],
+        "stations": [
+          "kam\\s*sheung\\s*road|錦上路"
+        ],
+        "adult": 2.5,
+        "other": 1.5,
+        "student": 2.5,
+        "source": "mtr_intermodal"
+      },
+      {
+        "id": "gmb_508_ss",
+        "cos": [
+          "gmb"
+        ],
+        "routes": [
+          "508"
+        ],
+        "stations": [
+          "sheung\\s*shui|上水"
+        ],
+        "adult": 0.6,
+        "other": 0.5,
+        "source": "mtr_intermodal"
+      },
+      {
+        "id": "ctb_1m_exhibition",
+        "cos": [
+          "ctb"
+        ],
+        "routes": [
+          "1M"
+        ],
+        "stations": [
+          "exhibition\\s*centre|會展"
+        ],
+        "adult": 2,
+        "other": null,
+        "adult_only": true,
+        "window_minutes": 90,
+        "source": "citybus_mtr_txt"
+      },
+      {
+        "id": "ctb_22_kai_tak",
+        "cos": [
+          "ctb"
+        ],
+        "routes": [
+          "22",
+          "22M"
+        ],
+        "stations": [
+          "kai\\s*tak|sung\\s*wong\\s*toi|啟德|宋皇臺"
+        ],
+        "adult": 0.6,
+        "other": null,
+        "adult_only": true,
+        "window_minutes": 90,
+        "source": "citybus_mtr_txt"
+      },
+      {
+        "id": "ctb_581_mos",
+        "cos": [
+          "ctb"
+        ],
+        "routes": [
+          "581"
+        ],
+        "stations": [
+          "ma\\s*on\\s*shan|wu\\s*kai\\s*sha|馬鞍山|烏溪沙"
+        ],
+        "adult": 0.6,
+        "other": null,
+        "adult_only": true,
+        "window_minutes": 90,
+        "source": "citybus_mtr_txt"
+      },
+      {
+        "id": "ctb_56_sheung_shui",
+        "cos": [
+          "ctb"
+        ],
+        "routes": [
+          "56",
+          "56A"
+        ],
+        "stations": [
+          "sheung\\s*shui|上水"
+        ],
+        "adult": 1,
+        "other": null,
+        "adult_only": true,
+        "window_minutes": 90,
+        "source": "citybus_mtr_txt"
+      },
+      {
+        "id": "ctb_792m_tko",
+        "cos": [
+          "ctb"
+        ],
+        "routes": [
+          "792M"
+        ],
+        "stations": [
+          "tiu\\s*keng\\s*leng|tseung\\s*kwan\\s*o|調景嶺|將軍澳"
+        ],
+        "adult": 1,
+        "other": null,
+        "student": 0.5,
+        "adult_only": true,
+        "window_minutes": 90,
+        "source": "citybus_mtr_txt"
+      },
+      {
+        "id": "kmb_19_diamond_hill",
+        "cos": [
+          "kmb"
+        ],
+        "routes": [
+          "19"
+        ],
+        "stations": [
+          "diamond\\s*hill|鑽石山"
+        ],
+        "adult": 1,
+        "other": null,
+        "adult_only": true,
+        "source": "mtr_intermodal"
+      },
+      {
+        "id": "kmb_72k_tai_wo",
+        "cos": [
+          "kmb"
+        ],
+        "routes": [
+          "72K"
+        ],
+        "stations": [
+          "tai\\s*wo|太和"
+        ],
+        "adult": 1,
+        "other": null,
+        "adult_only": true,
+        "source": "mtr_intermodal"
+      },
+      {
+        "id": "nlb_tung_chung_a",
+        "cos": [
+          "nlb"
+        ],
+        "routes": [
+          "37",
+          "37P",
+          "37H",
+          "37M",
+          "38",
+          "38X",
+          "N38"
+        ],
+        "stations": [
+          "tung\\s*chung|東涌"
+        ],
+        "adult": 1,
+        "other": null,
+        "adult_only": true,
+        "source": "mtr_intermodal"
+      },
+      {
+        "id": "nlb_tung_chung_b",
+        "cos": [
+          "nlb"
+        ],
+        "routes": [
+          "37A",
+          "39M",
+          "N37"
+        ],
+        "stations": [
+          "tung\\s*chung|東涌"
+        ],
+        "adult": 1,
+        "other": null,
+        "adult_only": true,
+        "source": "mtr_intermodal"
+      },
+      {
+        "id": "kaito_lei_tung",
+        "cos": [
+          "hkkf",
+          "fortuneferry",
+          "sunferry"
+        ],
+        "routes": [
+          "*"
+        ],
+        "stations": [
+          "lei\\s*tung|利東"
+        ],
+        "adult": 0.5,
+        "other": null,
+        "adult_only": true,
+        "source": "mtr_intermodal"
+      },
+      {
+        "id": "gmb_network_0.5",
+        "cos": [
+          "gmb"
+        ],
+        "routes": [
+          "*"
+        ],
+        "stations": null,
+        "adult": 0.5,
+        "other": 0.5,
+        "note": "Most GMB routes · any MTR station except Light Rail and Airport Express",
+        "source": "mtr_intermodal"
+      }
+    ]
+  },
+  "bus_bus": {
+    "enabled": false,
+    "note": "Citybus SPA lists ~90 BBI packages via concessionApi (pair matrices are large; not applied until rules[] is filled). Run npm run schemes:sync to refresh package index. Same-itinerary only when enabled.",
+    "sources": [
+      {
+        "id": "citybus_bbi",
+        "url": "https://www.citybus.com.hk/concession/en/scheme",
+        "api_list": "https://www.citybus.com.hk/concessionApi/public/bbi/api/v1/scheme/en",
+        "api_detail": "https://www.citybus.com.hk/concessionApi/public/bbi/api/v1/scheme/en/{packageId}"
+      }
+    ],
+    "citybus_packages": [
+      {
+        "id": "2",
+        "title": "Cityflyer Bus-Bus Interchange Scheme"
+      },
+      {
+        "id": "3",
+        "title": "Cityflyer - Hong Kong Island/Kowloon/ New Territories Routes BBI"
+      },
+      {
+        "id": "4",
+        "title": "AsiaWorld-Expo / Airport Routes BBI"
+      },
+      {
+        "id": "5",
+        "title": "Cityflyer/ North Lantau External Routes BBI"
+      },
+      {
+        "id": "6",
+        "title": "Lantau Link Bus-Bus Interchange Scheme"
+      },
+      {
+        "id": "7",
+        "title": "Tung Chung Town Centre BBI"
+      },
+      {
+        "id": "8",
+        "title": "Route E21 Octopus section fare and route S52 / S52A BBI"
+      },
+      {
+        "id": "9",
+        "title": "Route E21 / E21A / E22 / E22S / E23, E23A Bus-Bus Interchange Scheme"
+      },
+      {
+        "id": "10",
+        "title": "Route S56 - S52 / S52P BBI"
+      },
+      {
+        "id": "11",
+        "title": "Ying Tung Estate Route BBI"
+      },
+      {
+        "id": "12",
+        "title": "Aircraft Maintenance Area Routes BBI"
+      },
+      {
+        "id": "13",
+        "title": "Route B5 Bus-Bus Interchange Scheme"
+      },
+      {
+        "id": "20",
+        "title": "NT West Boundary Line B3, B3A, B3X BBI"
+      },
+      {
+        "id": "94",
+        "title": "NT East Boundary Line B7/ /B8 BBI"
+      },
+      {
+        "id": "14",
+        "title": "Hong Kong Disneyland Circular Route - Cityflyer / North Lantau Routes BBI Scheme"
+      },
+      {
+        "id": "16",
+        "title": "Overnight Routes N21, N21A and N11 BBI"
+      },
+      {
+        "id": "17",
+        "title": "Airport, New Territories West & Hong Kong Island Overnight Routes BBI"
+      },
+      {
+        "id": "18",
+        "title": "Hong Kong Island Overnight Route BBI"
+      },
+      {
+        "id": "19",
+        "title": "Octopus Free Interchange arrangement for Routes N72 and N90"
+      },
+      {
+        "id": "21",
+        "title": "Western Harbour Crossing Routes BBI"
+      },
+      {
+        "id": "22",
+        "title": "Western Harbour Crossing Routes - Hong Kong Island Routes BBI"
+      },
+      {
+        "id": "23",
+        "title": "Route 930 / 930A /930 X BBI"
+      },
+      {
+        "id": "24",
+        "title": "Route 967 / 969 BBI"
+      },
+      {
+        "id": "25",
+        "title": "Southern District Rotues - Route 973 / 973P BBI"
+      },
+      {
+        "id": "26",
+        "title": "Route 970 BBI"
+      },
+      {
+        "id": "27",
+        "title": "Western Harbour Crossing Routes - Ocean Park Route BBI"
+      },
+      {
+        "id": "89",
+        "title": "Route 933, 976, 986, 989 BBI"
+      },
+      {
+        "id": "91",
+        "title": "Route 982C BBI"
+      },
+      {
+        "id": "28",
+        "title": "Cross Harbour (EHC) BBI"
+      },
+      {
+        "id": "29",
+        "title": "Route 606A BBI"
+      },
+      {
+        "id": "30",
+        "title": "Route 680 BBI"
+      },
+      {
+        "id": "31",
+        "title": "Route 690 BBI"
+      },
+      {
+        "id": "32",
+        "title": "Route 694 BBI"
+      },
+      {
+        "id": "33",
+        "title": "Cyberport/ Kowloon East Routes BBI"
+      },
+      {
+        "id": "35",
+        "title": "Ma On Shan / Shui Chuen O Route BBI"
+      },
+      {
+        "id": "81",
+        "title": "Route 678 BBI"
+      },
+      {
+        "id": "86",
+        "title": "Route 608 Bus-Bus Interchange Scheme"
+      },
+      {
+        "id": "36",
+        "title": "Hunghom Harbour Crossing Routes BBI"
+      },
+      {
+        "id": "82",
+        "title": "Route 102 BBI"
+      },
+      {
+        "id": "83",
+        "title": "Route 110 BBI"
+      },
+      {
+        "id": "37",
+        "title": "Peak Routes BBI"
+      },
+      {
+        "id": "38",
+        "title": "Western District Routes BBI"
+      },
+      {
+        "id": "39",
+        "title": "Cyberport and Wah Fu(S) Routes BBI"
+      },
+      {
+        "id": "40",
+        "title": "Pok Fu Lam Road BBI"
+      },
+      {
+        "id": "41",
+        "title": "Wah Kwai BBI"
+      },
+      {
+        "id": "42",
+        "title": "Shek Pai Wan Routes BBI"
+      },
+      {
+        "id": "43",
+        "title": "Hong Kong Island (Southern District & Eastern District) BBI"
+      },
+      {
+        "id": "44",
+        "title": "Southern District Route 72A / 75 BBI"
+      },
+      {
+        "id": "45",
+        "title": "Southern District Rotues - Route 73 BBI"
+      },
+      {
+        "id": "47",
+        "title": "Route 77 BBI"
+      },
+      {
+        "id": "48",
+        "title": "Route 99 BBI"
+      },
+      {
+        "id": "49",
+        "title": "Southern District BBI"
+      },
+      {
+        "id": "50",
+        "title": "Route 43M BBI"
+      },
+      {
+        "id": "51",
+        "title": "Braemar Hill and Southern District BBI"
+      },
+      {
+        "id": "52",
+        "title": "Braemar Hill and Eastern District BBI"
+      },
+      {
+        "id": "53",
+        "title": "Central Mid-Levels BBI"
+      },
+      {
+        "id": "54",
+        "title": "Yiu Tung / Hing Tung BBI"
+      },
+      {
+        "id": "55",
+        "title": "Siu Sai Wan and Chai Wan Routes BBI"
+      },
+      {
+        "id": "56",
+        "title": "Route 2A BBI"
+      },
+      {
+        "id": "57",
+        "title": "Route 8X & 19 BBI"
+      },
+      {
+        "id": "58",
+        "title": "Route 18 BBI"
+      },
+      {
+        "id": "59",
+        "title": "Route 2 / 23 BBI"
+      },
+      {
+        "id": "60",
+        "title": "Route 81 BBI"
+      },
+      {
+        "id": "61",
+        "title": "Stanley Routes BBI"
+      },
+      {
+        "id": "62",
+        "title": "Happy Valley BBI"
+      },
+      {
+        "id": "63",
+        "title": "Shek O Routes BBI"
+      },
+      {
+        "id": "64",
+        "title": "Value Pack"
+      },
+      {
+        "id": "65",
+        "title": "Cape Collinson Routes BBI"
+      },
+      {
+        "id": "66",
+        "title": "Route 7 & 90B BBI"
+      },
+      {
+        "id": "67",
+        "title": "Route 25A BBI"
+      },
+      {
+        "id": "68",
+        "title": "Route 70 BBI"
+      },
+      {
+        "id": "69",
+        "title": "Route 72 & 76 BBI"
+      },
+      {
+        "id": "70",
+        "title": "Route 6, 6X & 260 Stanley Village Interchange Arrangement"
+      },
+      {
+        "id": "71",
+        "title": "Route 73 Stanley Village Interchange Arrangement"
+      },
+      {
+        "id": "72",
+        "title": "Lei King Wan BBI"
+      },
+      {
+        "id": "73",
+        "title": "Siu Sai Wan / Chai Wan and Kennedy Town BBI"
+      },
+      {
+        "id": "74",
+        "title": "Route 5B BBI"
+      },
+      {
+        "id": "75",
+        "title": "Route 8H BBI"
+      },
+      {
+        "id": "76",
+        "title": "Aberdeen Tunnel Toll Plaza BBI"
+      },
+      {
+        "id": "77",
+        "title": "Routes 682/ 798 BBI"
+      },
+      {
+        "id": "78",
+        "title": "Sai Kung and Tseung Kwan O BBI"
+      },
+      {
+        "id": "80",
+        "title": "Sham Shing Road BBI"
+      },
+      {
+        "id": "84",
+        "title": "Tin Shui Wai / Tuen Mun and Kowloon BBI"
+      },
+      {
+        "id": "85",
+        "title": "Route 20 / 22 Bus-Bus Interchange Scheme"
+      },
+      {
+        "id": "87",
+        "title": "Route 22M Bus-Bus Interchange Scheme"
+      },
+      {
+        "id": "88",
+        "title": "Tseung Kwan O Tunnel BBI station Interchange Scheme"
+      },
+      {
+        "id": "90",
+        "title": "Queen's Hill BBI"
+      },
+      {
+        "id": "92",
+        "title": "Area 54, Tuen Mun BBI"
+      },
+      {
+        "id": "93",
+        "title": "LOHAS Express route790, 795 BBI"
+      },
+      {
+        "id": "95",
+        "title": "Shap Sze Heung BBI"
+      },
+      {
+        "id": "96",
+        "title": "GO PARK Sai Sha Route 682, 682A, 682P, 988 BBI"
+      },
+      {
+        "id": "97",
+        "title": "Route N50, N796, N952, N962, N969 BBI"
+      }
+    ],
+    "rules": [],
+    "citybus_synced_at": "2026-08-01"
+  }
+}

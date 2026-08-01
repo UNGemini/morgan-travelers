@@ -11,6 +11,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:fares": "node scripts/build-fares.mjs",
+    "schemes:sync": "node scripts/sync-interchange-schemes.mjs",
     "collect:open-data": "node scripts/collect-open-data.mjs",
     "preview": "vite preview",
     "generate-metadata": "node scripts/generate-metadata.mjs",
