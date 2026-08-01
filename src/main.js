@@ -134,6 +134,7 @@ import {
   defaultHeadwayMins,
   expandTimetableSlots,
   withScheduledFallback,
+  stopOffsetMinutesFromBoard,
 } from "./eta.js";
 import {
   mergeStopSequence,
@@ -7308,7 +7309,7 @@ function selectEtaRoute(route, listIndex) {
 }
 
 /**
- * Wait label for Wheels-style big ETA (“+5 Minutes”, “Now”, “N/A”).
+ * Wait / time-to-stop label (“+5 Minutes”, “Now”, “N/A”).
  * @param {number | null | undefined} mins
  */
 function formatWaitCompact(mins) {
@@ -7317,6 +7318,79 @@ function formatWaitCompact(mins) {
   if (n <= 0) return "Now";
   if (n === 1) return "+1 Minute";
   return `+${n} Minutes`;
+}
+
+/**
+ * Estimate full-route ride seconds from stop coordinates (urban average).
+ * @param {Array<{ lon?: number, lat?: number }>} stops
+ * @param {"bus"|"mtr"|"lrt"|"mtr_bus"|string} kind
+ */
+function estimateEtaRouteRideSeconds(stops, kind) {
+  let distM = 0;
+  let segs = 0;
+  for (let i = 1; i < stops.length; i++) {
+    const a = stops[i - 1];
+    const b = stops[i];
+    if (
+      a &&
+      b &&
+      Number.isFinite(a.lon) &&
+      Number.isFinite(a.lat) &&
+      Number.isFinite(b.lon) &&
+      Number.isFinite(b.lat)
+    ) {
+      distM += haversineMEta(a.lat, a.lon, b.lat, b.lon);
+      segs++;
+    }
+  }
+  // Typical HK average including dwell: bus ~18 km/h, rail faster
+  const mps =
+    kind === "mtr" ? 9 : kind === "lrt" ? 6.5 : kind === "mtr_bus" ? 5.5 : 5;
+  const dwellSec =
+    Math.max(0, stops.length - 1) *
+    (kind === "mtr" || kind === "lrt" ? 25 : 18);
+  if (distM > 40 && segs > 0) {
+    return Math.max(60, Math.round(distM / mps) + dwellSec);
+  }
+  // Fallback: ~1.1 min per hop
+  return Math.max(60, Math.round(Math.max(stops.length - 1, 1) * 66));
+}
+
+/**
+ * Minutes from *now* until the next vehicle reaches each stop.
+ * Anchored on board-stop wait, then travel offsets along the route (Wheels-style).
+ * Stops before the board stop are null (no label).
+ *
+ * @param {Array<{ stopId?: string, name?: string, lon?: number, lat?: number }>} named
+ * @param {number} boardIndex
+ * @param {number | null | undefined} boardWaitMins
+ * @param {string} kind
+ * @returns {(number | null)[]}
+ */
+function etaStopReachMinutes(named, boardIndex, boardWaitMins, kind) {
+  const n = named.length;
+  /** @type {(number | null)[]} */
+  const out = Array(n).fill(null);
+  if (!n || boardIndex < 0 || boardIndex >= n) return out;
+  if (boardWaitMins == null || !Number.isFinite(Number(boardWaitMins))) {
+    // Still show travel-only offsets from board as relative times when no ETA
+    const rideSec = estimateEtaRouteRideSeconds(named, kind);
+    const offsets = stopOffsetMinutesFromBoard({}, named, rideSec);
+    const base = offsets[boardIndex] ?? 0;
+    for (let i = boardIndex; i < n; i++) {
+      out[i] = Math.max(0, (offsets[i] ?? base) - base);
+    }
+    return out;
+  }
+  const wait = Number(boardWaitMins);
+  const rideSec = estimateEtaRouteRideSeconds(named, kind);
+  const offsets = stopOffsetMinutesFromBoard({}, named, rideSec);
+  const base = offsets[boardIndex] ?? 0;
+  for (let i = boardIndex; i < n; i++) {
+    const travel = Math.max(0, (offsets[i] ?? base) - base);
+    out[i] = wait + travel;
+  }
+  return out;
 }
 
 /**
@@ -7419,8 +7493,16 @@ async function showEtaRouteDetailsPanel() {
   const dir = dirs[di] || dirs[0] || { dest: route.label };
   const dest = dir.destZh || dir.dest || route.label;
   const named = etaSelectedStops.filter((s) => s.name && !s._polylineOnly);
+  // Prefer nearby/live stop when present, else first stop with id
+  const liveMeta = etaLiveByKey.get(etaRouteKey(route));
   const boardStop =
-    named.find((s) => s.stopId && !s._polylineOnly) || named[0] || null;
+    (liveMeta?.stopId &&
+      named.find((s) => s.stopId && String(s.stopId) === String(liveMeta.stopId))) ||
+    (liveMeta?.stopLabel &&
+      named.find((s) => s.name === liveMeta.stopLabel)) ||
+    named.find((s) => s.stopId && !s._polylineOnly) ||
+    named[0] ||
+    null;
 
   // Live + timetable ETAs at board stop
   const opt = etaRouteAsOption(route, etaSelectedStops, dir);
@@ -7460,6 +7542,7 @@ async function showEtaRouteDetailsPanel() {
 
   const slots = (etaResult.etas || []).slice(0, 3);
   const hasLive = slots.some((s) => !s.scheduled);
+  const hasSched = slots.some((s) => s.scheduled);
   const boardName =
     boardStop?.name ||
     etaLiveByKey.get(etaRouteKey(route))?.stopLabel ||
@@ -7467,27 +7550,31 @@ async function showEtaRouteDetailsPanel() {
     dir.origZh ||
     "";
 
-  const etaBigHtml = slots.length
+  // Classic trip-detail style ETA card (not the solid Wheels mega-slots)
+  const etaRows = slots.length
     ? slots
-        .map((slot) => {
-          const wait = formatWaitCompact(slot.waitMins);
-          const clock =
-            slot.clock ||
-            (slot.etaIso ? formatHkClock(slot.etaIso) : "") ||
-            "—";
-          const due = slot.waitMins != null && slot.waitMins <= 0;
-          // Clock + source on one line: 21:52・LIVE
-          const clockBase = clock && clock !== "—" ? clock : "—";
-          const clockLine = slot.scheduled
-            ? `${clockBase}・SCHEDULED`
-            : `${clockBase}・LIVE`;
-          return `<div class="wheels-eta-slot${due ? " is-due" : ""}${slot.scheduled ? " is-scheduled" : ""}">
-            <span class="wheels-eta-wait">${escapeHtml(wait)}</span>
-            <span class="wheels-eta-clock">${escapeHtml(clockLine)}</span>
-          </div>`;
+        .map((slot, i) => {
+          const line = formatEtaCardLine(slot, {
+            operator: etaResult.operator,
+            showPlatform:
+              !slot.scheduled && etaOperatorShowsPlatform(etaResult.operator),
+          });
+          const tag = slot.scheduled
+            ? `<span class="rt-eta-card-tag" title="From timetable">SCHEDULED</span>`
+            : `<span class="rt-eta-card-tag rt-eta-card-tag-live" title="Live ETA">LIVE</span>`;
+          const nowArrived = slot.waitMins != null && slot.waitMins <= 0;
+          return `<li class="rt-eta-card-row${nowArrived ? " is-due is-now" : ""}${slot.scheduled ? " is-scheduled-row" : " is-live-row"}${i === 0 ? " is-next" : ""}"><span class="rt-eta-card-line">${escapeHtml(line)}</span>${tag}</li>`;
         })
         .join("")
-    : `<div class="wheels-eta-slot is-empty"><span class="wheels-eta-wait">N/A</span></div>`;
+    : `<li class="rt-eta-card-row is-empty">N/A</li>`;
+  const cardTone = hasLive
+    ? hasSched
+      ? "is-live is-mixed"
+      : "is-live"
+    : "is-scheduled";
+  const headText = hasLive
+    ? formatLiveStatusHead(etaResult.fetchedAt)
+    : "Timetable";
 
   const dirSwitchHtml =
     dirs.length >= 2
@@ -7500,6 +7587,24 @@ async function showEtaRouteDetailsPanel() {
           </span>
         </button>`
       : "";
+
+  let boardIndex = boardStop
+    ? named.findIndex(
+        (s) =>
+          (s.stopId && boardStop.stopId && s.stopId === boardStop.stopId) ||
+          s === boardStop ||
+          (boardName && s.name === boardName),
+      )
+    : 0;
+  if (boardIndex < 0) boardIndex = 0;
+  const reachMins = named.length
+    ? etaStopReachMinutes(
+        named,
+        boardIndex >= 0 ? boardIndex : 0,
+        slots[0]?.waitMins,
+        route.kind,
+      )
+    : [];
 
   let stopsHtml = "";
   if (!named.length && etaSelectedStops.length) {
@@ -7528,21 +7633,17 @@ async function showEtaRouteDetailsPanel() {
         <span class="rt-route-to">${escapeHtml(dest)}</span>
       </div>`,
     });
-    // Next departure wait for the board stop (replaces old BOARD / PASS BY / ALIGHT)
-    const boardWaitLabel = formatWaitCompact(slots[0]?.waitMins);
 
     for (let i = 0; i < named.length; i++) {
       const s = named[i];
       const isLast = i === named.length - 1;
-      const isEtaStop =
-        boardStop &&
-        ((s.stopId && boardStop.stopId && s.stopId === boardStop.stopId) ||
-          s === boardStop ||
-          (boardName && s.name === boardName));
-      // Role line under name — only on the stop the big ETA card is for
-      const roleHtml = isEtaStop
-        ? `<span class="rt-stop-role rt-stop-eta-mins">${escapeHtml(boardWaitLabel)}</span>`
-        : "";
+      const isEtaStop = i === boardIndex;
+      // Wheels-style: time for vehicle to *reach this stop* (board wait + ride)
+      const reach = reachMins[i];
+      const roleHtml =
+        reach != null
+          ? `<span class="rt-stop-role rt-stop-eta-mins">${escapeHtml(formatWaitCompact(reach))}</span>`
+          : "";
       rows.push({
         kind: "stop",
         line: isLast ? "none" : "solid",
@@ -7560,14 +7661,15 @@ async function showEtaRouteDetailsPanel() {
   if (els.etaRouteDetailBody) {
     els.etaRouteDetailBody.innerHTML = `
       <div class="wheels-route-detail">
-        <div class="wheels-eta-card" style="--wheels-route-color:${escapeHtml(color)}">
-          <div class="wheels-eta-dest">
-            <span class="material-symbols-outlined wheels-eta-dest-icon" aria-hidden="true">arrow_forward</span>
-            <span class="wheels-eta-dest-text">${escapeHtml(dest)}</span>
+        <div class="eta-detail-summary">
+          <div class="pinned-dest-row">
+            <span class="eta-card-arrow" aria-hidden="true">→</span>
+            <strong>${escapeHtml(dest)}</strong>
           </div>
-          ${boardName ? `<p class="wheels-eta-board">${escapeHtml(boardName)}</p>` : ""}
-          <div class="wheels-eta-slots" role="list" aria-label="${hasLive ? "Live arrivals" : "Scheduled departures"}">
-            ${etaBigHtml}
+          ${boardName ? `<p class="pinned-board-stop">${escapeHtml(boardName)}</p>` : ""}
+          <div class="rt-eta-card ${cardTone}" aria-live="polite" aria-label="${hasLive ? "Live status" : "Timetable"}">
+            <div class="rt-eta-card-head">${escapeHtml(headText)}</div>
+            <ul class="rt-eta-card-list">${etaRows}</ul>
           </div>
         </div>
         ${dirSwitchHtml}
