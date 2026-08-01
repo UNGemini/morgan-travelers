@@ -235,6 +235,10 @@ const els = {
   btnEtaPinRoute: document.getElementById("btn-eta-pin-route"),
   btnEtaPinned: document.getElementById("btn-eta-pinned"),
   toolbarPinnedLabel: document.getElementById("toolbar-pinned-label"),
+  etaBottomChrome: document.getElementById("eta-sidebar-bottom-chrome"),
+  etaSidebarSearch: document.getElementById("eta-sidebar-search"),
+  btnEtaSearchToggle: document.getElementById("btn-eta-search-toggle"),
+  btnEtaSearchClose: document.getElementById("btn-eta-search-close"),
   modeButtons: () =>
     Array.from(document.querySelectorAll(".toolbar-mode-btn[data-ui-mode]")),
 };
@@ -7264,10 +7268,36 @@ async function showEtaRouteDetailsPanel() {
 }
 
 function syncEtaModeChips() {
-  document.querySelectorAll(".eta-mode-chip[data-eta-mode]").forEach((btn) => {
+  document.querySelectorAll("[data-eta-mode]").forEach((btn) => {
+    if (!btn.classList.contains("eta-mode-tab") && !btn.classList.contains("eta-mode-chip"))
+      return;
     const on = btn.getAttribute("data-eta-mode") === etaTrafficMode;
     btn.classList.toggle("is-active", on);
+    if (btn.getAttribute("role") === "tab") {
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+    }
   });
+}
+
+function setEtaSearchOpen(open) {
+  const chrome = els.etaBottomChrome;
+  const field = els.etaSidebarSearch;
+  const toggle = els.btnEtaSearchToggle;
+  if (chrome) chrome.classList.toggle("is-search-open", !!open);
+  if (field) field.hidden = !open;
+  if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    requestAnimationFrame(() => {
+      els.inputEtaRoute?.focus?.();
+    });
+  } else if (els.inputEtaRoute && !String(els.inputEtaRoute.value || "").trim()) {
+    // keep value if user typed; only clear when empty close
+  }
+}
+
+function collapseEtaSearchIfEmpty() {
+  const q = String(els.inputEtaRoute?.value || "").trim();
+  if (!q) setEtaSearchOpen(false);
 }
 
 function initEtaRouteSearchUi() {
@@ -7309,7 +7339,7 @@ function initEtaRouteSearchUi() {
     setSidebarPage("search");
   });
 
-  document.querySelectorAll(".eta-mode-chip[data-eta-mode]").forEach((btn) => {
+  document.querySelectorAll(".eta-mode-tab[data-eta-mode], .eta-mode-chip[data-eta-mode]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const mode = btn.getAttribute("data-eta-mode") || "bus";
       etaTrafficMode =
@@ -7330,6 +7360,19 @@ function initEtaRouteSearchUi() {
   });
   syncEtaModeChips();
   syncPinnedRouteToolbar();
+  setEtaSearchOpen(false);
+
+  els.btnEtaSearchToggle?.addEventListener("click", () => {
+    setDetailOpen(true);
+    setEtaSearchOpen(true);
+    void refreshEtaRouteSuggest();
+  });
+  els.btnEtaSearchClose?.addEventListener("click", () => {
+    if (els.inputEtaRoute) els.inputEtaRoute.value = "";
+    setEtaSearchOpen(false);
+    etaRouteActive = -1;
+    void refreshEtaRouteSuggest();
+  });
 
   if (input) {
     let timer = 0;
@@ -7344,6 +7387,13 @@ function initEtaRouteSearchUi() {
 
     input.addEventListener("keydown", (e) => {
       if (getUiMode() !== "eta") return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (els.inputEtaRoute) els.inputEtaRoute.value = "";
+        setEtaSearchOpen(false);
+        void refreshEtaRouteSuggest();
+        return;
+      }
       if (e.key === "ArrowDown") {
         e.preventDefault();
         etaRouteActive = Math.min(
@@ -7366,7 +7416,17 @@ function initEtaRouteSearchUi() {
     input.addEventListener("focus", () => {
       if (getUiMode() !== "eta") return;
       setDetailOpen(true);
+      setEtaSearchOpen(true);
       void refreshEtaRouteSuggest();
+    });
+
+    input.addEventListener("blur", () => {
+      // Delay so close button / tab clicks still fire
+      window.setTimeout(() => {
+        if (document.activeElement === els.inputEtaRoute) return;
+        if (els.etaBottomChrome?.contains(document.activeElement)) return;
+        collapseEtaSearchIfEmpty();
+      }, 150);
     });
   }
 
