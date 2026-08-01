@@ -4945,7 +4945,8 @@ async function prefetchEtaDirections(hits) {
 }
 
 /**
- * Company CSS class for route number color.
+ * Company CSS class (legacy hooks). Prefer companyLineColor() for actual hex —
+ * matches Trip plan / GTFS agency colours.
  * @param {EtaRouteEntry} r
  */
 function etaCompanyColorClass(r) {
@@ -4960,6 +4961,20 @@ function etaCompanyColorClass(r) {
   if (co === "kmb" || !co) return "co-kmb";
   return "co-kmb";
 }
+
+/**
+ * Agency brand colours from HK GTFS (same palette Trip plan uses via route_color).
+ * MTR/LRT use resolveRouteColor brand map.
+ */
+const ETA_AGENCY_GTFS_COLORS = {
+  kmb: "#EE171F",
+  lwb: "#EE171F",
+  ctb: "#0053B9",
+  nlb: "#8AB666",
+  gmb: "#34C759",
+  lrtfeeder: "#AE2A42",
+  mtrbus: "#AE2A42",
+};
 
 /**
  * Compact GTFS-derived index for non-KMB nearby (CTB/NLB/GMB/MTR Bus).
@@ -5587,9 +5602,10 @@ function etaRouteCardInnerHtml(r, dir, eta = {}) {
       : mins != null
         ? "is-live"
         : "";
+  const color = companyLineColor(r);
   return `
     <div class="eta-card-main">
-      <div class="eta-card-route ${etaCompanyColorClass(r)}">${escapeHtml(r.id)}</div>
+      <div class="eta-card-route ${etaCompanyColorClass(r)}" style="color:${escapeHtml(color)}">${escapeHtml(r.id)}</div>
       <div class="eta-card-dest">
         <span class="eta-card-arrow" aria-hidden="true">→</span>
         <span>${escapeHtml(dest)}</span>
@@ -5743,16 +5759,42 @@ let etaSelectedForDetails = null;
 /** @type {Array<{ seq: number, name: string, stopId?: string, lon?: number, lat?: number }>} */
 let etaSelectedStops = [];
 
+/**
+ * Line / card colour aligned with Trip plan (GTFS route_color + MTR brand map).
+ * @param {EtaRouteEntry | null | undefined} route
+ */
 function companyLineColor(route) {
-  const co = String(route?.co || "").toLowerCase();
-  if (route?.kind === "mtr") return "#007bc6";
-  if (route?.kind === "lrt") return "#c9a227";
-  if (route?.kind === "mtr_bus") return "#5b8def";
-  if (co === "gmb") return "#2e9e3e";
-  if (co === "ctb") return "#f7b500";
-  if (co === "nlb") return "#00a651";
-  if (co === "lwb") return "#f5a623";
-  return "#e60012"; // KMB
+  if (!route) return ETA_AGENCY_GTFS_COLORS.kmb;
+
+  if (route.kind === "mtr") {
+    return (
+      routeColorCss({
+        route_short_name: route.id,
+        route_name: route.label || route.id,
+        route_long_name: route.label || "",
+        mode: "subway",
+        agency: { id: "MTRR", name: "MTR" },
+        color: "#003DA5",
+      }) || "#003DA5"
+    );
+  }
+  if (route.kind === "lrt") {
+    return (
+      routeColorCss({
+        route_short_name: route.id,
+        route_name: route.label || route.id,
+        mode: "tram",
+        agency: { id: "LR", name: "Light Rail" },
+        color: "#D3A809",
+      }) || "#D3A809"
+    );
+  }
+  if (route.kind === "mtr_bus") return ETA_AGENCY_GTFS_COLORS.lrtfeeder;
+
+  const co = String(route.co || "").toLowerCase();
+  if (ETA_AGENCY_GTFS_COLORS[co]) return ETA_AGENCY_GTFS_COLORS[co];
+  // Unknown bus → KMB red (GTFS default for franchised KMB)
+  return ETA_AGENCY_GTFS_COLORS.kmb;
 }
 
 /**
@@ -6383,7 +6425,7 @@ async function showEtaRouteDetailsPanel() {
       <div class="trip-od">
         <div class="trip-od-from">
           <span class="material-symbols-outlined" aria-hidden="true">directions_bus</span>
-          <span class="eta-card-route ${etaCompanyColorClass(route)}" style="font-size:1.4rem">${escapeHtml(route.id)}</span>
+          <span class="eta-card-route ${etaCompanyColorClass(route)}" style="font-size:1.4rem;color:${escapeHtml(companyLineColor(route))}">${escapeHtml(route.id)}</span>
         </div>
         <div class="trip-od-to">
           <span class="material-symbols-outlined" aria-hidden="true">flag</span>

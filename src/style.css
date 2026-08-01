@@ -869,30 +869,30 @@ body.mobile-ui [data-acrylic]::before {
   line-height: 1.1;
 }
 
-/* Company / mode colors for route number */
+/* Company / mode colors — GTFS route_color (same as Trip plan) */
 .eta-card-route.co-kmb {
-  color: #e60012; /* KMB red */
+  color: #ee171f; /* KMB */
 }
 .eta-card-route.co-lwb {
-  color: #f5a623; /* LWB orange */
+  color: #ee171f; /* LWB shares KMB GTFS red */
 }
 .eta-card-route.co-ctb {
-  color: #f7b500; /* Citybus yellow */
+  color: #0053b9; /* Citybus blue */
 }
 .eta-card-route.co-nlb {
-  color: #00a651; /* NLB green */
+  color: #8ab666; /* NLB */
 }
 .eta-card-route.co-gmb {
-  color: #2e9e3e; /* GMB green */
+  color: #34c759; /* GMB */
 }
 .eta-card-route.co-mtr {
-  color: #007bc6; /* MTR blue */
+  color: #003da5; /* generic MTR (line brand set inline) */
 }
 .eta-card-route.co-lrt {
-  color: #c9a227; /* LRT gold */
+  color: #d3a809; /* Light Rail brand gold */
 }
 .eta-card-route.co-mtrbus {
-  color: #5b8def; /* MTR Bus */
+  color: #ae2a42; /* MTR Bus */
 }
 
 .eta-card-dest {
