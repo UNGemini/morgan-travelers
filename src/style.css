@@ -727,42 +727,6 @@ body.mobile-ui [data-acrylic]::before {
   display: none !important;
 }
 
-/* Direction dots (swipe pager) — Wheels style */
-.eta-dir-pager {
-  display: flex;
-  justify-content: center;
-  padding: 2px 0 4px;
-}
-
-.eta-dir-pager[hidden] {
-  display: none !important;
-}
-
-.eta-dir-dots {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.eta-dir-dot {
-  appearance: none;
-  border: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  padding: 0;
-  background: rgba(255, 255, 255, 0.22);
-  cursor: pointer;
-  transition:
-    background 0.15s ease,
-    transform 0.15s ease;
-}
-
-.eta-dir-dot.is-active {
-  background: rgba(255, 255, 255, 0.85);
-  transform: scale(1.15);
-}
-
 /* Scrollable route cards */
 .eta-route-list-sidebar {
   list-style: none;
@@ -779,22 +743,32 @@ body.mobile-ui [data-acrylic]::before {
 
 /* Wheels-like ETA route card */
 .eta-route-list-sidebar li.eta-route-card {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 4px 12px;
-  padding: 14px 4px 14px 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 6px 10px;
   border: none;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 0;
   background: transparent;
   cursor: pointer;
-  align-items: start;
 }
 
-.eta-route-list-sidebar li.eta-route-card:hover,
+.eta-route-list-sidebar li.eta-route-card:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .eta-route-list-sidebar li.eta-route-card.is-active {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(192, 174, 252, 0.1);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.eta-route-card-body {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  align-items: start;
+  width: 100%;
 }
 
 .eta-route-list-sidebar .eta-route-empty {
@@ -820,20 +794,32 @@ body.mobile-ui [data-acrylic]::before {
   font-weight: 800;
   letter-spacing: -0.02em;
   line-height: 1.1;
-  color: #ff4d4f;
 }
 
-.eta-card-route.is-mtr {
-  color: #3d9be9;
+/* Company / mode colors for route number */
+.eta-card-route.co-kmb {
+  color: #e60012; /* KMB red */
 }
-.eta-card-route.is-lrt {
-  color: #d4a40a;
+.eta-card-route.co-lwb {
+  color: #f5a623; /* LWB orange */
 }
-.eta-card-route.is-gmb {
-  color: #3cb45a;
+.eta-card-route.co-ctb {
+  color: #f7b500; /* Citybus yellow */
 }
-.eta-card-route.is-mtr_bus {
-  color: #5b8def;
+.eta-card-route.co-nlb {
+  color: #00a651; /* NLB green */
+}
+.eta-card-route.co-gmb {
+  color: #2e9e3e; /* GMB green */
+}
+.eta-card-route.co-mtr {
+  color: #007bc6; /* MTR blue */
+}
+.eta-card-route.co-lrt {
+  color: #c9a227; /* LRT gold */
+}
+.eta-card-route.co-mtrbus {
+  color: #5b8def; /* MTR Bus */
 }
 
 .eta-card-dest {
@@ -872,14 +858,6 @@ body.mobile-ui [data-acrylic]::before {
   min-width: 3.2rem;
 }
 
-.eta-card-eta-icon {
-  font-size: 16px !important;
-  width: 16px;
-  height: 16px;
-  color: var(--text-muted);
-  opacity: 0.75;
-}
-
 .eta-card-eta-min {
   font-size: 1.45rem;
   font-weight: 800;
@@ -894,47 +872,43 @@ body.mobile-ui [data-acrylic]::before {
   color: var(--text-muted);
 }
 
-.eta-card-eta.is-live .eta-card-eta-icon {
-  color: #51cf66;
-  opacity: 1;
+.eta-card-eta.is-live .eta-card-eta-min {
+  color: var(--text-primary);
 }
 
 .eta-card-eta.is-soon .eta-card-eta-min {
   color: #51cf66;
 }
 
-/* Selected hero card */
-.eta-route-hero {
-  margin-top: 4px;
-  padding: 12px 14px 14px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.eta-route-hero[hidden] {
-  display: none !important;
-}
-
-.eta-route-hero .eta-route-card {
-  border-bottom: none;
-  padding: 4px 0 8px;
-}
-
-.eta-hero-swipe {
-  touch-action: pan-y;
-  overflow: hidden;
-}
-
-.eta-hero-track {
+/* Per-card direction dots */
+.eta-card-dots {
   display: flex;
-  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: transform;
+  justify-content: center;
+  gap: 8px;
+  padding: 2px 0 0;
 }
 
-.eta-hero-page {
-  flex: 0 0 100%;
-  min-width: 100%;
+.eta-dir-dot {
+  appearance: none;
+  border: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.22);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    transform 0.15s ease;
+}
+
+.eta-dir-dot.is-active {
+  background: rgba(255, 255, 255, 0.9);
+  transform: scale(1.15);
+}
+
+.eta-dir-dot:hover {
+  background: rgba(255, 255, 255, 0.45);
 }
 
 .eta-route-suggest .eta-route-badge-bus {

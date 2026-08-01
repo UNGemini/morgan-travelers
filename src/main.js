@@ -111,6 +111,7 @@ import {
   fetchPlanBoardEtas,
   buildPlanStopTimes,
   formatEtaCardLine,
+  waitMinutesFromIso,
   formatHkClock,
   formatLiveStatusHead,
   stationNameWithPlatforms,
@@ -204,8 +205,6 @@ const els = {
   tripPlanSidebarPanel: document.getElementById("trip-plan-sidebar-panel"),
   etaRouteListSidebar: document.getElementById("eta-route-list-sidebar"),
   etaRouteHintSidebar: document.getElementById("eta-route-hint-sidebar"),
-  etaDirPager: document.getElementById("eta-dir-pager"),
-  etaRouteHero: document.getElementById("eta-route-hero"),
   toolbarEtaSearch: document.getElementById("toolbar-eta-search"),
   modeButtons: () =>
     Array.from(document.querySelectorAll(".toolbar-mode-btn[data-ui-mode]")),
@@ -236,16 +235,37 @@ let etaGeoPromise = null;
 /** @type {Map<string, string[]> | null} station name_en lower → line codes */
 let mtrStationLinesMap = null;
 /**
- * KMB route → bound destinations for direction swipe.
+ * KMB route → bound destinations for direction dots.
  * @type {Map<string, Array<{ bound: string, dest_en: string, dest_tc: string, orig_en: string, orig_tc: string, service_type: string }>> | null}
  */
 let kmbRouteBoundsMap = null;
 /** @type {Promise<Map<string, any[]>> | null} */
 let kmbRouteBoundsPromise = null;
-/** Selected route direction page (0 or 1) — two dots pager */
-let etaDirIndex = 0;
-/** @type {EtaRouteEntry | null} */
-let etaSelectedRoute = null;
+/** Per-card direction index 0|1 keyed by routeKey */
+/** @type {Map<string, number>} */
+const etaCardDirIndex = new Map();
+/**
+ * Live ETA payload attached when browsing nearby stops.
+ * @type {Map<string, { minutes: number | null, stopLabel: string, dest?: string, destZh?: string, bound?: string }>}
+ */
+const etaLiveByKey = new Map();
+/** @type {Array<{ stop: string, name_en: string, name_tc: string, lat: number, lon: number }> | null} */
+let kmbStopsCache = null;
+/** @type {Promise<any> | null} */
+let kmbStopsPromise = null;
+
+function etaRouteKey(r) {
+  return `${r?.kind || ""}|${r?.id || ""}|${r?.co || ""}`;
+}
+
+function getCardDir(r) {
+  const k = etaRouteKey(r);
+  return etaCardDirIndex.get(k) || 0;
+}
+
+function setCardDir(r, i) {
+  etaCardDirIndex.set(etaRouteKey(r), i <= 0 ? 0 : 1);
+}
 
 /** Sidebar stack: "search" | "trip" */
 let sidebarPage = "search";
@@ -4661,7 +4681,7 @@ function etaKindMatchesFilter(r) {
 }
 
 /**
- * Load KMB full route list once → dests per bound for direction swipe.
+ * Load KMB full route list once → dests per bound for direction dots.
  * @returns {Promise<Map<string, any[]>>}
  */
 async function ensureKmbRouteBounds() {
@@ -4691,14 +4711,12 @@ async function ensureKmbRouteBounds() {
           service_type: String(row.service_type || "1"),
         });
       }
-      // Prefer service_type 1 first; unique by bound
       for (const [k, arr] of map) {
         arr.sort((a, b) => Number(a.service_type) - Number(b.service_type));
         const byBound = new Map();
         for (const x of arr) {
           if (!byBound.has(x.bound)) byBound.set(x.bound, x);
         }
-        // Stable order O then I
         const ordered = [];
         if (byBound.has("O")) ordered.push(byBound.get("O"));
         if (byBound.has("I")) ordered.push(byBound.get("I"));
@@ -4717,13 +4735,45 @@ async function ensureKmbRouteBounds() {
   return kmbRouteBoundsPromise;
 }
 
+/** @returns {Promise<Array<{ stop: string, name_en: string, name_tc: string, lat: number, lon: number }>>} */
+async function ensureKmbStops() {
+  if (kmbStopsCache) return kmbStopsCache;
+  if (kmbStopsPromise) return kmbStopsPromise;
+  kmbStopsPromise = (async () => {
+    try {
+      const res = await fetch("/eta/kmb/stop", {
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const j = await res.json();
+      kmbStopsCache = (j.data || [])
+        .map((s) => ({
+          stop: String(s.stop || ""),
+          name_en: String(s.name_en || ""),
+          name_tc: String(s.name_tc || ""),
+          lat: Number(s.lat),
+          lon: Number(s.long ?? s.lon),
+        }))
+        .filter((s) => s.stop && Number.isFinite(s.lat) && Number.isFinite(s.lon));
+      console.info("[eta] KMB stops", kmbStopsCache.length);
+    } catch (e) {
+      console.warn("[eta] KMB stops", e);
+      kmbStopsCache = [];
+    }
+    return kmbStopsCache;
+  })();
+  return kmbStopsPromise;
+}
+
 /**
  * Destination labels for a catalog route (up to 2 directions).
  * @param {EtaRouteEntry} r
- * @returns {Array<{ dest: string, destZh?: string, bound?: string }>}
+ * @returns {Array<{ dest: string, destZh?: string, bound?: string, orig?: string }>}
  */
 function etaRouteDirections(r) {
-  if (!r) return [{ dest: r?.label || "—" }];
+  if (!r) return [{ dest: "—" }];
+  // Live nearby payload may pin dest for current bound
+  const live = etaLiveByKey.get(etaRouteKey(r));
   if (r.kind === "mtr") {
     return [{ dest: r.label, bound: "line" }];
   }
@@ -4739,9 +4789,148 @@ function etaRouteDirections(r) {
       orig: b.orig_en || b.orig_tc || "",
     }));
   }
-  // Fallback: catalog label
-  const lab = String(r.label || "").replace(/^(KMB\/LWB|CTB|NLB|GMB|MTR Bus)\s+/i, "");
+  if (live?.dest) {
+    return [
+      {
+        dest: live.dest,
+        destZh: live.destZh || "",
+        bound: live.bound || "O",
+      },
+    ];
+  }
+  const lab = String(r.label || "").replace(
+    /^(KMB\/LWB|CTB|NLB|GMB|MTR Bus)\s+/i,
+    "",
+  );
   return [{ dest: lab || r.id, bound: "0" }];
+}
+
+/**
+ * Company CSS class for route number color.
+ * @param {EtaRouteEntry} r
+ */
+function etaCompanyColorClass(r) {
+  if (r.kind === "mtr") return "co-mtr";
+  if (r.kind === "lrt") return "co-lrt";
+  if (r.kind === "mtr_bus") return "co-mtrbus";
+  const co = String(r.co || "").toLowerCase();
+  if (co === "gmb") return "co-gmb";
+  if (co === "ctb") return "co-ctb";
+  if (co === "nlb") return "co-nlb";
+  if (co === "lwb") return "co-lwb";
+  if (co === "kmb" || !co) return "co-kmb";
+  return "co-kmb";
+}
+
+/**
+ * Nearby KMB stop ETAs → EtaRouteEntry hits with live minutes.
+ * @param {{ lat: number, lon: number }} geo
+ * @param {number} [limit]
+ */
+async function fetchNearbyKmbEtaHits(geo, limit = 16) {
+  const stops = await ensureKmbStops();
+  if (!stops.length) return { hits: [], hint: "No stop data" };
+
+  const ranked = stops
+    .map((s) => ({
+      s,
+      d: haversineMEta(geo.lat, geo.lon, s.lat, s.lon),
+    }))
+    .filter((x) => x.d <= 450)
+    .sort((a, b) => a.d - b.d)
+    .slice(0, 5);
+
+  if (!ranked.length) {
+    return { hits: [], hint: "No bus stops within 450 m" };
+  }
+
+  /** @type {Map<string, EtaRouteEntry & { _eta?: any }>} */
+  const byRoute = new Map();
+  await Promise.all(
+    ranked.map(async ({ s, d }) => {
+      try {
+        const res = await fetch(`/eta/kmb/stop-eta/${encodeURIComponent(s.stop)}`, {
+          headers: { Accept: "application/json" },
+        });
+        if (!res.ok) return;
+        const j = await res.json();
+        const rows = Array.isArray(j.data) ? j.data : [];
+        // Group by route+dir, keep soonest eta
+        /** @type {Map<string, { row: any, mins: number | null }>} */
+        const best = new Map();
+        for (const row of rows) {
+          const route = String(row.route || "").toUpperCase();
+          if (!route) continue;
+          const dir = String(row.dir || "O").toUpperCase();
+          const key = `${route}|${dir}`;
+          const mins = waitMinutesFromIso(row.eta);
+          const prev = best.get(key);
+          if (!prev || (mins != null && (prev.mins == null || mins < prev.mins))) {
+            best.set(key, { row, mins });
+          }
+        }
+        for (const { row, mins } of best.values()) {
+          const route = String(row.route || "").toUpperCase();
+          const co = String(row.co || "KMB").toLowerCase();
+          const coU = co === "lwb" ? "lwb" : "kmb";
+          const entry = {
+            id: route,
+            label: `${coU === "lwb" ? "LWB" : "KMB"} ${route}`,
+            kind: "bus",
+            co: coU,
+            nearbyHint: `${s.name_tc || s.name_en} · ${Math.round(d)} m`,
+          };
+          const rk = etaRouteKey(entry);
+          // Prefer soonest overall for same route (merge dirs later via dots)
+          const existing = byRoute.get(route);
+          const live = {
+            minutes: mins,
+            stopLabel: s.name_tc || s.name_en,
+            dest: row.dest_en || "",
+            destZh: row.dest_tc || "",
+            bound: String(row.dir || "O").toUpperCase(),
+          };
+          if (
+            !existing ||
+            (mins != null &&
+              (etaLiveByKey.get(etaRouteKey(existing))?.minutes == null ||
+                mins < (etaLiveByKey.get(etaRouteKey(existing))?.minutes ?? 999)))
+          ) {
+            byRoute.set(route, entry);
+            etaLiveByKey.set(rk, live);
+            // Also set dir index to this bound if O=0 I=1
+            if (live.bound === "I") setCardDir(entry, 1);
+            else setCardDir(entry, 0);
+          }
+        }
+      } catch {
+        /* ignore stop */
+      }
+    }),
+  );
+
+  const hits = [...byRoute.values()]
+    .filter(etaKindMatchesFilter)
+    .sort((a, b) => {
+      const ma = etaLiveByKey.get(etaRouteKey(a))?.minutes;
+      const mb = etaLiveByKey.get(etaRouteKey(b))?.minutes;
+      if (ma == null && mb == null) return a.id.localeCompare(b.id, undefined, { numeric: true });
+      if (ma == null) return 1;
+      if (mb == null) return -1;
+      return ma - mb;
+    })
+    .slice(0, limit);
+
+  const stopNames = ranked
+    .slice(0, 2)
+    .map((x) => x.s.name_tc || x.s.name_en)
+    .join(" · ");
+  return {
+    hits,
+    hint: hits.length
+      ? `Near ${stopNames}`
+      : `Stops nearby · no live ETA`,
+  };
 }
 
 /**
@@ -4870,26 +5059,47 @@ async function browseEtaRoutes(limit = 16) {
     }
   }
 
-  // Bus / MTR Bus — list from “1” (no stop-level geo in catalog)
-  if (etaTrafficMode === "all" || etaTrafficMode === "bus") {
-    const buses = filtered
-      .filter((r) => r.kind === "bus" || r.kind === "mtr_bus")
-      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-    for (const r of buses) {
-      push(r);
+  // Bus / GMB: live nearby stop ETAs (KMB open data)
+  if (
+    etaTrafficMode === "bus" ||
+    etaTrafficMode === "gmb" ||
+    etaTrafficMode === "all"
+  ) {
+    const nearBus = await fetchNearbyKmbEtaHits(geo, limit);
+    for (const r of nearBus.hits) {
+      if (etaTrafficMode === "gmb" && r.co !== "gmb") continue;
+      // KMB nearby is franchised — gmb filter gets little; still ok
+      push(r, r.nearbyHint);
       if (out.length >= limit) break;
+    }
+    // Fallback catalog from “1…” if no nearby ETAs
+    if (!nearBus.hits.length && (etaTrafficMode === "bus" || etaTrafficMode === "all")) {
+      const buses = filtered
+        .filter((r) => r.kind === "bus" || r.kind === "mtr_bus")
+        .sort((a, b) =>
+          a.id.localeCompare(b.id, undefined, { numeric: true }),
+        );
+      for (const r of buses) {
+        push(r);
+        if (out.length >= limit) break;
+      }
     }
   }
 
   const stName = [...lineNear.values()].sort((a, b) => a.dist - b.dist)[0]
     ?.station;
+  const hasLive = out.some((r) => etaLiveByKey.has(etaRouteKey(r)));
   return {
     hits: out.slice(0, limit),
-    hint: stName
-      ? `Near ${stName}` + (nearLrt ? " · LRT area" : "")
-      : nearLrt
-        ? "Near Light Rail · bus from route 1"
-        : "Nearby · bus from route 1",
+    hint: hasLive
+      ? stName
+        ? `Near ${stName}` + (nearLrt ? " · LRT" : "") + " · live ETA"
+        : "Nearby stops · live ETA"
+      : stName
+        ? `Near ${stName}` + (nearLrt ? " · LRT area" : "")
+        : nearLrt
+          ? "Near Light Rail · bus from route 1"
+          : "Nearby · bus from route 1",
   };
 }
 
@@ -4948,50 +5158,58 @@ function searchEtaRoutes(query, limit = 16) {
 }
 
 /**
- * Wheels-style card HTML for one direction of a route.
+ * Wheels-style card body (no wifi icon). Company color on route number.
  * @param {EtaRouteEntry} r
- * @param {{ dest: string, destZh?: string, bound?: string }} dir
- * @param {{ minutes?: number | null, stopLabel?: string, live?: boolean }} [eta]
+ * @param {{ dest: string, destZh?: string, bound?: string, orig?: string }} dir
+ * @param {{ minutes?: number | null, stopLabel?: string }} [eta]
  */
 function etaRouteCardInnerHtml(r, dir, eta = {}) {
-  const colorClass =
-    r.kind === "mtr"
-      ? "is-mtr"
-      : r.kind === "lrt"
-        ? "is-lrt"
-        : r.co === "gmb"
-          ? "is-gmb"
-          : r.kind === "mtr_bus"
-            ? "is-mtr_bus"
-            : "";
   const dest = dir.destZh || dir.dest || r.label || "—";
   const stop =
     eta.stopLabel ||
     r.nearbyHint ||
-    (dir.orig ? `from ${dir.orig}` : r.label);
+    (dir.orig ? dir.orig : "");
   const mins = eta.minutes;
   const minsText =
-    mins == null || Number.isNaN(Number(mins)) ? "—" : String(Math.max(0, Math.round(Number(mins))));
+    mins == null || Number.isNaN(Number(mins))
+      ? "—"
+      : String(Math.max(0, Math.round(Number(mins))));
   const etaClass =
-    mins != null && mins <= 3 ? "is-live is-soon" : eta.live ? "is-live" : "";
+    mins != null && Number(mins) <= 3
+      ? "is-live is-soon"
+      : mins != null
+        ? "is-live"
+        : "";
   return `
     <div class="eta-card-main">
-      <div class="eta-card-route ${colorClass}">${escapeHtml(r.id)}</div>
+      <div class="eta-card-route ${etaCompanyColorClass(r)}">${escapeHtml(r.id)}</div>
       <div class="eta-card-dest">
         <span class="eta-card-arrow" aria-hidden="true">→</span>
         <span>${escapeHtml(dest)}</span>
       </div>
-      <div class="eta-card-stop">${escapeHtml(stop)}</div>
+      ${stop ? `<div class="eta-card-stop">${escapeHtml(stop)}</div>` : ""}
     </div>
     <div class="eta-card-eta ${etaClass}">
-      <span class="material-symbols-outlined eta-card-eta-icon" aria-hidden="true">cell_wifi</span>
       <span class="eta-card-eta-min">${escapeHtml(minsText)}</span>
       <span class="eta-card-eta-unit">min</span>
     </div>`;
 }
 
 /**
- * Render ETA routes as Wheels-style cards in the detail sidebar.
+ * Per-card direction dots (Wheels).
+ * @param {EtaRouteEntry} r
+ * @param {number} dirCount
+ * @param {number} activeDir
+ */
+function etaCardDotsHtml(r, dirCount, activeDir) {
+  if (dirCount < 2) return "";
+  return `<div class="eta-card-dots" role="tablist" aria-label="Direction" data-route-key="${escapeHtml(etaRouteKey(r))}">
+    <button type="button" class="eta-dir-dot ${activeDir === 0 ? "is-active" : ""}" data-dir="0" aria-label="Direction 1"></button>
+    <button type="button" class="eta-dir-dot ${activeDir === 1 ? "is-active" : ""}" data-dir="1" aria-label="Direction 2"></button>
+  </div>`;
+}
+
+/**
  * @param {EtaRouteEntry[]} hits
  * @param {string} [hint]
  */
@@ -5008,120 +5226,70 @@ function renderEtaRouteSuggest(hits, hint = "") {
     }
   }
   etaRouteHits = hits;
-  if (etaRouteActive < 0 || etaRouteActive >= hits.length) {
-    etaRouteActive = hits.length ? 0 : -1;
-  }
+  // Keep selection index if still in range; do not auto-select 0
+  if (etaRouteActive >= hits.length) etaRouteActive = hits.length ? 0 : -1;
+
   if (!hits.length) {
     list.innerHTML = `<li class="eta-route-empty" role="presentation">No matching routes</li>`;
-    updateEtaDirPager(0);
     return;
   }
+
   list.innerHTML = hits
     .map((r, i) => {
       const dirs = etaRouteDirections(r);
-      const dir = dirs[Math.min(etaDirIndex, dirs.length - 1)] || dirs[0];
-      const active =
-        etaSelectedRoute &&
-        etaSelectedRoute.id === r.id &&
-        etaSelectedRoute.kind === r.kind
-          ? "is-active"
-          : i === etaRouteActive
-            ? "is-active"
-            : "";
+      const di = Math.min(getCardDir(r), Math.max(0, dirs.length - 1));
+      const dir = dirs[di] || dirs[0] || { dest: r.label };
+      const live = etaLiveByKey.get(etaRouteKey(r));
+      // Prefer live dest when bound matches
+      let useDir = dir;
+      if (live?.dest && (dirs.length < 2 || live.bound === dir.bound)) {
+        useDir = {
+          dest: live.dest,
+          destZh: live.destZh || live.dest,
+          bound: live.bound,
+        };
+      }
+      const active = i === etaRouteActive ? "is-active" : "";
       return `<li role="option" data-idx="${i}" class="eta-route-card ${active}" aria-selected="${active ? "true" : "false"}">
-        ${etaRouteCardInnerHtml(r, dir)}
+        <div class="eta-route-card-body">
+          ${etaRouteCardInnerHtml(r, useDir, {
+            minutes: live?.minutes,
+            stopLabel: live?.stopLabel || r.nearbyHint,
+          })}
+        </div>
+        ${etaCardDotsHtml(r, dirs.length, di)}
       </li>`;
     })
     .join("");
+
   list.querySelectorAll("li[data-idx]").forEach((li) => {
-    li.addEventListener("click", () => {
+    li.addEventListener("click", (e) => {
+      // Clicks on direction dots handled separately
+      if (e.target.closest?.(".eta-card-dots")) return;
       const idx = Number(li.getAttribute("data-idx"));
       etaRouteActive = idx;
-      selectEtaRoute(etaRouteHits[idx]);
+      selectEtaRoute(etaRouteHits[idx], idx);
     });
   });
-  // Pager reflects selected route's direction count
-  const focus = etaSelectedRoute || hits[etaRouteActive];
-  const nDir = focus ? etaRouteDirections(focus).length : 0;
-  updateEtaDirPager(nDir);
-  wireEtaListSwipe(list);
-}
 
-/**
- * Show/hide 2-dot direction pager (Wheels).
- * @param {number} dirCount
- */
-function updateEtaDirPager(dirCount) {
-  const pager = els.etaDirPager;
-  if (!pager) return;
-  if (dirCount < 2) {
-    pager.hidden = true;
-    return;
-  }
-  pager.hidden = false;
-  pager.querySelectorAll(".eta-dir-dot").forEach((dot) => {
-    const i = Number(dot.getAttribute("data-eta-dir"));
-    dot.classList.toggle("is-active", i === etaDirIndex);
-    dot.hidden = i >= dirCount;
+  list.querySelectorAll(".eta-card-dots").forEach((dots) => {
+    dots.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const btn = e.target.closest?.("[data-dir]");
+      if (!btn) return;
+      const li = dots.closest("li[data-idx]");
+      const idx = Number(li?.getAttribute("data-idx"));
+      const r = etaRouteHits[idx];
+      if (!r) return;
+      setCardDir(r, Number(btn.getAttribute("data-dir")) || 0);
+      // Keep selection on this card
+      etaRouteActive = idx;
+      renderEtaRouteSuggest(etaRouteHits, hint);
+      // re-apply selection highlight after re-render
+      etaRouteActive = idx;
+      syncEtaActive();
+    });
   });
-}
-
-function setEtaDirIndex(i) {
-  etaDirIndex = i <= 0 ? 0 : 1;
-  // Re-render list with new direction destinations
-  if (etaRouteHits.length) {
-    renderEtaRouteSuggest(
-      etaRouteHits,
-      els.etaRouteHintSidebar?.textContent || "",
-    );
-  }
-  if (etaSelectedRoute) paintEtaRouteHero(etaSelectedRoute);
-  syncEtaDirDots();
-}
-
-function syncEtaDirDots() {
-  document.querySelectorAll(".eta-dir-dot").forEach((dot) => {
-    const i = Number(dot.getAttribute("data-eta-dir"));
-    dot.classList.toggle("is-active", i === etaDirIndex);
-  });
-}
-
-/**
- * Horizontal swipe on list to flip direction (Wheels two-dots).
- * @param {HTMLElement} list
- */
-function wireEtaListSwipe(list) {
-  if (list.dataset.swipeWired === "1") return;
-  list.dataset.swipeWired = "1";
-  let x0 = 0;
-  let y0 = 0;
-  let tracking = false;
-  list.addEventListener(
-    "touchstart",
-    (e) => {
-      const t = e.changedTouches?.[0];
-      if (!t) return;
-      x0 = t.clientX;
-      y0 = t.clientY;
-      tracking = true;
-    },
-    { passive: true },
-  );
-  list.addEventListener(
-    "touchend",
-    (e) => {
-      if (!tracking) return;
-      tracking = false;
-      const t = e.changedTouches?.[0];
-      if (!t) return;
-      const dx = t.clientX - x0;
-      const dy = t.clientY - y0;
-      if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy)) return;
-      if (dx < 0) setEtaDirIndex(1);
-      else setEtaDirIndex(0);
-    },
-    { passive: true },
-  );
 }
 
 /** Refresh sidebar list from current toolbar input + filter. */
@@ -5130,11 +5298,12 @@ async function refreshEtaRouteSuggest() {
   void ensureKmbRouteBounds();
   const q = String(els.inputEtaRoute?.value || "").trim();
   if (q.length >= 1) {
+    await ensureKmbRouteBounds();
     renderEtaRouteSuggest(searchEtaRoutes(q));
     return;
   }
-  renderEtaRouteSuggest([], "Loading nearby / browse…");
-  await ensureKmbRouteBounds();
+  renderEtaRouteSuggest([], "Loading nearby…");
+  await Promise.all([ensureKmbRouteBounds(), ensureKmbStops()]);
   const { hits, hint } = await browseEtaRoutes();
   if (String(els.inputEtaRoute?.value || "").trim().length >= 1) return;
   if (getUiMode() !== "eta") return;
@@ -5142,72 +5311,20 @@ async function refreshEtaRouteSuggest() {
 }
 
 /**
- * @param {EtaRouteEntry} route
- */
-function paintEtaRouteHero(route) {
-  const hero = els.etaRouteHero;
-  if (!hero) return;
-  const dirs = etaRouteDirections(route);
-  const n = Math.max(1, dirs.length);
-  etaDirIndex = Math.min(etaDirIndex, n - 1);
-  updateEtaDirPager(n);
-
-  if (n === 1) {
-    hero.hidden = false;
-    hero.innerHTML = `<div class="eta-route-card">${etaRouteCardInnerHtml(route, dirs[0])}</div>`;
-    return;
-  }
-  // Two pages — swipe / dots switch direction
-  hero.hidden = false;
-  hero.innerHTML = `
-    <div class="eta-hero-swipe">
-      <div class="eta-hero-track" style="transform:translateX(-${etaDirIndex * 100}%)">
-        ${dirs
-          .map(
-            (d) =>
-              `<div class="eta-hero-page"><div class="eta-route-card">${etaRouteCardInnerHtml(route, d)}</div></div>`,
-          )
-          .join("")}
-      </div>
-    </div>`;
-  const swipe = hero.querySelector(".eta-hero-swipe");
-  if (swipe && swipe.dataset.swipeWired !== "1") {
-    swipe.dataset.swipeWired = "1";
-    let x0 = 0;
-    let y0 = 0;
-    swipe.addEventListener(
-      "touchstart",
-      (e) => {
-        const t = e.changedTouches?.[0];
-        if (!t) return;
-        x0 = t.clientX;
-        y0 = t.clientY;
-      },
-      { passive: true },
-    );
-    swipe.addEventListener(
-      "touchend",
-      (e) => {
-        const t = e.changedTouches?.[0];
-        if (!t) return;
-        const dx = t.clientX - x0;
-        const dy = t.clientY - y0;
-        if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
-        if (dx < 0) setEtaDirIndex(Math.min(1, n - 1));
-        else setEtaDirIndex(0);
-      },
-      { passive: true },
-    );
-  }
-}
-
-/**
+ * Select a card in-place (does NOT write route into the search box).
  * @param {EtaRouteEntry | undefined} route
+ * @param {number} [listIndex]
  */
-function selectEtaRoute(route) {
+function selectEtaRoute(route, listIndex) {
   if (!route) return;
-  etaSelectedRoute = route;
-  if (els.inputEtaRoute) els.inputEtaRoute.value = route.id;
+  if (typeof listIndex === "number" && listIndex >= 0) {
+    etaRouteActive = listIndex;
+  }
+  // Do not put route number into the search box
+  const dirs = etaRouteDirections(route);
+  const di = getCardDir(route);
+  const dir = dirs[Math.min(di, dirs.length - 1)] || dirs[0];
+  const live = etaLiveByKey.get(etaRouteKey(route));
   const kindLabel =
     route.kind === "mtr"
       ? "MTR"
@@ -5217,18 +5334,16 @@ function selectEtaRoute(route) {
           ? "MTR Bus"
           : route.co === "gmb"
             ? "GMB"
-            : "Bus";
-  const dirs = etaRouteDirections(route);
-  const dir = dirs[Math.min(etaDirIndex, dirs.length - 1)] || dirs[0];
-  showToast(
-    `${kindLabel} ${route.id} → ${dir?.dest || route.label}`,
-    2400,
-  );
+            : route.co === "ctb"
+              ? "CTB"
+              : route.co === "nlb"
+                ? "NLB"
+                : "Bus";
+  const dest = live?.destZh || live?.dest || dir?.destZh || dir?.dest || route.label;
+  showToast(`${kindLabel} ${route.id} → ${dest}`, 2000);
   setDetailOpen(true);
   setSidebarPage("search");
   syncEtaActive();
-  paintEtaRouteHero(route);
-  // Hide generic plan-results; hero card is the Wheels-style focus
   if (els.planResults) {
     els.planResults.hidden = true;
     els.planResults.innerHTML = "";
@@ -5252,23 +5367,13 @@ function initEtaRouteSearchUi() {
         mode === "mtr" || mode === "lrt" || mode === "gmb" || mode === "bus"
           ? mode
           : "bus";
-      etaSelectedRoute = null;
-      etaDirIndex = 0;
-      if (els.etaRouteHero) {
-        els.etaRouteHero.hidden = true;
-        els.etaRouteHero.innerHTML = "";
-      }
+      etaRouteActive = -1;
+      etaLiveByKey.clear();
       syncEtaModeChips();
       void refreshEtaRouteSuggest();
     });
   });
   syncEtaModeChips();
-
-  document.querySelectorAll(".eta-dir-dot").forEach((dot) => {
-    dot.addEventListener("click", () => {
-      setEtaDirIndex(Number(dot.getAttribute("data-eta-dir")) || 0);
-    });
-  });
 
   if (input) {
     let timer = 0;
@@ -5276,11 +5381,7 @@ function initEtaRouteSearchUi() {
       clearTimeout(timer);
       timer = window.setTimeout(() => {
         if (getUiMode() !== "eta") return;
-        etaSelectedRoute = null;
-        if (els.etaRouteHero) {
-          els.etaRouteHero.hidden = true;
-          els.etaRouteHero.innerHTML = "";
-        }
+        etaRouteActive = -1;
         void refreshEtaRouteSuggest();
       }, 120);
     });
@@ -5289,21 +5390,20 @@ function initEtaRouteSearchUi() {
       if (getUiMode() !== "eta") return;
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        etaRouteActive = Math.min(etaRouteActive + 1, etaRouteHits.length - 1);
+        etaRouteActive = Math.min(
+          Math.max(etaRouteActive + 1, 0),
+          etaRouteHits.length - 1,
+        );
         syncEtaActive();
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         etaRouteActive = Math.max(etaRouteActive - 1, 0);
         syncEtaActive();
-      } else if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        setEtaDirIndex(0);
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        setEtaDirIndex(1);
       } else if (e.key === "Enter") {
         e.preventDefault();
-        if (etaRouteActive >= 0) selectEtaRoute(etaRouteHits[etaRouteActive]);
+        if (etaRouteActive >= 0) {
+          selectEtaRoute(etaRouteHits[etaRouteActive], etaRouteActive);
+        }
       }
     });
 
@@ -5314,16 +5414,18 @@ function initEtaRouteSearchUi() {
     });
   }
 
-  // Initial ETA mode (default shell): fill sidebar list
   if (getUiMode() === "eta") {
     if (els.etaSidebarPanel) els.etaSidebarPanel.hidden = false;
     if (els.tripPlanSidebarPanel) els.tripPlanSidebarPanel.hidden = true;
     void ensureMtrStationLinesMap();
-    void ensureKmbRouteBounds().then(() => refreshEtaRouteSuggest());
+    void Promise.all([ensureKmbRouteBounds(), ensureKmbStops()]).then(() =>
+      refreshEtaRouteSuggest(),
+    );
   }
 
   void ensureMtrStationLinesMap();
   void ensureKmbRouteBounds();
+  void ensureKmbStops();
 }
 
 function syncEtaActive() {
@@ -5331,13 +5433,8 @@ function syncEtaActive() {
   if (!list) return;
   list.querySelectorAll("li[data-idx]").forEach((li) => {
     const i = Number(li.getAttribute("data-idx"));
-    const on =
-      (etaSelectedRoute &&
-        etaRouteHits[i] &&
-        etaSelectedRoute.id === etaRouteHits[i].id &&
-        etaSelectedRoute.kind === etaRouteHits[i].kind) ||
-      (!etaSelectedRoute && i === etaRouteActive);
-    li.classList.toggle("is-active", !!on);
+    const on = i === etaRouteActive;
+    li.classList.toggle("is-active", on);
     li.setAttribute("aria-selected", on ? "true" : "false");
     if (on) li.scrollIntoView({ block: "nearest" });
   });
