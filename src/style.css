@@ -646,17 +646,35 @@ body.mobile-ui [data-acrylic]::before {
   display: none !important;
 }
 
-/* Search box in sidebar (moved from toolbar) */
+/* Bottom chrome: search + filters (thumb zone) */
+.eta-sidebar-bottom-chrome {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+  margin: 0 -2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.4) 0%,
+    rgba(0, 0, 0, 0.18) 55%,
+    transparent 100%
+  );
+}
+
+/* Search box — bottom of list for mobile access */
 .eta-sidebar-search {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
   margin: 0 4px;
-  padding: 10px 12px;
+  padding: 12px 14px;
+  min-height: 48px;
   border-radius: 14px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   box-sizing: border-box;
 }
 
@@ -844,19 +862,14 @@ body.mobile-ui [data-acrylic]::before {
   justify-content: flex-start;
 }
 
-/* Bottom filter bar — easier thumb reach on mobile */
+/* Filter chips under search */
 .eta-mode-filter-bottom {
   flex-shrink: 0;
   justify-content: center;
-  padding: 10px 6px calc(8px + env(safe-area-inset-bottom, 0px));
-  margin: 0 -2px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  background: linear-gradient(
-    to top,
-    rgba(0, 0, 0, 0.35) 0%,
-    rgba(0, 0, 0, 0.12) 70%,
-    transparent 100%
-  );
+  padding: 2px 6px 4px;
+  margin: 0;
+  border-top: none;
+  background: transparent;
 }
 
 .eta-mode-filter-bottom .eta-mode-chip {

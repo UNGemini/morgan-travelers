@@ -610,32 +610,13 @@
             <!-- Page: search + plan list -->
             <div id="sidebar-page-search" class="sidebar-page">
 
-            <!-- ETA mode: search + route list + bottom filters (hidden in Trip Plan) -->
+            <!-- ETA mode: list on top; search + filters at bottom for mobile thumbs -->
             <section
               id="eta-sidebar-panel"
               class="panel-section eta-sidebar-panel"
               hidden
               aria-label="ETA route browser"
             >
-              <!-- Search at top of sidebar -->
-              <div class="eta-sidebar-search" id="eta-sidebar-search">
-                <span class="material-symbols-outlined eta-sidebar-search-icon" aria-hidden="true"
-                  >search</span
-                >
-                <input
-                  id="input-eta-route"
-                  class="eta-sidebar-search-input"
-                  type="search"
-                  enterkeyhint="search"
-                  autocomplete="off"
-                  spellcheck="false"
-                  placeholder="Route no. or MTR line"
-                  aria-label="Search bus, MTR or LRT route"
-                  aria-autocomplete="list"
-                  aria-controls="eta-route-list-sidebar"
-                />
-              </div>
-
               <p id="eta-route-hint-sidebar" class="eta-route-hint-sidebar" hidden></p>
 
               <div class="eta-route-list-wrap">
@@ -673,28 +654,48 @@
                 </button>
               </div>
 
-              <!-- Filters at bottom for easier thumb reach on mobile -->
-              <div
-                class="eta-mode-filter eta-mode-filter-sidebar eta-mode-filter-bottom"
-                role="group"
-                aria-label="Traffic method"
-              >
-                <button type="button" class="eta-mode-chip is-active" data-eta-mode="bus" title="Bus">
-                  <span class="material-symbols-outlined" aria-hidden="true">directions_bus</span>
-                  <span>Bus</span>
-                </button>
-                <button type="button" class="eta-mode-chip" data-eta-mode="mtr" title="MTR">
-                  <span class="material-symbols-outlined" aria-hidden="true">subway</span>
-                  <span>MTR</span>
-                </button>
-                <button type="button" class="eta-mode-chip" data-eta-mode="gmb" title="GMB">
-                  <span class="material-symbols-outlined" aria-hidden="true">airport_shuttle</span>
-                  <span>GMB</span>
-                </button>
-                <button type="button" class="eta-mode-chip" data-eta-mode="lrt" title="LRT">
-                  <span class="material-symbols-outlined" aria-hidden="true">tram</span>
-                  <span>LRT</span>
-                </button>
+              <!-- Bottom chrome: search + filters (thumb-friendly) -->
+              <div class="eta-sidebar-bottom-chrome">
+                <div class="eta-sidebar-search" id="eta-sidebar-search">
+                  <span class="material-symbols-outlined eta-sidebar-search-icon" aria-hidden="true"
+                    >search</span
+                  >
+                  <input
+                    id="input-eta-route"
+                    class="eta-sidebar-search-input"
+                    type="search"
+                    enterkeyhint="search"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="Route no. or MTR line"
+                    aria-label="Search bus, MTR or LRT route"
+                    aria-autocomplete="list"
+                    aria-controls="eta-route-list-sidebar"
+                  />
+                </div>
+
+                <div
+                  class="eta-mode-filter eta-mode-filter-sidebar eta-mode-filter-bottom"
+                  role="group"
+                  aria-label="Traffic method"
+                >
+                  <button type="button" class="eta-mode-chip is-active" data-eta-mode="bus" title="Bus">
+                    <span class="material-symbols-outlined" aria-hidden="true">directions_bus</span>
+                    <span>Bus</span>
+                  </button>
+                  <button type="button" class="eta-mode-chip" data-eta-mode="mtr" title="MTR">
+                    <span class="material-symbols-outlined" aria-hidden="true">subway</span>
+                    <span>MTR</span>
+                  </button>
+                  <button type="button" class="eta-mode-chip" data-eta-mode="gmb" title="GMB">
+                    <span class="material-symbols-outlined" aria-hidden="true">airport_shuttle</span>
+                    <span>GMB</span>
+                  </button>
+                  <button type="button" class="eta-mode-chip" data-eta-mode="lrt" title="LRT">
+                    <span class="material-symbols-outlined" aria-hidden="true">tram</span>
+                    <span>LRT</span>
+                  </button>
+                </div>
               </div>
             </section>
 
