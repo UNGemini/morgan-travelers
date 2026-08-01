@@ -1875,13 +1875,13 @@ body.mobile-ui [data-acrylic]::before {
  * Nested:     r_card = r_btn + pad
  */
 .eta-route-list-sidebar li.eta-route-card {
-  --eta-card-pad: 12px;
+  --eta-card-pad: 16px;
   --eta-btn-h: 44px;
   --eta-btn-r: calc(var(--eta-btn-h) / 2); /* pill */
   --eta-card-r: calc(var(--eta-btn-r) + var(--eta-card-pad)); /* outer = inner + pad */
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   padding: var(--eta-card-pad);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--eta-card-r);
@@ -1909,9 +1909,11 @@ body.mobile-ui [data-acrylic]::before {
 .eta-route-card-body {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 4px 12px;
+  gap: 6px 14px;
   align-items: start;
   width: 100%;
+  /* Extra breathing room for route / dest / stop info */
+  padding: 2px 2px 4px;
 }
 
 .eta-route-list-sidebar .eta-route-empty {
@@ -2005,7 +2007,7 @@ body.mobile-ui [data-acrylic]::before {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 5px;
 }
 
 .eta-card-route {
