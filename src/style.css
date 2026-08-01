@@ -1253,7 +1253,7 @@ body.mobile-ui [data-acrylic]::before {
 .eta-route-list-sidebar {
   list-style: none;
   margin: 0;
-  padding: 4px 8px 36px;
+  padding: 4px 8px 48px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1262,17 +1262,22 @@ body.mobile-ui [data-acrylic]::before {
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
-  /* Fade the cards themselves (opacity mask) — no solid overlay tint */
+  /*
+   * Soft edge fade only at the very bottom — keep card content (esp. Opposite
+   * control) fully solid while scrolling. Long fade (56px) was washing buttons.
+   */
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - 56px),
+    #000 calc(100% - 20px),
+    rgba(0, 0, 0, 0.55) calc(100% - 8px),
     transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - 56px),
+    #000 calc(100% - 20px),
+    rgba(0, 0, 0, 0.55) calc(100% - 8px),
     transparent 100%
   );
 }
@@ -1653,25 +1658,41 @@ body.mobile-ui [data-acrylic]::before {
   font-size: 20px !important;
 }
 
-/* Search list: full-width liquid glass Opposite control */
+/* Search list: full-width solid liquid-glass Opposite (no wash / no fade) */
 .eta-route-card .eta-card-dir-switch,
 .eta-route-card .wheels-dir-switch.eta-card-dir-switch {
   align-self: stretch;
   width: 100%;
-  margin: 8px 0 0;
-  min-height: 44px;
+  margin: 10px 0 2px;
+  min-height: 46px;
   padding: 10px 14px;
-  border: 1px solid var(--lg-border, rgba(255, 255, 255, 0.14));
-  background: var(--lg-fill, rgba(40, 42, 48, 0.55));
+  opacity: 1;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(52, 54, 62, 0.92);
   box-shadow:
-    var(--lg-highlight, inset 0 1px 0 rgba(255, 255, 255, 0.18)),
-    0 4px 14px rgba(0, 0, 0, 0.2);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  backdrop-filter: blur(20px) saturate(1.4);
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 4px 16px rgba(0, 0, 0, 0.28);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  backdrop-filter: blur(24px) saturate(1.5);
+  color: #fff;
+  /* Avoid inheriting list transitions that look like a fade-in */
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 
 .eta-route-card .eta-card-dir-switch:hover {
-  background: var(--lg-fill-strong, rgba(48, 50, 56, 0.72));
+  background: rgba(62, 64, 74, 0.96);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+
+.eta-route-card .eta-card-dir-switch .wheels-dir-dots i {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.eta-route-card .eta-card-dir-switch .wheels-dir-dots i.is-on {
+  background: #fff;
 }
 
 .wheels-dir-dots {
