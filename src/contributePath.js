@@ -776,6 +776,8 @@ export function createPathContributor(ctx) {
     showToast = () => {},
     getSelectedPlanRoute,
     getSelectedPlanPolyline,
+    /** Clear trip/ETA route path on the map when entering contribute */
+    clearRoutePath = () => {},
   } = ctx;
 
   /** @type {number[][]} lon,lat — dense editable path */
@@ -2897,6 +2899,12 @@ export function createPathContributor(ctx) {
         3200,
       );
       return;
+    }
+    // Unload trip/ETA painted route so only contribute draft layers show
+    try {
+      clearRoutePath();
+    } catch {
+      /* ignore */
     }
     els.sheet.hidden = false;
     active = true;

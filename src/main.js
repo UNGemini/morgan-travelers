@@ -8480,6 +8480,18 @@ els.btnInfo?.addEventListener("click", () => openSheet(els.infoSheet));
 const pathContributor = createPathContributor({
   map,
   showToast,
+  clearRoutePath: () => {
+    try {
+      clearRouteGeometry();
+    } catch {
+      /* ignore */
+    }
+    try {
+      setMapRouteLoading(false);
+    } catch {
+      /* ignore */
+    }
+  },
   getSelectedPlanRoute: () => {
     if (tripDetailIdx == null && (!plans?.length)) return null;
     const idx = tripDetailIdx != null ? tripDetailIdx : 0;
