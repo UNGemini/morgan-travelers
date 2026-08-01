@@ -4985,6 +4985,200 @@ function etaCompanyColorClass(r) {
 }
 
 /**
+ * Compact GTFS-derived index for non-KMB nearby (CTB/NLB/GMB/MTR Bus).
+ * Shape: { v, stops: [lat, lon, name, stopId, [[co, route], ...]] }
+ * @type {{ v: number, stops: any[] } | null}
+ */
+let etaNearbyIndex = null;
+/** @type {Promise<{ v: number, stops: any[] }> | null} */
+let etaNearbyIndexPromise = null;
+
+async function ensureEtaNearbyIndex() {
+  if (etaNearbyIndex) return etaNearbyIndex;
+  if (etaNearbyIndexPromise) return etaNearbyIndexPromise;
+  etaNearbyIndexPromise = (async () => {
+    try {
+      const res = await fetch("/data/eta-nearby-stops.json", {
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const j = await res.json();
+      etaNearbyIndex = {
+        v: Number(j.v) || 1,
+        stops: Array.isArray(j.stops) ? j.stops : [],
+      };
+      console.info("[eta] nearby index stops", etaNearbyIndex.stops.length);
+    } catch (e) {
+      console.warn("[eta] nearby index", e);
+      etaNearbyIndex = { v: 1, stops: [] };
+    }
+    return etaNearbyIndex;
+  })();
+  return etaNearbyIndexPromise;
+}
+
+/**
+ * Label helper for multi-op catalog/nearby cards.
+ * @param {string} co
+ * @param {string} route
+ */
+function etaCoRouteLabel(co, route) {
+  const c = String(co || "").toLowerCase();
+  const r = String(route || "").toUpperCase();
+  if (c === "ctb") return `CTB ${r}`;
+  if (c === "nlb") return `NLB ${r}`;
+  if (c === "gmb") return `GMB ${r}`;
+  if (c === "lwb") return `LWB ${r}`;
+  if (c === "lrtfeeder" || c === "mtrbus") return `MTR Bus ${r}`;
+  if (c === "kmb") return `KMB ${r}`;
+  return `Bus ${r}`;
+}
+
+/**
+ * Nearby CTB / NLB / GMB / MTR Bus from GTFS stop index (geo), optional CTB live ETA.
+ * @param {{ lat: number, lon: number }} geo
+ * @param {number} [limit]
+ */
+async function fetchNearbyMultiOpHits(geo, limit = 24) {
+  const idx = await ensureEtaNearbyIndex();
+  const stops = idx?.stops || [];
+  if (!stops.length) return { hits: [], hint: "" };
+
+  /** @type {Array<{ s: any, d: number }>} */
+  const ranked = [];
+  for (const s of stops) {
+    const lat = Number(s[0]);
+    const lon = Number(s[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const d = haversineMEta(geo.lat, geo.lon, lat, lon);
+    if (d <= 500) ranked.push({ s, d });
+  }
+  ranked.sort((a, b) => a.d - b.d);
+  const topStops = ranked.slice(0, 14);
+  if (!topStops.length) {
+    return { hits: [], hint: "No CTB/NLB/GMB stops within 500 m" };
+  }
+
+  /** @type {Map<string, EtaRouteEntry>} */
+  const byKey = new Map();
+  /** @type {Map<string, { d: number, stopId: string, name: string }>} */
+  const meta = new Map();
+
+  for (const { s, d } of topStops) {
+    const name = String(s[2] || "");
+    const stopId = String(s[3] || "");
+    const routes = Array.isArray(s[4]) ? s[4] : [];
+    for (const pair of routes) {
+      const co = String(pair?.[0] || "").toLowerCase();
+      const route = String(pair?.[1] || "").toUpperCase();
+      if (!co || !route) continue;
+      const kind = co === "lrtfeeder" || co === "mtrbus" ? "mtr_bus" : "bus";
+      const entry = {
+        id: route,
+        label: etaCoRouteLabel(co, route),
+        kind,
+        co,
+        nearbyHint: `${name} · ${Math.round(d)} m`,
+      };
+      if (!etaKindMatchesFilter(entry)) continue;
+      const k = etaRouteKey(entry);
+      const prev = meta.get(k);
+      if (!prev || d < prev.d) {
+        byKey.set(k, entry);
+        meta.set(k, { d, stopId, name });
+      }
+    }
+  }
+
+  // Live CTB ETAs for a few nearest routes (stop-level)
+  const ctbKeys = [...byKey.entries()]
+    .filter(([, e]) => e.co === "ctb")
+    .sort(
+      (a, b) => (meta.get(a[0])?.d ?? 9999) - (meta.get(b[0])?.d ?? 9999),
+    )
+    .slice(0, 12);
+
+  await Promise.all(
+    ctbKeys.map(async ([k, entry]) => {
+      const m = meta.get(k);
+      if (!m?.stopId) return;
+      const sid = m.stopId;
+      const candidates = [sid];
+      if (/^\d+$/.test(sid)) {
+        candidates.push(sid.padStart(6, "0"));
+        candidates.push(String(Number(sid)));
+      }
+      for (const stop of [...new Set(candidates)]) {
+        try {
+          const res = await fetch(
+            `/eta/ctb/eta/CTB/${encodeURIComponent(stop)}/${encodeURIComponent(entry.id)}`,
+            { headers: { Accept: "application/json" } },
+          );
+          if (!res.ok) continue;
+          const j = await res.json();
+          const rows = Array.isArray(j.data) ? j.data : [];
+          let bestMins = null;
+          let dest = "";
+          let destZh = "";
+          let bound = "O";
+          for (const row of rows) {
+            const mins = waitMinutesFromIso(row.eta);
+            if (mins == null) continue;
+            if (bestMins == null || mins < bestMins) {
+              bestMins = mins;
+              dest = row.dest_en || "";
+              destZh = row.dest_tc || "";
+              bound = String(row.dir || "O").toUpperCase();
+            }
+          }
+          if (bestMins != null) {
+            etaLiveByKey.set(k, {
+              minutes: bestMins,
+              stopLabel: m.name,
+              dest,
+              destZh,
+              bound,
+            });
+            if (bound === "I") setCardDir(entry, 1);
+            else setCardDir(entry, 0);
+          }
+          break;
+        } catch {
+          /* try next stop id form */
+        }
+      }
+    }),
+  );
+
+  const hits = [...byKey.values()]
+    .sort((a, b) => {
+      const ma = etaLiveByKey.get(etaRouteKey(a))?.minutes;
+      const mb = etaLiveByKey.get(etaRouteKey(b))?.minutes;
+      const da = meta.get(etaRouteKey(a))?.d ?? 9999;
+      const db = meta.get(etaRouteKey(b))?.d ?? 9999;
+      // Live first, then distance
+      if (ma != null && mb != null && ma !== mb) return ma - mb;
+      if (ma != null && mb == null) return -1;
+      if (ma == null && mb != null) return 1;
+      if (da !== db) return da - db;
+      return a.id.localeCompare(b.id, undefined, { numeric: true });
+    })
+    .slice(0, limit);
+
+  const stopNames = topStops
+    .slice(0, 2)
+    .map((x) => String(x.s[2] || ""))
+    .filter(Boolean)
+    .join(" · ");
+  return {
+    hits,
+    hint: hits.length
+      ? `Near ${stopNames || "you"} · multi-op`
+      : "No other operators nearby",
+  };
+}
+
+/**
  * Nearby KMB stop ETAs → EtaRouteEntry hits with live minutes.
  * @param {{ lat: number, lon: number }} geo
  * @param {number} [limit]
@@ -5122,8 +5316,8 @@ function ensureEtaUserGeo() {
 
 /**
  * Empty query browse list.
- * Multi-operator catalog always (KMB/LWB/CTB/NLB/GMB/MTR/LRT by filter).
- * With location: promote nearby KMB live ETAs + nearby MTR lines + LRT.
+ * With location: multi-operator nearby (KMB live + CTB/NLB/GMB/MTR Bus index) + MTR/LRT.
+ * Without location: multi-operator catalog from route 1.
  * @param {number} [limit]
  * @returns {Promise<{ hits: EtaRouteEntry[], hint: string }>}
  */
@@ -5144,14 +5338,10 @@ async function browseEtaRoutes(limit = 28) {
     out.push({ ...r, nearbyHint: hint || r.nearbyHint });
   };
 
-  // Catalog sorted by route id (multi-operator)
+  // Catalog sorted by route id (multi-operator) — fallback only
   const catalogSorted = [...filtered].sort((a, b) => {
-    const ka = `${a.kind}|${a.co || ""}|${a.id}`;
-    const kb = `${b.kind}|${b.co || ""}|${b.id}`;
-    // Prefer numeric route order within same kind
     const idCmp = a.id.localeCompare(b.id, undefined, { numeric: true });
     if (a.kind === b.kind && a.co === b.co) return idCmp;
-    // Group: mtr, lrt, then bus companies
     const order = { mtr: 0, lrt: 1, mtr_bus: 2, bus: 3 };
     const oa = order[a.kind] ?? 9;
     const ob = order[b.kind] ?? 9;
@@ -5162,13 +5352,15 @@ async function browseEtaRoutes(limit = 28) {
   });
 
   if (!geo) {
+    // Warm multi-op index in background for when location arrives
+    void ensureEtaNearbyIndex();
     const hits = catalogSorted.slice(0, limit);
     return {
       hits,
       hint:
         etaTrafficMode === "mtr"
           ? "All MTR lines · allow location for nearby"
-          : "All operators from route 1 · allow location for nearby ETAs",
+          : "All operators · allow location for nearby routes",
     };
   }
 
@@ -5230,50 +5422,114 @@ async function browseEtaRoutes(limit = 28) {
     }
   }
 
-  // Bus / GMB: merge live KMB nearby + full multi-op catalog (CTB/NLB/GMB/…)
+  // Bus / GMB: true multi-op nearby (not KMB-only)
   if (
     etaTrafficMode === "bus" ||
     etaTrafficMode === "gmb" ||
     etaTrafficMode === "all"
   ) {
-    const nearBus = await fetchNearbyKmbEtaHits(geo, Math.min(20, limit));
-    // Live first (soonest)
-    for (const r of nearBus.hits) {
-      if (etaTrafficMode === "gmb" && r.co !== "gmb") continue;
-      push(r, r.nearbyHint);
+    const wantKmb = etaTrafficMode !== "gmb";
+    const [nearKmb, nearOther] = await Promise.all([
+      wantKmb
+        ? fetchNearbyKmbEtaHits(geo, Math.min(14, limit))
+        : Promise.resolve({ hits: [], hint: "" }),
+      fetchNearbyMultiOpHits(geo, Math.min(24, limit)),
+    ]);
+
+    // Merge and rank: live minutes first, then keep operator diversity near top
+    /** @type {EtaRouteEntry[]} */
+    const merged = [];
+    const mergeSeen = new Set();
+    const addMerged = (r) => {
+      if (!r || !etaKindMatchesFilter(r)) return;
+      if (etaTrafficMode === "gmb" && r.co !== "gmb") return;
+      const k = etaRouteKey(r);
+      if (mergeSeen.has(k)) return;
+      mergeSeen.add(k);
+      merged.push(r);
+    };
+    for (const r of nearKmb.hits) addMerged(r);
+    for (const r of nearOther.hits) addMerged(r);
+
+    const etaMins = (r) => etaLiveByKey.get(etaRouteKey(r))?.minutes;
+    const sortByEtaThenId = (a, b) => {
+      const ma = etaMins(a);
+      const mb = etaMins(b);
+      if (ma != null && mb != null && ma !== mb) return ma - mb;
+      if (ma != null && mb == null) return -1;
+      if (ma == null && mb != null) return 1;
+      return a.id.localeCompare(b.id, undefined, { numeric: true });
+    };
+
+    // Round-robin by operator so nearby isn't only KMB at the top
+    /** @type {Map<string, EtaRouteEntry[]>} */
+    const byCo = new Map();
+    for (const r of merged) {
+      const co = String(r.co || r.kind || "bus");
+      if (!byCo.has(co)) byCo.set(co, []);
+      byCo.get(co).push(r);
     }
-    // Then fill with CTB / NLB / GMB / KMB / MTR Bus from catalog (not only KMB)
-    for (const r of catalogSorted) {
-      if (r.kind !== "bus" && r.kind !== "mtr_bus") continue;
-      // Skip if already have same operator+route from live
-      const already = out.some(
-        (x) =>
-          x.id === r.id &&
-          (x.co || "") === (r.co || "") &&
-          (x.kind === "bus" || x.kind === "mtr_bus"),
-      );
-      if (already) continue;
-      // Also skip duplicate route id from different co if live KMB same number? keep both
-      push(r);
+    for (const arr of byCo.values()) arr.sort(sortByEtaThenId);
+
+    /** @type {EtaRouteEntry[]} */
+    const diversified = [];
+    const used = new Set();
+    const cos = [...byCo.keys()].sort();
+    for (let i = 0; i < 8; i++) {
+      for (const co of cos) {
+        const r = byCo.get(co)?.[i];
+        if (!r) continue;
+        const k = etaRouteKey(r);
+        if (used.has(k)) continue;
+        used.add(k);
+        diversified.push(r);
+        if (diversified.length >= limit) break;
+      }
+      if (diversified.length >= limit) break;
+    }
+    if (diversified.length < limit) {
+      const rest = merged.filter((r) => !used.has(etaRouteKey(r))).sort(sortByEtaThenId);
+      for (const r of rest) {
+        diversified.push(r);
+        if (diversified.length >= limit) break;
+      }
+    }
+
+    for (const r of diversified) {
+      push(r, r.nearbyHint);
       if (out.length >= limit) break;
+    }
+
+    // Catalog fill only if few true nearby hits
+    if (out.length < Math.min(8, limit)) {
+      for (const r of catalogSorted) {
+        if (r.kind !== "bus" && r.kind !== "mtr_bus") continue;
+        push(r);
+        if (out.length >= limit) break;
+      }
     }
   }
 
   const stName = [...lineNear.values()].sort((a, b) => a.dist - b.dist)[0]
     ?.station;
+  const cos = new Set(out.map((r) => r.co || r.kind).filter(Boolean));
+  const coList = [...cos]
+    .map((c) => String(c).toUpperCase())
+    .filter((c) => c !== "BUS")
+    .slice(0, 6)
+    .join(" · ");
   const hasLive = out.some((r) => etaLiveByKey.has(etaRouteKey(r)));
-  const cos = new Set(
-    out.map((r) => r.co || r.kind).filter(Boolean),
-  );
   return {
     hits: out.slice(0, limit),
-    hint: hasLive
-      ? `Live KMB nearby · + CTB/NLB/GMB catalog${stName ? ` · MTR near ${stName}` : ""}`
+    hint: out.length
+      ? `Nearby ${coList || "routes"}${hasLive ? " · live ETA" : ""}${
+          stName ? ` · MTR near ${stName}` : ""
+        }`
       : stName
-        ? `Near ${stName}${nearLrt ? " · LRT" : ""} · multi-operator list`
+        ? `Near ${stName}${nearLrt ? " · LRT" : ""}`
         : nearLrt
-          ? "Near Light Rail · multi-operator from route 1"
-          : "Multi-operator from route 1",
+          ? "Near Light Rail"
+          : "No nearby routes found",
   };
 }
 
@@ -5429,13 +5685,9 @@ function renderEtaRouteSuggest(hits, hint = "", opts = {}) {
       const di = Math.min(getCardDir(r), Math.max(0, dirs.length - 1));
       const dir = dirs[di] || dirs[0] || { dest: r.label };
       const live = etaLiveByKey.get(etaRouteKey(r));
-      // Prefer live dest only for same company key (live is KMB-only nearby today)
+      // Live dest when we have ETA for this exact operator+route key
       let useDir = dir;
-      if (
-        live?.dest &&
-        (r.co === "kmb" || r.co === "lwb" || !r.co) &&
-        (dirs.length < 2 || live.bound === dir.bound)
-      ) {
+      if (live?.dest && (dirs.length < 2 || !dir.bound || live.bound === dir.bound)) {
         useDir = {
           dest: live.dest,
           destZh: live.destZh || live.dest,
@@ -5446,12 +5698,8 @@ function renderEtaRouteSuggest(hits, hint = "", opts = {}) {
       return `<li role="option" data-idx="${i}" class="eta-route-card ${active}" aria-selected="${active ? "true" : "false"}">
         <div class="eta-route-card-body">
           ${etaRouteCardInnerHtml(r, useDir, {
-            minutes:
-              r.co === "kmb" || r.co === "lwb" || !r.co ? live?.minutes : null,
-            stopLabel:
-              r.co === "kmb" || r.co === "lwb" || !r.co
-                ? live?.stopLabel || r.nearbyHint
-                : r.nearbyHint,
+            minutes: live?.minutes,
+            stopLabel: live?.stopLabel || r.nearbyHint,
           })}
         </div>
         ${etaCardDotsHtml(r, dirs.length, di)}
