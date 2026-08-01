@@ -1734,8 +1734,7 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 /*
- * Search list Opposite — nested corners:
- *   outer (card) = inner (button) + padding
+ * Search list Opposite — full pill shape (capsule).
  * no backdrop-filter so the list mask fade still applies.
  */
 .eta-route-card .eta-card-dir-switch,
@@ -1746,8 +1745,7 @@ body.mobile-ui [data-acrylic]::before {
   min-height: 46px;
   padding: 10px 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  /* Inner radius = outer − pad (clamped) */
-  border-radius: var(--eta-card-inner-r, 8px);
+  border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
   -webkit-backdrop-filter: none;
