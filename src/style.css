@@ -391,8 +391,9 @@ body.mobile-ui [data-acrylic]::before {
   bottom: calc(var(--dock-pad) + var(--safe-bottom));
   top: auto;
   transform: translateY(0);
-  /* Width locked via --dock-chrome-w (JS); max-width always caps to viewport */
+  /* Width locked via --dock-chrome-w (JS) — same for ETA + Trip Plan */
   width: var(--dock-chrome-w, max-content);
+  min-width: var(--dock-chrome-w, 0px);
   max-width: calc(100vw - 2 * var(--dock-pad));
   display: flex;
   flex-direction: column;
@@ -425,7 +426,19 @@ body.mobile-ui [data-acrylic]::before {
   max-height: calc(100dvh - 2 * var(--dock-pad) - var(--safe-top) - var(--safe-bottom));
   height: auto;
   width: var(--dock-chrome-w, max-content);
+  min-width: var(--dock-chrome-w, 0px);
   max-width: calc(100vw - 2 * var(--dock-pad));
+}
+
+/* Sidebar pages must not widen the dock beyond chrome lock */
+.detail-sidebar,
+.detail-sidebar-body,
+.sidebar-page,
+.eta-sidebar-panel,
+.trip-plan-sidebar-panel {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .app-shell[data-toolbar="closed"] .main-toolbar {

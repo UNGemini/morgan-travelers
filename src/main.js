@@ -4535,10 +4535,12 @@ function dockPadPx() {
 
 /**
  * Lock dock width to chrome content × scale (collapsed + expanded).
- * Always caps to viewport. Use force:true on resize / detail toggle.
- * Without force, never shrink (avoids mid-slot flex shrink loops on mode switch).
+ * ETA and Trip Plan share the same width: we never shrink on mode switch.
+ * Shrink only when allowShrink (viewport resize).
+ *
+ * @param {{ force?: boolean, allowShrink?: boolean }} [opts]
  */
-function syncDockChromeWidth({ force = false } = {}) {
+function syncDockChromeWidth({ force = false, allowShrink = false } = {}) {
   const dock = els.mainToolbar;
   if (!dock || dock.offsetParent === null) return;
   const inner = dock.querySelector(".toolbar-inner");
@@ -4565,6 +4567,7 @@ function syncDockChromeWidth({ force = false } = {}) {
   dock.style.transition = "none";
   dock.style.removeProperty("--dock-chrome-w");
   // Measure chrome only: mid slot at its min footprint (not flex-grown)
+  // Same footprint for ETA + Trip Plan (faces are absolute in the mid slot)
   dock.style.width = "max-content";
   if (mid) {
     mid.style.flex = "0 0 auto";
@@ -4600,14 +4603,16 @@ function syncDockChromeWidth({ force = false } = {}) {
   }
 
   const boosted = Math.ceil(natural * DOCK_WIDTH_SCALE);
-  // Hard cap to viewport (previous Math.max(maxW, natural) could overflow)
   let next = Math.min(boosted, maxW);
-  if (!force && prevW > 40) {
+  // Keep a stable width across ETA ↔ Trip Plan (never shrink unless viewport resize)
+  if (!allowShrink && prevW > 40) {
     next = Math.max(prevW, next);
   }
   next = Math.min(next, maxW);
 
   dock.style.setProperty("--dock-chrome-w", `${next}px`);
+  // Keep min-width in sync so flex children can't collapse the dock
+  dock.style.minWidth = `${next}px`;
 
   // Keep map-tool offset in sync with real chrome height
   const chromeH = Math.ceil(inner.getBoundingClientRect().height);
@@ -4626,7 +4631,7 @@ let dockResizeTimer = null;
 function onViewportChromeResize() {
   clearTimeout(dockResizeTimer);
   dockResizeTimer = setTimeout(() => {
-    syncDockChromeWidth({ force: true });
+    syncDockChromeWidth({ force: true, allowShrink: true });
     resizeMapSoon();
   }, 80);
 }
@@ -4720,11 +4725,8 @@ function setUiMode(mode) {
     void ensureMtrStationLinesMap();
     void refreshEtaRouteSuggest();
   }
-  // Remeasure dock to current chrome (ETA search vs plan mid-slot) — allow shrink
-  requestAnimationFrame(() => {
-    syncDockChromeWidth({ force: true });
-    resizeMapSoon();
-  });
+  // Keep sidebar width stable across ETA ↔ Trip Plan (no remeasure / no shrink)
+  requestAnimationFrame(() => resizeMapSoon());
 }
 
 // ── ETA mode: bus / MTR / LRT route search ──────────────────────────────────
