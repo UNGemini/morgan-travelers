@@ -7308,7 +7308,36 @@ function selectEtaRoute(route, listIndex) {
 }
 
 /**
- * Open ETA route detail page (like trip details) with full stop list.
+ * Compact wait label for Wheels-style big ETA (“5m”, “Now”, “N/A”).
+ * @param {number | null | undefined} mins
+ */
+function formatWaitCompact(mins) {
+  if (mins == null || !Number.isFinite(Number(mins))) return "N/A";
+  const n = Math.round(Number(mins));
+  if (n <= 0) return "Now";
+  return `${n}m`;
+}
+
+/**
+ * Operator label for route hero (Citybus, KMB, MTR…).
+ * @param {EtaRouteEntry} route
+ */
+function etaOperatorDisplayName(route) {
+  if (!route) return "Bus";
+  if (route.kind === "mtr") return "MTR";
+  if (route.kind === "lrt") return "Light Rail";
+  if (route.kind === "mtr_bus") return "MTR Bus";
+  const co = String(route.co || "").toLowerCase();
+  if (co === "ctb") return "Citybus";
+  if (co === "kmb") return "KMB";
+  if (co === "nlb") return "NLB";
+  if (co === "lwb") return "LWB";
+  if (co === "gmb") return "GMB";
+  return co ? co.toUpperCase() : "Bus";
+}
+
+/**
+ * Open ETA route detail page — Wheels-style hero + ETA card + stop timeline.
  */
 async function showEtaRouteDetailsPanel() {
   const route = etaSelectedForDetails;
@@ -7323,43 +7352,45 @@ async function showEtaRouteDetailsPanel() {
   const co = String(route.co || "").toLowerCase();
   if (co === "ctb") await ensureCtbRouteBound(route.id);
   if (co === "nlb") await ensureNlbRouteBounds();
+  if (route.kind === "bus" || route.kind === "mtr_bus") {
+    await ensureKmbRouteBounds();
+  }
   if (gen !== etaShapeGen) return;
 
-  const dirs = etaRouteDirections(route);
-  const di = getCardDir(route);
-  const dir = dirs[Math.min(di, dirs.length - 1)] || dirs[0];
-  const dest = dir?.destZh || dir?.dest || route.label;
-  const live = etaLiveByKey.get(etaRouteKey(route));
-  const coLabel =
-    route.kind === "mtr"
-      ? "MTR"
-      : route.kind === "lrt"
-        ? "LRT"
-        : route.kind === "mtr_bus"
-          ? "MTR Bus"
-          : String(route.co || "bus").toUpperCase();
+  const color = companyLineColor(route);
+  const coLabel = etaOperatorDisplayName(route);
+  const pinned = isRoutePinned(route);
 
   if (els.etaRouteDetailHead) {
     els.etaRouteDetailHead.innerHTML = `
-      <div class="trip-od">
-        <div class="trip-od-from">
-          <span class="material-symbols-outlined" aria-hidden="true">directions_bus</span>
-          <span class="eta-card-route ${etaCompanyColorClass(route)}" style="font-size:1.4rem;color:${escapeHtml(companyLineColor(route))}">${escapeHtml(route.id)}</span>
+      <div class="wheels-route-hero">
+        <div class="wheels-route-hero-brand">
+          <span class="wheels-route-co" style="color:${escapeHtml(color)}">${escapeHtml(coLabel)}</span>
+          <span class="wheels-route-id" style="color:${escapeHtml(color)}">${escapeHtml(route.id)}</span>
         </div>
-        <div class="trip-od-to">
-          <span class="material-symbols-outlined" aria-hidden="true">flag</span>
-          <span>${escapeHtml(dest)}</span>
-        </div>
-      </div>
-      <p class="hint" style="margin:8px 0 0;text-transform:none;letter-spacing:0">
-        ${escapeHtml(coLabel)} · ${escapeHtml(route.label)}
-        ${live?.stopLabel ? ` · near ${escapeHtml(live.stopLabel)}` : ""}
-        ${live?.minutes != null ? ` · ${live.minutes} min` : ""}
-      </p>
-    `;
+        <button type="button" class="wheels-route-pin ${pinned ? "is-pinned" : ""}" id="btn-eta-detail-pin" title="${pinned ? "Unpin route" : "Pin route"}" aria-label="${pinned ? "Unpin route" : "Pin route"}">
+          <span class="material-symbols-outlined" aria-hidden="true">${pinned ? "keep" : "push_pin"}</span>
+        </button>
+      </div>`;
+    els.etaRouteDetailHead.querySelector("#btn-eta-detail-pin")?.addEventListener(
+      "click",
+      () => {
+        const nowPinned = togglePinnedEtaRoute(route);
+        showToast(nowPinned ? `Pinned ${route.id}` : `Unpinned ${route.id}`, 1600);
+        syncPinnedRouteToolbar();
+        const btn = els.etaRouteDetailHead?.querySelector("#btn-eta-detail-pin");
+        if (btn) {
+          btn.classList.toggle("is-pinned", nowPinned);
+          btn.title = nowPinned ? "Unpin route" : "Pin route";
+          btn.setAttribute("aria-label", nowPinned ? "Unpin route" : "Pin route");
+          const ic = btn.querySelector(".material-symbols-outlined");
+          if (ic) ic.textContent = nowPinned ? "keep" : "push_pin";
+        }
+      },
+    );
   }
   if (els.etaRouteDetailBody) {
-    els.etaRouteDetailBody.innerHTML = `<p class="hint">Loading stops…</p>`;
+    els.etaRouteDetailBody.innerHTML = `<p class="hint wheels-route-loading">Loading route…</p>`;
   }
 
   // Always reload for this operator+route (avoids stale KMB stops on same #)
@@ -7382,24 +7413,152 @@ async function showEtaRouteDetailsPanel() {
 
   if (gen !== etaShapeGen) return;
 
+  const dirs = etaRouteDirections(route);
+  const di = Math.min(getCardDir(route), Math.max(0, dirs.length - 1));
+  const dir = dirs[di] || dirs[0] || { dest: route.label };
+  const dest = dir.destZh || dir.dest || route.label;
   const named = etaSelectedStops.filter((s) => s.name && !s._polylineOnly);
-  if (els.etaRouteDetailBody) {
-    if (!named.length && etaSelectedStops.length) {
-      els.etaRouteDetailBody.innerHTML = `<p class="hint">${etaSelectedStops.length} path points on map (stop names unavailable for this operator).</p>`;
-    } else if (!named.length) {
-      els.etaRouteDetailBody.innerHTML = `<p class="hint">No stop list for ${escapeHtml(coLabel)} ${escapeHtml(route.id)}.</p>`;
-    } else {
-      els.etaRouteDetailBody.innerHTML = `<ol>${named
-        .map(
-          (s) =>
-            `<li><strong>${escapeHtml(String(s.seq || ""))}.</strong> ${escapeHtml(s.name)}${
-              s.stopId
-                ? ` <code>${escapeHtml(String(s.stopId).slice(0, 14))}</code>`
-                : ""
-            }</li>`,
-        )
-        .join("")}</ol>`;
+  const boardStop =
+    named.find((s) => s.stopId && !s._polylineOnly) || named[0] || null;
+
+  // Live + timetable ETAs at board stop
+  const opt = etaRouteAsOption(route, etaSelectedStops, dir);
+  let etaResult = null;
+  if (boardStop && Number.isFinite(boardStop.lon)) {
+    try {
+      etaResult = await fetchBoardEta(opt);
+      etaResult = withScheduledFallback(etaResult, opt, null, 0);
+    } catch (e) {
+      console.warn("[eta] details eta", e);
     }
+  }
+  if (!etaResult || !etaResult.etas?.length) {
+    const headwaySlots = headwayTimetableSlots({
+      dest,
+      operator: co || route.kind,
+      mode:
+        route.kind === "mtr"
+          ? "subway"
+          : route.kind === "lrt"
+            ? "tram"
+            : "bus",
+      count: 3,
+    });
+    etaResult = {
+      operator: co || route.kind,
+      route: route.id,
+      stopId: boardStop?.stopId || "",
+      etas: headwaySlots,
+      waitMins: headwaySlots[0]?.waitMins ?? null,
+      etaIso: null,
+      scheduled: true,
+    };
+  }
+
+  if (gen !== etaShapeGen) return;
+
+  const slots = (etaResult.etas || []).slice(0, 3);
+  const hasLive = slots.some((s) => !s.scheduled);
+  const boardName =
+    boardStop?.name ||
+    etaLiveByKey.get(etaRouteKey(route))?.stopLabel ||
+    dir.orig ||
+    dir.origZh ||
+    "";
+
+  const etaBigHtml = slots.length
+    ? slots
+        .map((slot) => {
+          const wait = formatWaitCompact(slot.waitMins);
+          const clock =
+            slot.clock ||
+            (slot.etaIso ? formatHkClock(slot.etaIso) : "") ||
+            "—";
+          const due = slot.waitMins != null && slot.waitMins <= 0;
+          return `<div class="wheels-eta-slot${due ? " is-due" : ""}${slot.scheduled ? " is-scheduled" : ""}">
+            <span class="wheels-eta-wait">${escapeHtml(wait)}</span>
+            <span class="wheels-eta-clock">${escapeHtml(clock)}</span>
+            ${slot.scheduled ? `<span class="wheels-eta-tag">SCH</span>` : hasLive && !slot.scheduled ? `<span class="wheels-eta-tag is-live">LIVE</span>` : ""}
+          </div>`;
+        })
+        .join("")
+    : `<div class="wheels-eta-slot is-empty"><span class="wheels-eta-wait">N/A</span></div>`;
+
+  const dirSwitchHtml =
+    dirs.length >= 2
+      ? `<button type="button" class="wheels-dir-switch" id="btn-eta-detail-dir" aria-label="Switch direction">
+          <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
+          <span>Opposite</span>
+          <span class="wheels-dir-dots" aria-hidden="true">
+            <i class="${di === 0 ? "is-on" : ""}"></i>
+            <i class="${di === 1 ? "is-on" : ""}"></i>
+          </span>
+        </button>`
+      : "";
+
+  let stopsHtml = "";
+  if (!named.length && etaSelectedStops.length) {
+    stopsHtml = `<p class="hint">${etaSelectedStops.length} path points on map (stop names unavailable).</p>`;
+  } else if (!named.length) {
+    stopsHtml = `<p class="hint">No stop list for ${escapeHtml(coLabel)} ${escapeHtml(route.id)}.</p>`;
+  } else {
+    stopsHtml = `<ol class="wheels-stop-timeline" aria-label="Stops on route">
+      ${named
+        .map((s, i) => {
+          const isBoard =
+            boardStop &&
+            ((s.stopId && s.stopId === boardStop.stopId) || s === boardStop);
+          return `<li class="wheels-stop${isBoard ? " is-board" : ""}${i === 0 ? " is-first" : ""}${i === named.length - 1 ? " is-last" : ""}">
+            <span class="wheels-stop-dot" aria-hidden="true"></span>
+            <div class="wheels-stop-main">
+              <span class="wheels-stop-name">${escapeHtml(s.name)}</span>
+            </div>
+          </li>`;
+        })
+        .join("")}
+    </ol>`;
+  }
+
+  if (els.etaRouteDetailBody) {
+    els.etaRouteDetailBody.innerHTML = `
+      <div class="wheels-route-detail">
+        <div class="wheels-eta-card" style="--wheels-route-color:${escapeHtml(color)}">
+          <div class="wheels-eta-dest">
+            <span class="material-symbols-outlined wheels-eta-dest-icon" aria-hidden="true">arrow_forward</span>
+            <span class="wheels-eta-dest-text">${escapeHtml(dest)}</span>
+          </div>
+          ${boardName ? `<p class="wheels-eta-board">${escapeHtml(boardName)}</p>` : ""}
+          <div class="wheels-eta-slots" role="list" aria-label="${hasLive ? "Live arrivals" : "Scheduled departures"}">
+            ${etaBigHtml}
+          </div>
+        </div>
+        ${dirSwitchHtml}
+        <button type="button" class="wheels-full-route-toggle" id="btn-eta-full-route" aria-expanded="true">
+          <span class="material-symbols-outlined" aria-hidden="true">expand_less</span>
+          <span>Full route</span>
+          <span class="wheels-stop-count">${named.length || etaSelectedStops.length} stops</span>
+        </button>
+        <div class="wheels-stop-panel" id="eta-detail-stops">
+          ${stopsHtml}
+        </div>
+      </div>`;
+
+    els.etaRouteDetailBody
+      .querySelector("#btn-eta-detail-dir")
+      ?.addEventListener("click", () => {
+        const next = di === 0 ? 1 : 0;
+        setCardDir(route, next);
+        void showEtaRouteDetailsPanel();
+      });
+
+    const toggle = els.etaRouteDetailBody.querySelector("#btn-eta-full-route");
+    const panel = els.etaRouteDetailBody.querySelector("#eta-detail-stops");
+    toggle?.addEventListener("click", () => {
+      const collapsed = panel?.classList.toggle("is-collapsed");
+      toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      const ic = toggle.querySelector(".material-symbols-outlined");
+      if (ic) ic.textContent = collapsed ? "expand_more" : "expand_less";
+    });
   }
 }
 

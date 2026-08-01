@@ -1281,25 +1281,355 @@ body.mobile-ui [data-acrylic]::before {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 0 14px 16px;
+  padding: 0 12px 20px;
   -webkit-overflow-scrolling: touch;
 }
 
-.eta-route-detail-body ol {
-  margin: 0;
-  padding: 0 0 0 1.15rem;
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-  line-height: 1.5;
+/* ── Wheels-style route detail page ── */
+#sidebar-page-eta-route .trip-detail-head {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding: 0 14px 6px;
 }
 
-.eta-route-detail-body li {
-  margin: 3px 0;
+.wheels-route-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0 8px;
 }
 
-.eta-route-detail-body code {
-  font-size: 0.68em;
+.wheels-route-hero-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wheels-route-co {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  opacity: 0.95;
+}
+
+.wheels-route-id {
+  font-size: clamp(2.4rem, 11vw, 3.35rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 0.95;
+  font-variant-numeric: tabular-nums;
+}
+
+.wheels-route-pin {
+  appearance: none;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  margin: 0 0 4px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.wheels-route-pin .material-symbols-outlined {
+  font-size: 22px !important;
+}
+
+.wheels-route-pin:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.wheels-route-pin.is-pinned {
+  color: var(--accent);
+  border-color: rgba(192, 174, 252, 0.4);
+  background: rgba(192, 174, 252, 0.12);
+}
+
+.wheels-route-pin.is-pinned .material-symbols-outlined {
+  font-variation-settings: "FILL" 1, "wght" 500, "GRAD" 0, "opsz" 24;
+}
+
+.wheels-route-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wheels-route-loading {
+  padding: 16px 4px;
+}
+
+/* Solid company-color ETA card (Wheels blue card) */
+.wheels-eta-card {
+  --wheels-route-color: #0053b9;
+  border-radius: 20px;
+  padding: 16px 18px 18px;
+  background: var(--wheels-route-color);
+  color: #fff;
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.35),
+    0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.wheels-eta-dest {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.wheels-eta-dest-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  font-size: 20px !important;
+  opacity: 0.95;
+}
+
+.wheels-eta-dest-text {
+  min-width: 0;
+}
+
+.wheels-eta-board {
+  margin: 6px 0 0;
+  padding-left: 28px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.wheels-eta-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  margin-top: 18px;
+  padding-top: 4px;
+}
+
+.wheels-eta-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 4.2rem;
+  position: relative;
+}
+
+.wheels-eta-wait {
+  font-size: 2.15rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.wheels-eta-slot.is-due .wheels-eta-wait {
+  opacity: 1;
+}
+
+.wheels-eta-slot.is-scheduled .wheels-eta-wait {
+  opacity: 0.92;
+}
+
+.wheels-eta-slot.is-empty .wheels-eta-wait {
   opacity: 0.7;
+  font-size: 1.6rem;
+}
+
+.wheels-eta-clock {
+  font-size: 0.78rem;
+  font-weight: 550;
+  color: rgba(255, 255, 255, 0.78);
+  font-variant-numeric: tabular-nums;
+}
+
+.wheels-eta-tag {
+  position: absolute;
+  top: -2px;
+  right: -6px;
+  font-size: 0.55rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.wheels-eta-tag.is-live {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* Opposite direction switcher */
+.wheels-dir-switch {
+  appearance: none;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 0;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.wheels-dir-switch:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.wheels-dir-switch .material-symbols-outlined {
+  font-size: 18px !important;
+}
+
+.wheels-dir-dots {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.wheels-dir-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  display: block;
+}
+
+.wheels-dir-dots i.is-on {
+  background: rgba(255, 255, 255, 0.88);
+}
+
+/* Full route expand + stop timeline */
+.wheels-full-route-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 4px 0 0;
+  padding: 8px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 650;
+  cursor: pointer;
+  text-align: left;
+}
+
+.wheels-full-route-toggle:hover {
+  color: var(--text-primary);
+}
+
+.wheels-full-route-toggle .material-symbols-outlined {
+  font-size: 20px !important;
+}
+
+.wheels-stop-count {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: 550;
+  color: var(--text-muted);
+}
+
+.wheels-stop-panel.is-collapsed {
+  display: none;
+}
+
+.wheels-stop-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 8px 0;
+  position: relative;
+}
+
+.wheels-stop {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 10px;
+  align-items: start;
+  position: relative;
+  padding: 0 0 18px;
+  min-height: 36px;
+}
+
+.wheels-stop:last-child {
+  padding-bottom: 4px;
+}
+
+/* Vertical connector line */
+.wheels-stop:not(.is-last)::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 16px;
+  bottom: -2px;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 1px;
+}
+
+.wheels-stop-dot {
+  width: 12px;
+  height: 12px;
+  margin: 4px 0 0 4px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  background: var(--surface, #1a1b1f);
+  box-sizing: border-box;
+  z-index: 1;
+}
+
+.wheels-stop.is-board .wheels-stop-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(192, 174, 252, 0.25);
+}
+
+.wheels-stop.is-first .wheels-stop-dot,
+.wheels-stop.is-last .wheels-stop-dot {
+  border-color: rgba(255, 255, 255, 0.65);
+}
+
+.wheels-stop-main {
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.wheels-stop-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.wheels-stop.is-board .wheels-stop-name {
+  color: #fff;
 }
 
 /* Wheels-like ETA route card — rounded selection */
