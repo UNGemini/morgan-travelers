@@ -1868,22 +1868,26 @@ body.mobile-ui [data-acrylic]::before {
 
 
 
-/* Per-card direction dots */
+/* Per-card direction dots (larger hit target on search list) */
 .eta-card-dots {
   display: flex;
   justify-content: center;
-  gap: 8px;
-  padding: 2px 0 0;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0 4px;
+  min-height: 36px;
 }
 
 .eta-dir-dot {
   appearance: none;
   border: none;
-  width: 7px;
-  height: 7px;
+  width: 14px;
+  height: 14px;
   border-radius: 999px;
   padding: 0;
-  background: rgba(255, 255, 255, 0.22);
+  /* Expand tap area without growing the visible disc further */
+  box-shadow: 0 0 0 10px transparent;
+  background: rgba(255, 255, 255, 0.28);
   cursor: pointer;
   transition:
     background 0.15s ease,
@@ -1891,12 +1895,21 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 .eta-dir-dot.is-active {
-  background: rgba(255, 255, 255, 0.9);
-  transform: scale(1.15);
+  background: rgba(255, 255, 255, 0.95);
+  transform: scale(1.2);
 }
 
 .eta-dir-dot:hover {
-  background: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.eta-card-fare {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #7dcea0;
+  letter-spacing: 0.02em;
 }
 
 /* Show route details + pin (after selection) */

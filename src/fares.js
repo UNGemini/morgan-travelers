@@ -834,10 +834,27 @@ function normBusStopName(s) {
     .replace(/<br\s*\/?>/gi, " ")
     .replace(/<[^>]+>/g, "")
     .toUpperCase()
-    .replace(/[()[\],./]/g, " ")
+    // TD embeds bilingual "EN / / Zh" or "EN / EN"
+    .replace(/\s*\/+\s*/g, " ")
+    .replace(/[()[\],.\-]/g, " ")
     .replace(/\b(BUS\s*)?(TERMINUS|TERM|STATION|STN|STOP|BT)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * Expand a raw label into match candidates (split bilingual TD / ETA forms).
+ * @param {string} raw
+ * @returns {string[]}
+ */
+function expandStopLabelParts(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return [];
+  const parts = s
+    .split(/\s*\/+\s*|<br\s*\/?>/i)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return [...new Set([s, ...parts])];
 }
 
 /**
@@ -877,8 +894,9 @@ function planStopLabelCandidates(planStop) {
     planStop.name,
     planStop.name_tc,
   ]) {
-    const s = String(k || "").trim();
-    if (s && !out.includes(s)) out.push(s);
+    for (const part of expandStopLabelParts(k)) {
+      if (!out.includes(part)) out.push(part);
+    }
   }
   return out;
 }
@@ -889,22 +907,30 @@ function planStopLabelCandidates(planStop) {
  * @param {{ stop_name?: string, name?: string, name_en?: string } | null | undefined} planStop
  * @returns {{ index: number, score: number } | null}
  */
-function matchTdStopIndexScored(tdStops, planStop) {
+function matchTdStopIndexScored(tdStops, planStop, opts = {}) {
   if (!tdStops?.length) return null;
   const names = planStopLabelCandidates(planStop);
   if (!names.length) return null;
+  const minI = opts.minIndex != null ? opts.minIndex : 0;
+  const maxI =
+    opts.maxIndex != null ? opts.maxIndex : tdStops.length - 1;
   let best = null;
   let bestScore = 0;
-  for (let i = 0; i < tdStops.length; i++) {
-    for (const name of names) {
-      const sc = busStopMatchScore(tdStops[i], name);
-      if (sc > bestScore) {
-        bestScore = sc;
-        best = i;
+  for (let i = Math.max(0, minI); i <= Math.min(tdStops.length - 1, maxI); i++) {
+    // Also expand TD bilingual labels
+    const tdParts = expandStopLabelParts(tdStops[i]);
+    for (const tdPart of tdParts.length ? tdParts : [tdStops[i]]) {
+      for (const name of names) {
+        const sc = busStopMatchScore(tdPart, name);
+        if (sc > bestScore) {
+          bestScore = sc;
+          best = i;
+        }
       }
     }
   }
-  return bestScore >= 200 && best != null ? { index: best, score: bestScore } : null;
+  // Slightly lower threshold: 400 was too strict for partial EN matches
+  return bestScore >= 400 && best != null ? { index: best, score: bestScore } : null;
 }
 
 /**
@@ -952,14 +978,18 @@ function alignPlanStopsToTd(planStops, tdStops) {
 
   let anchorScore = 0;
   let anchors = 0;
-  // Match each plan stop independently (prefer EN names via planStopLabelCandidates)
+  // Sequential forward match: each stop must map at/after the previous TD index
+  let minI = 0;
   for (let i = 0; i < planN; i++) {
-    const hit = matchTdStopIndexScored(tdStops, planStops[i]);
-    // Require a solid match so “Garden”/short tokens don’t jump the alignment
-    if (hit && hit.score >= 600) {
+    const hit = matchTdStopIndexScored(tdStops, planStops[i], {
+      minIndex: minI,
+      maxIndex: tdN - 1,
+    });
+    if (hit && hit.score >= 400) {
       raw[i] = hit.index;
       anchors += 1;
       anchorScore += hit.score;
+      minI = hit.index; // allow same stop if lists denser; next can equal
     }
   }
 
@@ -976,7 +1006,6 @@ function alignPlanStopsToTd(planStops, tdStops) {
     if (mono[i] < last) mono[i] = last;
     last = mono[i];
   }
-  // Pass backward so a late high anchor doesn’t leave early gaps inverted
   let next = tdN - 1;
   for (let i = planN - 1; i >= 0; i--) {
     if (mono[i] < 0) continue;
@@ -1004,20 +1033,16 @@ function alignPlanStopsToTd(planStops, tdStops) {
     for (let k = i; k < j; k++) {
       const t = (k - leftI) / span;
       out[k] = Math.round(leftV + (rightV - leftV) * t);
-      // Keep monotonic
       if (k > 0 && out[k] < out[k - 1]) out[k] = out[k - 1];
     }
     i = j;
   }
-  // Final clamp + monotonic fix
   for (let k = 0; k < planN; k++) {
     out[k] = Math.max(0, Math.min(tdN - 1, out[k]));
     if (k > 0 && out[k] < out[k - 1]) out[k] = out[k - 1];
   }
-  // Ensure last maps to terminus when riding to end of plan
   if (planN >= 2) {
-    out[planN - 1] = Math.max(out[planN - 1], Math.min(tdN - 1, out[planN - 2] + 1));
-    out[planN - 1] = Math.min(tdN - 1, out[planN - 1]);
+    out[planN - 1] = Math.min(tdN - 1, Math.max(out[planN - 1], out[planN - 2]));
   }
 
   return { tdIndex: out, anchors, score: anchorScore };
@@ -1195,18 +1220,23 @@ function tdBusSectionFare(opt) {
         fullFallback = variant.full / 10;
       }
       const bounds = variant.b || {};
-      // Prefer the bound that best matches plan endpoints (correct O/I)
+      // Prefer the bound that best matches plan endpoints (correct O/I).
+      // TD keys are ROUTE_SEQ "1"/"2" — map O→1, I→2 when known.
+      const wantSeq = (() => {
+        const b = String(opt.bound || opt.headsign_bound || "").toUpperCase();
+        if (b.startsWith("I") || b === "2" || b === "INBOUND") return "2";
+        if (b.startsWith("O") || b === "1" || b === "OUTBOUND") return "1";
+        return "";
+      })();
       /** @type {Array<{ stops: string[], tri: number[], boundSc: number }>} */
       const boundList = [];
-      for (const bound of Object.values(bounds)) {
+      for (const [bKey, bound] of Object.entries(bounds)) {
         const stops = bound.s || bound.stops || [];
         const tri = bound.t || bound.tri || [];
         if (stops.length < 2 || !tri.length) continue;
-        boundList.push({
-          stops,
-          tri,
-          boundSc: scoreTdBoundForPlan(planStops, stops),
-        });
+        let boundSc = scoreTdBoundForPlan(planStops, stops);
+        if (wantSeq && String(bKey) === wantSeq) boundSc += 500;
+        boundList.push({ stops, tri, boundSc });
       }
       boundList.sort((a, b) => b.boundSc - a.boundSc);
 
@@ -2096,6 +2126,76 @@ export function formatHkd(amount) {
  * @param {FareType} [fareType]
  * @returns {number | null}
  */
+/**
+ * Board → terminus fare when only the boarding stop is known (search cards).
+ * Matches the stop into TD by name and reads the triangle cell to terminus.
+ *
+ * @param {object} baseOpt
+ * @param {{ name?: string, name_en?: string, stop_name?: string, nameEn?: string } | null} boardStop
+ * @param {FareType} [fareType]
+ * @returns {number | null}
+ */
+export function estimateBusBoardToTerminusByStop(
+  baseOpt,
+  boardStop,
+  fareType = activeFareType,
+) {
+  if (!baseOpt || !boardStop || !pack?.busSection) return null;
+  if (isFerryOption(baseOpt) || isMtrTransitOption(baseOpt)) return null;
+  const route = String(baseOpt.route_short_name || baseOpt.route_name || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+  if (!route) return null;
+  const keys = tdBusSectionKeys(
+    { ...baseOpt, bound: baseOpt.bound || "" },
+    route,
+  );
+  const wantSeq = (() => {
+    const b = String(baseOpt.bound || "").toUpperCase();
+    if (b.startsWith("I") || b === "2") return "2";
+    if (b.startsWith("O") || b === "1") return "1";
+    return "";
+  })();
+
+  let best = null;
+  let bestSc = -1;
+  for (const key of keys) {
+    const variants = pack.busSection[key];
+    if (!variants?.length) continue;
+    for (const variant of variants) {
+      for (const [bKey, bound] of Object.entries(variant.b || {})) {
+        const stops = bound.s || bound.stops || [];
+        const tri = bound.t || bound.tri || [];
+        if (stops.length < 2 || !tri.length) continue;
+        const hit = matchTdStopIndexScored(stops, boardStop);
+        if (!hit) continue;
+        let sc = hit.score;
+        if (wantSeq && String(bKey) === wantSeq) sc += 200;
+        // Prefer earlier matches on outbound-like bounds
+        if (hit.index < stops.length - 1) sc += 10;
+        const cents = triFareCentsFlexible(
+          tri,
+          hit.index,
+          stops.length - 1,
+          stops.length,
+        );
+        if (cents == null) continue;
+        if (sc > bestSc) {
+          bestSc = sc;
+          best = cents / 10;
+        }
+      }
+      if (best == null && variant.full != null) {
+        best = variant.full / 10;
+        bestSc = 1;
+      }
+    }
+  }
+  if (best == null) return null;
+  return scaleAdultFare(best, fareType);
+}
+
 export function estimateBusBoardFare(
   baseOpt,
   stops,
@@ -2168,6 +2268,8 @@ export function estimateBusBoardFare(
     stops: pts,
     boardIndex: boardI,
     alightIndex: alightI,
+    // Pass direction so O/I bound can be preferred in TD tables
+    bound: baseOpt.bound || baseOpt.headsign_bound || "",
   };
   // Prefer scaled TD section (incl. index fallback) over generic bus table
   const section = tdBusSectionFare(opt);
