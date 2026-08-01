@@ -679,19 +679,51 @@ body.mobile-ui [data-acrylic]::before {
   bottom: 0;
   z-index: 4;
   pointer-events: none; /* let list scroll; buttons re-enable below */
-  /* Full-width frosted strip so content blurs under the toolbar */
-  background: linear-gradient(
-    to top,
-    rgba(22, 22, 28, 0.72) 0%,
-    rgba(22, 22, 28, 0.45) 55%,
-    rgba(22, 22, 28, 0.12) 100%
+  /* Extra top pad = soft fade zone above the controls */
+  padding-top: 36px;
+  /* Soft top edge: fade fill + blur (not a hard rect) */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.35) 28%,
+    rgba(0, 0, 0, 0.85) 58%,
+    #000 78%,
+    #000 100%
   );
-  -webkit-backdrop-filter: blur(36px) saturate(1.7);
-  backdrop-filter: blur(36px) saturate(1.7);
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.35) 28%,
+    rgba(0, 0, 0, 0.85) 58%,
+    #000 78%,
+    #000 100%
+  );
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
   isolation: isolate;
 }
 
+/* Frosted fill lives on ::before so mask softens blur + tint together */
+.eta-sidebar-panel > .eta-sidebar-bottom-chrome::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    rgba(22, 22, 28, 0.78) 0%,
+    rgba(22, 22, 28, 0.5) 42%,
+    rgba(22, 22, 28, 0.18) 72%,
+    rgba(22, 22, 28, 0) 100%
+  );
+  -webkit-backdrop-filter: blur(36px) saturate(1.7);
+  backdrop-filter: blur(36px) saturate(1.7);
+}
+
 .eta-sidebar-panel > .eta-sidebar-bottom-chrome > * {
+  position: relative;
+  z-index: 1;
   pointer-events: auto;
 }
 
