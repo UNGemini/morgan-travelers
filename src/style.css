@@ -44,8 +44,6 @@
   );
   --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
   --glass: rgba(18, 22, 28, 0.78);
-  /* Solid match for list fades (same hue as --glass, no alpha) */
-  --sidebar-bg-solid: #12161c;
   --glass-border: rgba(255, 255, 255, 0.12);
 }
 
@@ -760,7 +758,7 @@ body.mobile-ui [data-acrylic]::before {
 .eta-route-list-sidebar {
   list-style: none;
   margin: 0;
-  padding: 4px 8px 28px;
+  padding: 4px 8px 36px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -769,26 +767,19 @@ body.mobile-ui [data-acrylic]::before {
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
-}
-
-/* Fade cards into sidebar glass color at bottom of list */
-.eta-route-list-wrap::after {
-  content: "";
-  pointer-events: none;
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 72px;
-  background: linear-gradient(
+  /* Fade the cards themselves (opacity mask) — no solid overlay tint */
+  -webkit-mask-image: linear-gradient(
     to bottom,
-    rgba(18, 22, 28, 0) 0%,
-    rgba(18, 22, 28, 0.35) 28%,
-    rgba(18, 22, 28, 0.72) 62%,
-    var(--sidebar-bg-solid) 100%
+    #000 0%,
+    #000 calc(100% - 56px),
+    transparent 100%
   );
-  z-index: 2;
-  border-radius: 0 0 12px 12px;
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 calc(100% - 56px),
+    transparent 100%
+  );
 }
 
 .eta-route-detail-body {

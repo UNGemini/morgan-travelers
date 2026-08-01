@@ -96,7 +96,11 @@ import {
   resolvePlatformForStop,
   stationsFromGeoJson,
 } from "./mtrLayer.js";
-import { buildTransitPolyline, projectStops } from "./routeSnapper.js";
+import {
+  buildTransitPolyline,
+  projectStops,
+  sliceRouteBetweenStops,
+} from "./routeSnapper.js";
 import {
   matchBusShapeOverride,
   matchBusShapeForRoute,
@@ -1448,19 +1452,8 @@ function ensureRouteLayers() {
       type: "circle",
       source: "route-stops",
       paint: {
-        // Keep paint expressions simple — nested match/interpolate has
-        // failed silently on some MapLibre builds.
-        "circle-radius": [
-          "match",
-          ["get", "role"],
-          "board",
-          9,
-          "alight",
-          9,
-          "transfer",
-          8,
-          6,
-        ],
+        // Uniform size for all stops (board / via / alight)
+        "circle-radius": 7,
         "circle-color": [
           "coalesce",
           ["get", "color"],
@@ -1485,13 +1478,7 @@ function ensureRouteLayers() {
       ],
       layout: {
         "text-field": ["get", "stop_name"],
-        "text-size": [
-          "match",
-          ["get", "role"],
-          "via",
-          10,
-          12,
-        ],
+        "text-size": 11,
         "text-offset": [0, 1.25],
         "text-anchor": "top",
         "text-font": ["Noto Sans Regular"],
@@ -1511,17 +1498,7 @@ function ensureRouteLayers() {
   // Re-apply paint in case an older HMR/session left a broken expression
   try {
     if (map.getLayer("route-stops-circle")) {
-      map.setPaintProperty("route-stops-circle", "circle-radius", [
-        "match",
-        ["get", "role"],
-        "board",
-        9,
-        "alight",
-        9,
-        "transfer",
-        8,
-        6,
-      ]);
+      map.setPaintProperty("route-stops-circle", "circle-radius", 7);
       map.setPaintProperty("route-stops-circle", "circle-color", [
         "coalesce",
         ["get", "color"],
@@ -5807,6 +5784,50 @@ function shapeAgencyMatchesCo(co, shapeAg) {
   return false;
 }
 
+/**
+ * Build a RAPTOR-like route option for shape matching / densify (same as trip plan).
+ * @param {EtaRouteEntry} route
+ * @param {Array<{ seq?: number, name?: string, stopId?: string, lon: number, lat: number }>} stops
+ * @param {{ orig?: string, dest?: string, bound?: string }} [dir]
+ */
+function etaRouteAsOption(route, stops, dir = {}) {
+  const pts = (stops || [])
+    .filter((s) => Number.isFinite(s.lon) && Number.isFinite(s.lat) && !s._polylineOnly)
+    .map((s, i) => ({
+      stop_id: s.stopId || String(i),
+      id: s.stopId || String(i),
+      stop_name: s.name || "",
+      name: s.name || "",
+      lon: s.lon,
+      lat: s.lat,
+      location: { lon: s.lon, lat: s.lat },
+    }));
+  const co = String(route.co || route.kind || "bus").toUpperCase();
+  const mode =
+    route.kind === "mtr"
+      ? "subway"
+      : route.kind === "lrt"
+        ? "tram"
+        : "bus";
+  return {
+    route_short_name: route.id,
+    route_name: route.label || route.id,
+    route_id: `${co}-${route.id}`,
+    mode,
+    agency: { id: co, name: co },
+    headsign: dir.dest || "",
+    from: pts[0] || {
+      stop_name: dir.orig || "",
+      location: { lon: 0, lat: 0 },
+    },
+    to: pts[pts.length - 1] || {
+      stop_name: dir.dest || "",
+      location: { lon: 0, lat: 0 },
+    },
+    stops: pts,
+  };
+}
+
 async function loadEtaRouteStops(route) {
   // Ensure OD/bounds for non-KMB before reading direction
   const coPre = String(route.co || "").toLowerCase();
@@ -5819,51 +5840,8 @@ async function loadEtaRouteStops(route) {
   const bound = String(dir?.bound || "O").toUpperCase();
   const co = String(route.co || "").toLowerCase();
 
-  // Published override — only when agency matches (or joint)
-  if (route.kind === "bus" || route.kind === "mtr_bus") {
-    const match = matchBusShapeForRoute({
-      route_short_name: route.id,
-      agency: co || "",
-      direction: bound === "I" ? "inbound" : "outbound",
-      from: dir?.orig || "",
-      to: dir?.dest || "",
-    });
-    if (match?.shape?.coordinates?.length >= 2 && !match.similar) {
-      const shapeAg = String(match.shape.agency || "").toLowerCase();
-      if (shapeAgencyMatchesCo(co, shapeAg)) {
-        const vs = match.shape.visual_stops || [];
-        if (vs.length) {
-          return vs
-            .map((s, i) => {
-              const c = s.visual || s.official;
-              if (!Array.isArray(c) || c.length < 2) return null;
-              return {
-                seq: Number(s.seq) || i + 1,
-                name: String(s.name || `Stop ${i + 1}`),
-                stopId: s.stop_id || "",
-                lon: Number(c[0]),
-                lat: Number(c[1]),
-                _shape: match.shape,
-              };
-            })
-            .filter(Boolean);
-        }
-        return match.shape.coordinates.map((c, i) => ({
-          seq: i + 1,
-          name:
-            i === 0
-              ? "Start"
-              : i === match.shape.coordinates.length - 1
-                ? "End"
-                : "",
-          lon: Number(c[0]),
-          lat: Number(c[1]),
-          _shape: match.shape,
-          _polylineOnly: true,
-        }));
-      }
-    }
-  }
+  // Load official stop sequence from operator APIs first (names + ETA ids).
+  // Contributed path is applied later in paint via buildTransitPolyline (trip plan).
 
   // ── KMB / LWB only (never fall through for CTB/NLB) ──
   if (co === "kmb" || co === "lwb" || route.kind === "mtr_bus") {
@@ -6065,37 +6043,58 @@ async function loadEtaRouteStops(route) {
     }
   }
 
+  // Fallback: contributed shape only (no official stop API) — still show path
+  if (route.kind === "bus" || route.kind === "mtr_bus") {
+    const match = matchBusShapeForRoute({
+      route_short_name: route.id,
+      agency: co || "",
+      direction: bound === "I" ? "inbound" : "outbound",
+      from: dir?.orig || "",
+      to: dir?.dest || "",
+    });
+    if (
+      match?.shape?.coordinates?.length >= 2 &&
+      shapeAgencyMatchesCo(co, String(match.shape.agency || "").toLowerCase())
+    ) {
+      const vs = match.shape.visual_stops || [];
+      if (vs.length) {
+        return vs
+          .map((s, i) => {
+            const c = s.visual || s.official;
+            if (!Array.isArray(c) || c.length < 2) return null;
+            return {
+              seq: Number(s.seq) || i + 1,
+              name: String(s.name || `Stop ${i + 1}`),
+              stopId: s.stop_id || "",
+              lon: Number(c[0]),
+              lat: Number(c[1]),
+              _shape: match.shape,
+            };
+          })
+          .filter(Boolean);
+      }
+      return match.shape.coordinates.map((c, i) => ({
+        seq: i + 1,
+        name:
+          i === 0
+            ? "Start"
+            : i === match.shape.coordinates.length - 1
+              ? "End"
+              : "",
+        lon: Number(c[0]),
+        lat: Number(c[1]),
+        _shape: match.shape,
+        _polylineOnly: i > 0 && i < match.shape.coordinates.length - 1,
+      }));
+    }
+  }
+
   return [];
 }
 
 /**
- * Optional OSRM densify of stop polyline for a smoother path.
- * @param {number[][]} coords [lon,lat][]
- */
-async function densifyEtaLine(coords) {
-  if (!coords || coords.length < 2) return coords;
-  // OSRM has waypoint limits — sample if too many
-  let pts = coords;
-  if (pts.length > 40) {
-    const step = Math.ceil(pts.length / 35);
-    pts = pts.filter((_, i) => i % step === 0 || i === pts.length - 1);
-  }
-  try {
-    const path = pts.map((c) => `${c[0]},${c[1]}`).join(";");
-    const url = `/osrm/route/v1/driving/${path}?overview=full&geometries=geojson&continue_straight=true`;
-    const res = await fetch(url);
-    if (!res.ok) return coords;
-    const j = await res.json();
-    const g = j.routes?.[0]?.geometry?.coordinates;
-    if (Array.isArray(g) && g.length >= 2) return g;
-  } catch {
-    /* keep straight */
-  }
-  return coords;
-}
-
-/**
  * Draw selected ETA route on map (polyline + stops).
+ * Path uses the same pipeline as Trip plan: contributed bus-shapes → OSRM densify.
  * @param {EtaRouteEntry} route
  * @param {Array<{ seq: number, name: string, stopId?: string, lon: number, lat: number, _shape?: any, _polylineOnly?: boolean }>} stops
  */
@@ -6104,26 +6103,42 @@ async function paintEtaRouteOnMap(route, stops) {
   ensureRouteLayers();
   const color = companyLineColor(route);
 
+  const dirs = etaRouteDirections(route);
+  const di = getCardDir(route);
+  const dir = dirs[Math.min(di, dirs.length - 1)] || dirs[0];
+  const opt = etaRouteAsOption(route, stops, dir);
+
+  /** @type {number[][]} */
   let lineCoords = [];
-  const shape = stops.find((s) => s._shape)?._shape;
-  if (shape?.coordinates?.length >= 2) {
-    lineCoords = shape.coordinates
-      .map((c) => [Number(c[0]), Number(c[1])])
-      .filter((c) => Number.isFinite(c[0]) && Number.isFinite(c[1]));
-  } else {
-    lineCoords = stops
-      .filter((s) => Number.isFinite(s.lon) && Number.isFinite(s.lat))
-      .map((s) => [s.lon, s.lat]);
+
+  // Trip-plan path: matchBusShapeOverride + busShapeToPolyline + OSRM densify
+  try {
+    const poly = await buildTransitPolyline(opt);
+    if (poly?.length >= 2) {
+      lineCoords = poly
+        .map((p) => [Number(p.lon), Number(p.lat)])
+        .filter((c) => Number.isFinite(c[0]) && Number.isFinite(c[1]));
+    }
+  } catch (e) {
+    console.warn("[eta] buildTransitPolyline", e);
   }
 
-  // Road-follow densify for bus (not MTR)
-  if (
-    lineCoords.length >= 2 &&
-    route.kind !== "mtr" &&
-    route.kind !== "lrt" &&
-    !shape
-  ) {
-    lineCoords = await densifyEtaLine(lineCoords);
+  // Fallback: contributed shape (sliced like trip plan) or stop chords
+  if (lineCoords.length < 2) {
+    const shape =
+      stops.find((s) => s._shape)?._shape || matchBusShapeOverride(opt);
+    if (shape?.coordinates?.length >= 2) {
+      const poly = busShapeToPolyline(shape, opt.stops, sliceRouteBetweenStops);
+      lineCoords = (poly?.length >= 2 ? poly : shape.coordinates)
+        .map((c) =>
+          Array.isArray(c)
+            ? [Number(c[0]), Number(c[1])]
+            : [Number(c.lon), Number(c.lat)],
+        )
+        .filter((c) => Number.isFinite(c[0]) && Number.isFinite(c[1]));
+    } else {
+      lineCoords = opt.stops.map((s) => [s.lon, s.lat]);
+    }
   }
 
   const stopFeats = stops
@@ -6136,14 +6151,27 @@ async function paintEtaRouteOnMap(route, stops) {
         type: "Feature",
         properties: {
           name: label,
-          stop_name: label, // label layer reads stop_name
+          stop_name: label,
+          stop_id: s.stopId || "",
+          stop_index: s.seq || i + 1,
           seq: s.seq || i + 1,
-          role: i === 0 ? "board" : i === arr.length - 1 ? "alight" : "via",
+          // Same marker style for all stops
+          role: "via",
           color,
         },
         geometry: { type: "Point", coordinates: [s.lon, s.lat] },
       };
     });
+
+  // Contributed visual_stops (same as trip plan)
+  try {
+    const shape = matchBusShapeOverride(opt);
+    if (shape?.visual_stops?.length) {
+      applyVisualStopsFromShape(stopFeats, shape);
+    }
+  } catch (e) {
+    console.warn("[eta] visual_stops", e);
+  }
 
   const lineFeat =
     lineCoords.length >= 2
