@@ -493,10 +493,14 @@ async function fetchCtbEta(opt, board) {
   return packSlots({ operator: "ctb", route, stopId: usedStop }, slots);
 }
 
-async function nlbRouteIdMap() {
+/**
+ * NLB routeNo → variants (each direction is its own routeId).
+ * @returns {Promise<Map<string, Array<{ routeId: string, nameE: string, nameC: string }>>>}
+ */
+async function nlbRouteVariantsMap() {
   if (!nlbRouteMapPromise) {
     nlbRouteMapPromise = (async () => {
-      /** @type {Map<string, string>} */
+      /** @type {Map<string, Array<{ routeId: string, nameE: string, nameC: string }>>} */
       const map = new Map();
       try {
         const data = await fetchJson(
@@ -509,9 +513,17 @@ async function nlbRouteIdMap() {
             ? data
             : [];
         for (const r of list) {
-          const no = String(r.routeNo || r.route_no || "").toUpperCase();
-          const id = String(r.routeId || r.route_id || "");
-          if (no && id && !map.has(no)) map.set(no, id);
+          const no = String(r.routeNo || r.route_no || "")
+            .trim()
+            .toUpperCase();
+          const id = String(r.routeId || r.route_id || "").trim();
+          if (!no || !id) continue;
+          if (!map.has(no)) map.set(no, []);
+          map.get(no).push({
+            routeId: id,
+            nameE: String(r.routeName_e || r.routeName_en || ""),
+            nameC: String(r.routeName_c || r.routeName_tc || ""),
+          });
         }
       } catch {
         /* empty map */
@@ -522,7 +534,69 @@ async function nlbRouteIdMap() {
   return nlbRouteMapPromise;
 }
 
-/** @param {object} opt @param {object} board */
+/**
+ * Pick NLB routeId(s) for a public route number, preferring OD/direction match.
+ * @param {string} routeNo
+ * @param {object} [opt]
+ * @returns {Promise<string[]>}
+ */
+async function nlbRouteIdsForOption(routeNo, opt) {
+  const variants = await nlbRouteVariantsMap();
+  const list = variants.get(String(routeNo || "").toUpperCase()) || [];
+  if (!list.length) {
+    const fromOpt = stripOperatorStopId(String(opt?.route_id || ""));
+    return fromOpt ? [fromOpt] : [];
+  }
+  const toName = String(
+    opt?.to?.stop_name ||
+      opt?.headsign ||
+      (opt?.stops?.length ? opt.stops[opt.stops.length - 1]?.stop_name : "") ||
+      "",
+  ).toLowerCase();
+  const fromName = String(
+    opt?.from?.stop_name || opt?.stops?.[0]?.stop_name || "",
+  ).toLowerCase();
+  if (toName || fromName) {
+    const scored = list
+      .map((v) => {
+        const blob = `${v.nameE} ${v.nameC}`.toLowerCase();
+        let score = 0;
+        const parts = v.nameE.split(/\s*>\s*/);
+        const dest = (parts[1] || parts[0] || "").toLowerCase();
+        const orig = (parts[0] || "").toLowerCase();
+        if (
+          toName &&
+          dest &&
+          (dest.includes(toName.slice(0, 8)) || toName.includes(dest.slice(0, 8)))
+        ) {
+          score += 30;
+        }
+        if (
+          fromName &&
+          orig &&
+          (orig.includes(fromName.slice(0, 8)) ||
+            fromName.includes(orig.slice(0, 8)))
+        ) {
+          score += 20;
+        }
+        if (toName && blob.includes(toName.slice(0, 6))) score += 10;
+        return { id: v.routeId, score };
+      })
+      .sort((a, b) => b.score - a.score);
+    if (scored[0]?.score > 0) {
+      return [...new Set(scored.map((s) => s.id))];
+    }
+  }
+  return list.map((v) => v.routeId);
+}
+
+/**
+ * NLB open data ETA:
+ * GET …/nlb/stop.php?action=estimatedArrivals&routeId={routeId}&stopId={stopId}&language={languageCode}
+ * noGPS=1 → timetable-based estimate (not live GPS).
+ * @param {object} opt
+ * @param {object} board
+ */
 async function fetchNlbEta(opt, board) {
   const stopId = stripOperatorStopId(stopIdOf(board));
   const route = routeShort(opt);
@@ -537,9 +611,8 @@ async function fetchNlbEta(opt, board) {
       error: "missing stop/route",
     };
   }
-  const map = await nlbRouteIdMap();
-  const routeId = map.get(route) || stripOperatorStopId(String(opt.route_id || ""));
-  if (!routeId) {
+  const routeIds = await nlbRouteIdsForOption(route, opt);
+  if (!routeIds.length) {
     return {
       operator: "nlb",
       route,
@@ -550,30 +623,57 @@ async function fetchNlbEta(opt, board) {
       error: "NLB route id unknown",
     };
   }
-  try {
-    const data = await fetchJson(
-      `${ETA_BASE}/nlb/stop.php?action=estimatedArrivals&routeId=${encodeURIComponent(routeId)}&stopId=${encodeURIComponent(stopId)}`,
-    );
-    const rows = Array.isArray(data?.estimatedArrivals)
-      ? data.estimatedArrivals
-      : [];
-    const now = Date.now();
-    const slots = [];
-    for (const r of rows) {
-      const iso = normalizeEtaIso(r.estimatedArrivalTime || r.estimatedArrival);
-      if (!iso) continue;
-      const waitMins = waitMinutesFromIso(iso, now);
-      if (waitMins == null) continue;
-      slots.push({
-        waitMins,
-        etaIso: iso,
-        dest: r.routeVariantName || "",
-        remark: "",
-        platform: platformFromStop(board),
-      });
+
+  const now = Date.now();
+  /** @type {any[]} */
+  const slots = [];
+  let usedRouteId = routeIds[0];
+  let apiMessage = "";
+
+  for (const routeId of routeIds) {
+    try {
+      const data = await fetchJson(
+        `${ETA_BASE}/nlb/stop.php?action=estimatedArrivals&routeId=${encodeURIComponent(routeId)}&stopId=${encodeURIComponent(stopId)}&language=en`,
+      );
+      const rows = Array.isArray(data?.estimatedArrivals)
+        ? data.estimatedArrivals
+        : Array.isArray(data?.data)
+          ? data.data
+          : [];
+      if (data?.message) {
+        apiMessage = String(data.message).replace(/<br\s*\/?>/gi, " ");
+      }
+      if (!rows.length) continue;
+      usedRouteId = routeId;
+      for (const r of rows) {
+        if (String(r.departed) === "1" || r.departed === true) continue;
+        const iso = normalizeEtaIso(
+          r.estimatedArrivalTime || r.estimatedArrival || r.eta,
+        );
+        if (!iso) continue;
+        const waitMins = waitMinutesFromIso(iso, now);
+        if (waitMins == null) continue;
+        const noGps =
+          r.noGPS === 1 ||
+          r.noGPS === "1" ||
+          r.noGps === 1 ||
+          r.noGps === "1";
+        slots.push({
+          waitMins,
+          etaIso: iso,
+          dest: r.routeVariantName || r.dest || "",
+          remark: noGps ? "Timetable" : "",
+          platform: null,
+          scheduled: !!noGps,
+        });
+      }
+      if (slots.length) break;
+    } catch {
+      /* try next routeId (other direction) */
     }
-    return packSlots({ operator: "nlb", route, stopId }, slots);
-  } catch (e) {
+  }
+
+  if (!slots.length) {
     return {
       operator: "nlb",
       route,
@@ -581,9 +681,17 @@ async function fetchNlbEta(opt, board) {
       etas: [],
       waitMins: null,
       etaIso: null,
-      error: e instanceof Error ? e.message : "NLB fetch failed",
+      error: apiMessage || "No NLB arrivals",
     };
   }
+
+  const packed = packSlots({ operator: "nlb", route, stopId }, slots);
+  if (slots.every((s) => s.scheduled)) {
+    packed.scheduled = true;
+    if (apiMessage) packed.error = apiMessage;
+  }
+  packed.nlbRouteId = usedRouteId;
+  return packed;
 }
 
 /**
@@ -1008,7 +1116,7 @@ export function planTransitBoards(plan) {
 }
 
 /**
- * True when open-data returned usable live departures.
+ * True when open-data returned usable *live GPS* departures (not timetable-only).
  * @param {LegEtaResult | null | undefined} result
  */
 export function hasLiveEtaSlots(result) {
@@ -1022,7 +1130,23 @@ export function hasLiveEtaSlots(result) {
 }
 
 /**
- * Attach RAPTOR/GTFS timetable board when live ETA is N/A.
+ * Any usable arrival rows (live GPS or operator timetable like NLB noGPS).
+ * @param {LegEtaResult | null | undefined} result
+ */
+export function hasAnyEtaSlots(result) {
+  if (!result || result.unsupported) return false;
+  const slots = Array.isArray(result.etas) ? result.etas : [];
+  return slots.some(
+    (s) =>
+      s.waitMins != null ||
+      (s.etaIso && String(s.etaIso).length > 0) ||
+      (s.clock && s.clock !== "—"),
+  );
+}
+
+/**
+ * Attach RAPTOR/GTFS timetable board when open-data ETA is fully N/A.
+ * Keeps NLB/operator timetable rows (noGPS) — does not overwrite them.
  * @param {LegEtaResult} result
  * @param {object} opt
  * @param {object} plan
@@ -1031,6 +1155,14 @@ export function hasLiveEtaSlots(result) {
  */
 export function withScheduledFallback(result, opt, plan, legIndex) {
   if (hasLiveEtaSlots(result)) return result;
+  // Operator already returned arrivals (possibly all timetable / noGPS)
+  if (hasAnyEtaSlots(result)) {
+    return {
+      ...result,
+      scheduled: result.scheduled || result.etas.every((s) => s?.scheduled),
+      unsupported: false,
+    };
+  }
   const sched = scheduledSlotFromPlanLeg(opt, plan, legIndex);
   if (!sched) return result;
   return {

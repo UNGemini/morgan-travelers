@@ -3977,7 +3977,7 @@ function applyTripDetailEtaDom(plan, etaMap) {
     }
   });
 
-  // Board ETA card — live open-data, else timetable (from fetchPlanBoardEtas fallback)
+  // Board ETA card — live GPS, operator timetable (e.g. NLB noGPS), or plan GTFS
   root.querySelectorAll("[data-eta-card-leg]").forEach((card) => {
     const legIdx = Number(card.getAttribute("data-eta-card-leg"));
     const eta = etaMap?.get(legIdx);
@@ -3992,7 +3992,6 @@ function applyTripDetailEtaDom(plan, etaMap) {
     const operator = eta?.operator || etaOperator(opt);
     const allSlots = Array.isArray(eta?.etas) ? eta.etas.slice(0, 3) : [];
     const liveSlots = allSlots.filter((s) => !s?.scheduled);
-    const schedSlots = allSlots.filter((s) => s?.scheduled);
     const useLive = hasLiveEtaSlots(eta) && liveSlots.length > 0;
 
     if (useLive) {
@@ -4013,14 +4012,19 @@ function applyTripDetailEtaDom(plan, etaMap) {
       return;
     }
 
-    // Timetable calculation (injected by withScheduledFallback, or compute now)
-    let slots = schedSlots;
+    // Operator timetable (NLB noGPS estimatedArrivals) or RAPTOR/GTFS fallback
+    let slots = allSlots.filter((s) => s?.scheduled || s?.waitMins != null || s?.etaIso);
     if (!slots.length) {
       const sched = scheduledSlotFromPlanLeg(opt, plan, legIdx);
       if (sched) slots = [sched];
     }
     if (slots.length) {
-      if (head) head.textContent = "Timetable";
+      const fromNlb = operator === "nlb";
+      if (head) {
+        head.textContent = fromNlb
+          ? formatLiveStatusHead(eta?.fetchedAt) || "Timetable"
+          : "Timetable";
+      }
       list.innerHTML = slots
         .map((slot, i) => {
           const line = formatEtaCardLine(
@@ -4030,14 +4034,14 @@ function applyTripDetailEtaDom(plan, etaMap) {
           const nowArrived = slot.waitMins != null && slot.waitMins <= 0;
           const dest = slot.dest
             ? ` title="${escapeHtml(`To ${slot.dest} (scheduled)`)}"`
-            : ` title="Scheduled departure from trip plan timetable"`;
+            : ` title="Scheduled arrival"`;
           return `<li class="rt-eta-card-row is-scheduled-row${nowArrived ? " is-due is-now" : ""}${i === 0 ? " is-next" : ""}"${dest}><span class="rt-eta-card-line">${escapeHtml(line)}</span></li>`;
         })
         .join("");
       card.classList.add("is-scheduled");
       card.insertAdjacentHTML(
         "beforeend",
-        `<div class="rt-eta-card-badge" title="From trip plan timetable (GTFS)">SCHEDULED</div>`,
+        `<div class="rt-eta-card-badge" title="${fromNlb ? "NLB estimatedArrivals (no GPS / timetable)" : "Trip plan timetable (GTFS)"}">SCHEDULED</div>`,
       );
       return;
     }
