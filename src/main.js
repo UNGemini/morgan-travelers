@@ -7309,15 +7309,14 @@ function selectEtaRoute(route, listIndex) {
 }
 
 /**
- * Wait / time-to-stop label (“+5 Minutes”, “Now”, “N/A”).
+ * Compact wait / time-to-stop label (“5m”, “Now”, “N/A”) — Wheels-style.
  * @param {number | null | undefined} mins
  */
 function formatWaitCompact(mins) {
   if (mins == null || !Number.isFinite(Number(mins))) return "N/A";
   const n = Math.round(Number(mins));
   if (n <= 0) return "Now";
-  if (n === 1) return "+1 Minute";
-  return `+${n} Minutes`;
+  return `${n}m`;
 }
 
 /**
@@ -7542,7 +7541,6 @@ async function showEtaRouteDetailsPanel() {
 
   const slots = (etaResult.etas || []).slice(0, 3);
   const hasLive = slots.some((s) => !s.scheduled);
-  const hasSched = slots.some((s) => s.scheduled);
   const boardName =
     boardStop?.name ||
     etaLiveByKey.get(etaRouteKey(route))?.stopLabel ||
@@ -7550,31 +7548,27 @@ async function showEtaRouteDetailsPanel() {
     dir.origZh ||
     "";
 
-  // Classic trip-detail style ETA card (not the solid Wheels mega-slots)
-  const etaRows = slots.length
+  // Wheels-style solid card: big “5m” wait + “21:52・LIVE” under it
+  const etaBigHtml = slots.length
     ? slots
-        .map((slot, i) => {
-          const line = formatEtaCardLine(slot, {
-            operator: etaResult.operator,
-            showPlatform:
-              !slot.scheduled && etaOperatorShowsPlatform(etaResult.operator),
-          });
-          const tag = slot.scheduled
-            ? `<span class="rt-eta-card-tag" title="From timetable">SCHEDULED</span>`
-            : `<span class="rt-eta-card-tag rt-eta-card-tag-live" title="Live ETA">LIVE</span>`;
-          const nowArrived = slot.waitMins != null && slot.waitMins <= 0;
-          return `<li class="rt-eta-card-row${nowArrived ? " is-due is-now" : ""}${slot.scheduled ? " is-scheduled-row" : " is-live-row"}${i === 0 ? " is-next" : ""}"><span class="rt-eta-card-line">${escapeHtml(line)}</span>${tag}</li>`;
+        .map((slot) => {
+          const wait = formatWaitCompact(slot.waitMins);
+          const clock =
+            slot.clock ||
+            (slot.etaIso ? formatHkClock(slot.etaIso) : "") ||
+            "—";
+          const due = slot.waitMins != null && slot.waitMins <= 0;
+          const clockBase = clock && clock !== "—" ? clock : "—";
+          const clockLine = slot.scheduled
+            ? `${clockBase}・SCHEDULED`
+            : `${clockBase}・LIVE`;
+          return `<div class="wheels-eta-slot${due ? " is-due" : ""}${slot.scheduled ? " is-scheduled" : ""}">
+            <span class="wheels-eta-wait">${escapeHtml(wait)}</span>
+            <span class="wheels-eta-clock">${escapeHtml(clockLine)}</span>
+          </div>`;
         })
         .join("")
-    : `<li class="rt-eta-card-row is-empty">N/A</li>`;
-  const cardTone = hasLive
-    ? hasSched
-      ? "is-live is-mixed"
-      : "is-live"
-    : "is-scheduled";
-  const headText = hasLive
-    ? formatLiveStatusHead(etaResult.fetchedAt)
-    : "Timetable";
+    : `<div class="wheels-eta-slot is-empty"><span class="wheels-eta-wait">N/A</span></div>`;
 
   const dirSwitchHtml =
     dirs.length >= 2
@@ -7661,15 +7655,14 @@ async function showEtaRouteDetailsPanel() {
   if (els.etaRouteDetailBody) {
     els.etaRouteDetailBody.innerHTML = `
       <div class="wheels-route-detail">
-        <div class="eta-detail-summary">
-          <div class="pinned-dest-row">
-            <span class="eta-card-arrow" aria-hidden="true">→</span>
-            <strong>${escapeHtml(dest)}</strong>
+        <div class="wheels-eta-card" style="--wheels-route-color:${escapeHtml(color)}">
+          <div class="wheels-eta-dest">
+            <span class="material-symbols-outlined wheels-eta-dest-icon" aria-hidden="true">arrow_forward</span>
+            <span class="wheels-eta-dest-text">${escapeHtml(dest)}</span>
           </div>
-          ${boardName ? `<p class="pinned-board-stop">${escapeHtml(boardName)}</p>` : ""}
-          <div class="rt-eta-card ${cardTone}" aria-live="polite" aria-label="${hasLive ? "Live status" : "Timetable"}">
-            <div class="rt-eta-card-head">${escapeHtml(headText)}</div>
-            <ul class="rt-eta-card-list">${etaRows}</ul>
+          ${boardName ? `<p class="wheels-eta-board">${escapeHtml(boardName)}</p>` : ""}
+          <div class="wheels-eta-slots" role="list" aria-label="${hasLive ? "Live arrivals" : "Scheduled departures"}">
+            ${etaBigHtml}
           </div>
         </div>
         ${dirSwitchHtml}
