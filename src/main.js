@@ -5464,22 +5464,13 @@ async function ensureKmbStops() {
  * @param {EtaRouteEntry} r
  * @returns {Array<{ dest: string, destZh?: string, bound?: string, orig?: string, routeId?: string }>}
  */
-function etaRouteDirections(r) {
+/**
+ * Full OD directions from operator bounds (no nearby filter).
+ * @param {EtaRouteEntry} r
+ * @returns {Array<{ dest: string, destZh?: string, bound?: string, orig?: string, stopId?: string }>}
+ */
+function etaRouteDirectionsFromOd(r) {
   if (!r) return [{ dest: "—" }];
-  const key = etaRouteKey(r);
-  // Nearby browse: directions come from actual nearby stops (may differ per bound)
-  const nearbySlots = etaNearbyDirsByKey.get(key);
-  if (nearbySlots?.length) {
-    return nearbySlots.map((s) => ({
-      dest: s.dest || "—",
-      destZh: s.destZh || "",
-      bound: s.bound,
-      orig: s.stopLabel || "",
-      stopId: s.stopId,
-    }));
-  }
-
-  const live = etaLiveByKey.get(key);
   if (r.kind === "mtr") {
     return [{ dest: r.label, bound: "line" }];
   }
@@ -5519,6 +5510,70 @@ function etaRouteDirections(r) {
     if (bounds?.length) return bounds;
   }
 
+  // Synthesize reverse when we only have one OD with orig (circulars stay 1)
+  return [];
+}
+
+/**
+ * @param {EtaRouteEntry} r
+ * @param {{ full?: boolean }} [opts] full=true → always use operator OD (route detail)
+ */
+function etaRouteDirections(r, opts = {}) {
+  if (!r) return [{ dest: "—" }];
+  const key = etaRouteKey(r);
+  const full = !!opts.full;
+
+  // Nearby browse: prefer multi-dir nearby slots for list cards
+  if (!full) {
+    const nearbySlots = etaNearbyDirsByKey.get(key);
+    if (nearbySlots?.length >= 2) {
+      return nearbySlots.map((s) => ({
+        dest: s.dest || "—",
+        destZh: s.destZh || "",
+        bound: s.bound,
+        orig: s.stopLabel || "",
+        stopId: s.stopId,
+      }));
+    }
+  }
+
+  const od = etaRouteDirectionsFromOd(r);
+  if (od.length >= 2) return od;
+
+  // Single nearby slot only when OD unavailable
+  if (!full) {
+    const nearbySlots = etaNearbyDirsByKey.get(key);
+    if (nearbySlots?.length) {
+      return nearbySlots.map((s) => ({
+        dest: s.dest || "—",
+        destZh: s.destZh || "",
+        bound: s.bound,
+        orig: s.stopLabel || "",
+        stopId: s.stopId,
+      }));
+    }
+  }
+
+  if (od.length === 1) {
+    const one = od[0];
+    // Invert O↔I when we know origin so Opposite works on detail page
+    if (one.orig && one.dest && one.orig !== one.dest) {
+      const flipBound =
+        String(one.bound || "O").toUpperCase() === "I" ? "O" : "I";
+      return [
+        one,
+        {
+          dest: one.orig,
+          destZh: one.origZh || "",
+          bound: flipBound,
+          orig: one.dest,
+        },
+      ];
+    }
+    return od;
+  }
+
+  const live = etaLiveByKey.get(key);
   if (live?.dest) {
     return [
       {
@@ -7797,7 +7852,8 @@ async function showEtaRouteDetailsPanel() {
 
   if (gen !== etaShapeGen) return;
 
-  const dirs = etaRouteDirections(route);
+  // Full OD directions so Opposite shows even when nearby only saw one bound
+  const dirs = etaRouteDirections(route, { full: true });
   const di = Math.min(getCardDir(route), Math.max(0, dirs.length - 1));
   const dir = dirs[di] || dirs[0] || { dest: route.label };
   const dest = dir.destZh || dir.dest || route.label;
