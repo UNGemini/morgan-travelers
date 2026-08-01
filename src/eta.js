@@ -1138,31 +1138,63 @@ export function estimateTripArrival(plan, etaByLeg, nowMs = Date.now()) {
 }
 
 /**
- * Format wait for UI: "Now", "1 min", "12 min"
+ * Format wait for UI: "N/A", "Now", "1 min", "12 min"
  * @param {number | null | undefined} mins
  */
 export function formatWaitMins(mins) {
-  if (mins == null || !Number.isFinite(mins)) return "—";
-  if (mins <= 0) return "Now";
-  if (mins === 1) return "1 min";
-  return `${mins} min`;
+  if (mins == null || !Number.isFinite(Number(mins))) return "N/A";
+  const n = Math.round(Number(mins));
+  if (n <= 0) return "Now";
+  if (n === 1) return "1 min";
+  return `${n} min`;
+}
+
+/**
+ * Bus / GMB / ferry — no platform in live status lines.
+ * @param {string | null | undefined} operator
+ */
+export function etaOperatorShowsPlatform(operator) {
+  const op = String(operator || "").toLowerCase();
+  if (!op) return true;
+  if (
+    op === "kmb" ||
+    op === "lwb" ||
+    op === "ctb" ||
+    op === "nlb" ||
+    op === "gmb" ||
+    op === "bus" ||
+    op === "mtr_bus" ||
+    op === "mtr-bus" ||
+    op === "lrtfeeder"
+  ) {
+    return false;
+  }
+  return true; // mtr, lrt, …
 }
 
 /**
  * One line in the trip-detail ETA card:
- *   Platform 1 · 3 min · 18:16
- *   Platform 2 · Now · 18:12
+ *   Rail: Platform 1 · 3 min · 18:16
+ *   Bus/GMB: 3 min · 18:16  (no Platform)
  * @param {EtaSlot} slot
- * @param {{ fallbackPlatform?: string | null }} [opts]
+ * @param {{ fallbackPlatform?: string | null, operator?: string, showPlatform?: boolean }} [opts]
  */
 export function formatEtaCardLine(slot, opts = {}) {
+  const waitText = formatWaitMins(slot?.waitMins);
+  const clock = formatHkClock(slot?.etaIso);
+  const showPlat =
+    opts.showPlatform != null
+      ? !!opts.showPlatform
+      : etaOperatorShowsPlatform(opts.operator);
+  if (!showPlat) {
+    return clock && clock !== "—" ? `${waitText} · ${clock}` : waitText;
+  }
   const plat =
     formatPlatformLabel(slot?.platform) ||
     formatPlatformLabel(opts.fallbackPlatform) ||
-    "Platform —";
-  const waitText = formatWaitMins(slot?.waitMins);
-  const clock = formatHkClock(slot?.etaIso);
-  return `${plat} · ${waitText} · ${clock}`;
+    null;
+  if (plat) return `${plat} · ${waitText}${clock && clock !== "—" ? ` · ${clock}` : ""}`;
+  return clock && clock !== "—" ? `${waitText} · ${clock}` : waitText;
 }
 
 /**

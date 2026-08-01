@@ -656,22 +656,27 @@ body.mobile-ui [data-acrylic]::before {
   display: flex !important;
 }
 
-.app-shell[data-ui-mode="eta"] #sidebar-page-search {
+/* Search / detail pages fill the open sidebar in every mode */
+#sidebar-page-search:not([hidden]),
+#sidebar-page-trip:not([hidden]),
+#sidebar-page-eta-route:not([hidden]) {
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;
 }
 
-.app-shell[data-ui-mode="eta"] #sidebar-page-eta-route {
-  flex: 1 1 auto;
+.app-shell[data-detail="open"] .detail-sidebar-body {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
-  height: 100%;
 }
 
 .app-shell[data-ui-mode="eta"] .detail-sidebar-body {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden; /* list scrolls inside */
+  overflow: hidden; /* ETA list scrolls inside */
+}
+
+.app-shell[data-ui-mode="route"] .detail-sidebar-body {
+  overflow: auto;
 }
 
 .eta-mode-filter-sidebar {
@@ -951,6 +956,17 @@ body.mobile-ui [data-acrylic]::before {
 
 .eta-card-eta.is-soon .eta-card-eta-min {
   color: #51cf66;
+}
+
+.eta-card-eta.is-now .eta-card-eta-min {
+  color: #51cf66;
+  font-size: 1.15rem;
+}
+
+.eta-card-eta.is-na .eta-card-eta-min {
+  color: var(--text-muted);
+  font-size: 1.05rem;
+  font-weight: 700;
 }
 
 /* Per-card direction dots */

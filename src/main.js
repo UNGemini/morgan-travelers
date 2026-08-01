@@ -117,11 +117,13 @@ import {
   fetchPlanBoardEtas,
   buildPlanStopTimes,
   formatEtaCardLine,
+  formatWaitMins,
   waitMinutesFromIso,
   formatHkClock,
   formatLiveStatusHead,
   stationNameWithPlatforms,
   stationBaseName,
+  etaOperatorShowsPlatform,
 } from "./eta.js";
 import {
   mergeStopSequence,
@@ -3952,7 +3954,7 @@ function applyTripDetailEtaDom(plan, etaMap) {
     }
   });
 
-  // Board stop title: "Tung Chung - Platform 1/2" when both serve destination
+  // Board stop title: "Tung Chung - Platform 1/2" for rail only (not bus/GMB)
   root.querySelectorAll("[data-eta-board-name-leg]").forEach((el) => {
     const legIdx = Number(el.getAttribute("data-eta-board-name-leg"));
     const base =
@@ -3962,7 +3964,8 @@ function applyTripDetailEtaDom(plan, etaMap) {
       "";
     const eta = etaMap?.get(legIdx);
     const plats = eta?.servingPlatforms || [];
-    if (plats.length) {
+    const showPlat = etaOperatorShowsPlatform(eta?.operator);
+    if (plats.length && showPlat) {
       el.textContent = stationNameWithPlatforms(base, plats);
       el.title =
         plats.length > 1
@@ -3987,12 +3990,12 @@ function applyTripDetailEtaDom(plan, etaMap) {
 
     if (!eta) {
       card.classList.add("is-empty");
-      list.innerHTML = `<li class="rt-eta-card-row is-empty">No ETA</li>`;
+      list.innerHTML = `<li class="rt-eta-card-row is-empty">N/A</li>`;
       return;
     }
     if (eta.unsupported) {
       card.classList.add("is-empty");
-      list.innerHTML = `<li class="rt-eta-card-row is-empty">ETA N/A</li>`;
+      list.innerHTML = `<li class="rt-eta-card-row is-empty">N/A</li>`;
       card.title = eta.error || "Live ETA not available for this operator";
       return;
     }
@@ -4000,13 +4003,13 @@ function applyTripDetailEtaDom(plan, etaMap) {
     const slots = Array.isArray(eta.etas) ? eta.etas.slice(0, 3) : [];
     if (!slots.length) {
       card.classList.add("is-empty");
-      list.innerHTML = `<li class="rt-eta-card-row is-empty">${escapeHtml(eta.error || "No departures")}</li>`;
+      list.innerHTML = `<li class="rt-eta-card-row is-empty">${escapeHtml(eta.error || "N/A")}</li>`;
       return;
     }
 
     list.innerHTML = slots
       .map((slot, i) => {
-        const line = formatEtaCardLine(slot);
+        const line = formatEtaCardLine(slot, { operator: eta.operator });
         const nowArrived = slot.waitMins != null && slot.waitMins <= 0;
         const dest = slot.dest
           ? ` title="${escapeHtml(`To ${slot.dest}${slot.remark ? ` · ${slot.remark}` : ""}`)}"`
@@ -4646,6 +4649,14 @@ function setUiMode(mode) {
     btn.classList.toggle("is-active", active);
     btn.setAttribute("aria-selected", String(active));
   });
+
+  // Leaving trip/ETA-route nested pages prevents a broken empty sidebar
+  if (sidebarPage === "trip") {
+    closeTripDetailPage();
+  } else if (sidebarPage === "eta-route") {
+    setSidebarPage("search");
+  }
+
   // Show ETA route browser vs trip-plan form in the detail sidebar
   if (els.etaSidebarPanel) {
     els.etaSidebarPanel.hidden = next !== "eta";
@@ -4653,17 +4664,22 @@ function setUiMode(mode) {
   if (els.tripPlanSidebarPanel) {
     els.tripPlanSidebarPanel.hidden = next === "eta";
   }
-  if (els.detailTitle && sidebarPage !== "trip") {
+  if (els.detailTitle) {
     els.detailTitle.textContent =
-      next === "eta" ? "ETA · routes" : "Trip Plan";
+      next === "eta" ? "ETA · routes" : "Route planner";
   }
+  // Always land on the search page for the active mode
+  setSidebarPage("search");
   if (next === "eta") {
-    setSidebarPage("search");
     setDetailOpen(true);
     void ensureMtrStationLinesMap();
     void refreshEtaRouteSuggest();
   }
-  // Do NOT re-measure dock width on mode switch — mid slot is fixed size.
+  // Remeasure dock to current chrome (ETA search vs plan mid-slot) — allow shrink
+  requestAnimationFrame(() => {
+    syncDockChromeWidth({ force: true });
+    resizeMapSoon();
+  });
 }
 
 // ── ETA mode: bus / MTR / LRT route search ──────────────────────────────────
@@ -5917,16 +5933,21 @@ function etaRouteCardInnerHtml(r, dir, eta = {}) {
     r.nearbyHint ||
     (dir.orig ? dir.orig : "");
   const mins = eta.minutes;
-  const minsText =
-    mins == null || Number.isNaN(Number(mins))
-      ? "—"
-      : String(Math.max(0, Math.round(Number(mins))));
+  const waitLabel = formatWaitMins(mins);
+  // "N/A" / "Now" are full labels; numeric waits keep a separate "min" unit
+  const isTextWait = waitLabel === "N/A" || waitLabel === "Now";
+  const minsText = isTextWait
+    ? waitLabel
+    : String(Math.max(0, Math.round(Number(mins))));
+  const unitText = isTextWait ? "" : "min";
   const etaClass =
-    mins != null && Number(mins) <= 3
-      ? "is-live is-soon"
-      : mins != null
-        ? "is-live"
-        : "";
+    mins != null && !Number.isNaN(Number(mins)) && Number(mins) <= 0
+      ? "is-live is-soon is-now"
+      : mins != null && Number(mins) <= 3
+        ? "is-live is-soon"
+        : mins != null
+          ? "is-live"
+          : "is-na";
   const color = companyLineColor(r);
   return `
     <div class="eta-card-main">
@@ -5939,7 +5960,7 @@ function etaRouteCardInnerHtml(r, dir, eta = {}) {
     </div>
     <div class="eta-card-eta ${etaClass}">
       <span class="eta-card-eta-min">${escapeHtml(minsText)}</span>
-      <span class="eta-card-eta-unit">min</span>
+      ${unitText ? `<span class="eta-card-eta-unit">${escapeHtml(unitText)}</span>` : ""}
     </div>`;
 }
 
