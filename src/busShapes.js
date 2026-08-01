@@ -97,24 +97,38 @@ export function matchBusShapeOverride(opt) {
   if (!routes.length || !opt) return null;
 
   const b = routeBlob(opt);
-  /** @type {BusShapeOverride | null} */
-  let best = null;
-  let bestScore = 0;
+  /** @type {Array<{ r: BusShapeOverride, score: number, exactRoute: boolean }>} */
+  const candidates = [];
 
   for (const r of routes) {
     let score = 0;
     const rShort = String(r.route_short_name || "").trim().toUpperCase();
-    if (rShort && b.short && rShort === b.short) score += 40;
+    const exactRoute = !!(rShort && b.short && rShort === b.short);
+    if (exactRoute) score += 40;
     else if (rShort && b.short && rShort !== b.short) continue;
 
+    let agencyOk = true;
     if (r.agency) {
       const ag = String(r.agency).toUpperCase();
-      if (b.agency.includes(ag) || ag.includes(b.agency.split(/\s/)[0] || "")) {
+      const bag = String(b.agency || "").toUpperCase();
+      if (
+        !bag ||
+        bag.includes(ag) ||
+        ag.includes(bag.split(/\s/)[0] || "") ||
+        ag.includes("JOINT") ||
+        // KMB/LWB family
+        ((ag.includes("KMB") || ag.includes("LWB")) &&
+          (bag.includes("KMB") || bag.includes("LWB")))
+      ) {
         score += 15;
-      } else if (b.agency && ag && !b.agency.includes(ag) && !ag.includes("JOINT")) {
-        // soft mismatch — still allow if route name matches strongly
-        score -= 5;
+      } else {
+        agencyOk = false;
+        score -= 25; // wrong company — usually skip
       }
+    }
+    if (!agencyOk && exactRoute) {
+      // Still allow only if agency completely unknown on either side
+      if (r.agency && b.agency) continue;
     }
 
     if (Array.isArray(r.route_id_match) && r.route_id_match.length) {
@@ -122,24 +136,50 @@ export function matchBusShapeOverride(opt) {
         b.id.includes(String(m).toUpperCase()),
       );
       if (idHit) score += 25;
-      else score -= 10;
+      else score -= 5;
     }
 
+    // OD match is a soft preference (disambiguate multi-bound shapes), not a hard reject
     if (r.from_match?.length) {
       if (nameMatches(b.from, r.from_match)) score += 20;
-      else score -= 15;
+      else if (nameMatches(b.to, r.from_match)) score += 8; // reverse bound
+      else score -= 5;
     }
     if (r.to_match?.length) {
       if (nameMatches(b.to, r.to_match)) score += 20;
-      else score -= 15;
+      else if (nameMatches(b.from, r.to_match)) score += 8;
+      else score -= 5;
     }
 
-    if (score > bestScore && score >= 40) {
-      bestScore = score;
-      best = r;
+    if (r.direction && b.from) {
+      // mild preference only
+      const rd = String(r.direction).toLowerCase();
+      if (rd === "circular" || rd.includes("loop")) score += 2;
     }
+
+    candidates.push({ r, score, exactRoute });
   }
-  if (best) return best;
+
+  if (!candidates.length) {
+    const stops = stopsFromOpt(opt);
+    const similar = matchSimilarBusShapeOverride(stops, {
+      excludeRoute: b.short || undefined,
+      preferAgency: b.agency || undefined,
+    });
+    return similar?.shape || null;
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+
+  // Single published shape for this route number → always use it (merged path)
+  const exact = candidates.filter((c) => c.exactRoute);
+  if (exact.length === 1 && exact[0].score >= 20) {
+    return exact[0].r;
+  }
+
+  // Multiple bounds / variants: pick best score
+  if (candidates[0].score >= 35) return candidates[0].r;
+  if (exact.length && exact[0].score >= 30) return exact[0].r;
 
   // No exact override — try a published path that already follows this corridor
   const stops = stopsFromOpt(opt);
@@ -483,32 +523,36 @@ export function matchBusShapeForRoute(query) {
 
     if (r.from_match?.length) {
       if (nameMatches(from, r.from_match)) score += 25;
-      else score -= 12;
+      else if (nameMatches(to, r.from_match)) score += 10;
+      else score -= 5;
     }
     if (r.to_match?.length) {
       if (nameMatches(to, r.to_match)) score += 25;
-      else score -= 12;
+      else if (nameMatches(from, r.to_match)) score += 10;
+      else score -= 5;
     }
 
     if (r.direction && dir) {
       const rd = String(r.direction).toLowerCase();
       const sameBound =
         rd === dir ||
+        rd === "circular" ||
         (dir === "o" && (rd.includes("out") || rd === "o")) ||
         (dir === "i" && (rd.includes("in") || rd === "i")) ||
         rd.includes(dir) ||
         dir.includes(rd);
       if (sameBound) score += 10;
-      else score -= 5;
+      else score -= 3;
     }
 
-    if (score > bestScore && score >= 45) {
+    if (score > bestScore && score >= 40) {
       bestScore = score;
       best = r;
     }
   }
 
   // Soft fallback: single published shape for this route+agency (any bound)
+  // — ensures merged contributions always show even when OD labels differ
   if (!best && short) {
     const candidates = routes.filter((r) => {
       if (!Array.isArray(r.coordinates) || r.coordinates.length < 2) return false;
@@ -519,10 +563,27 @@ export function matchBusShapeForRoute(query) {
       if (rShort !== short) return false;
       if (!agency || !r.agency) return true;
       const ag = String(r.agency).toUpperCase();
-      return agency.includes(ag) || ag.includes(agency) || ag.includes("JOINT");
+      return (
+        agency.includes(ag) ||
+        ag.includes(agency) ||
+        ag.includes("JOINT") ||
+        ((agency === "KMB" || agency === "LWB") &&
+          (ag.includes("KMB") || ag.includes("LWB")))
+      );
     });
     if (candidates.length === 1) {
       return { shape: candidates[0], score: 40 };
+    }
+    if (candidates.length > 1 && dir) {
+      const dirHit = candidates.find((r) => {
+        const rd = String(r.direction || "").toLowerCase();
+        return (
+          rd === dir ||
+          (dir === "outbound" && (rd.includes("out") || rd === "o")) ||
+          (dir === "inbound" && (rd.includes("in") || rd === "i"))
+        );
+      });
+      if (dirHit) return { shape: dirHit, score: 42 };
     }
   }
 

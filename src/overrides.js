@@ -14,10 +14,12 @@
 export const OVERRIDES_REPO_DEFAULT = "UNGemini/morgan-travelers-overrides";
 
 /**
- * Where to fetch bus-shapes.json:
+ * Where to fetch bus-shapes.json (latest merged contributions):
  * 1. VITE_OVERRIDES_BUS_SHAPES_URL if set
- * 2. In Vite dev: same-origin /api/overrides/bus-shapes.json (local sibling repo)
- * 3. Else GitHub raw (production default)
+ * 2. Same-origin /api/overrides/bus-shapes.json
+ *    - Dev (Vite): sibling repo / local file
+ *    - Prod (Pages Function): proxies GitHub raw (COEP-safe, fresh)
+ * 3. Direct GitHub raw as last-resort URL (used if API fails)
  */
 export function busShapesRemoteUrl() {
   if (
@@ -26,21 +28,20 @@ export function busShapesRemoteUrl() {
   ) {
     return String(import.meta.env.VITE_OVERRIDES_BUS_SHAPES_URL);
   }
-  if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
-    if (typeof window !== "undefined" && window.location?.origin) {
-      return `${window.location.origin}/api/overrides/bus-shapes.json`;
-    }
-    return "/api/overrides/bus-shapes.json";
+  // Prefer same-origin API in browser (works under COEP; CF proxies GitHub)
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}/api/overrides/bus-shapes.json`;
   }
+  return "/api/overrides/bus-shapes.json";
+}
+
+/** Direct GitHub raw URL (fallback when same-origin API is down). */
+export function busShapesGithubRawUrl() {
   return `https://raw.githubusercontent.com/${OVERRIDES_REPO_DEFAULT}/main/bus-shapes.json`;
 }
 
 /** @deprecated use busShapesRemoteUrl() */
-export const DEFAULT_BUS_SHAPES_REMOTE =
-  typeof import.meta !== "undefined" &&
-  import.meta.env?.VITE_OVERRIDES_BUS_SHAPES_URL
-    ? String(import.meta.env.VITE_OVERRIDES_BUS_SHAPES_URL)
-    : `https://raw.githubusercontent.com/${OVERRIDES_REPO_DEFAULT}/main/bus-shapes.json`;
+export const DEFAULT_BUS_SHAPES_REMOTE = busShapesGithubRawUrl();
 
 /** @type {any} */
 const LRT_FALLBACK = {
@@ -130,7 +131,39 @@ function baseUrl() {
 }
 
 /**
- * Fetch overrides: LRT/access from app bundle; bus shapes from remote repo first.
+ * Try one bus-shapes URL; return parsed object or null.
+ * @param {string} url
+ * @param {string} label
+ */
+async function tryFetchBusShapes(url, label) {
+  if (!url) return null;
+  try {
+    const bust = url.includes("?")
+      ? `${url}&_=${Date.now()}`
+      : `${url}?_=${Date.now()}`;
+    const res = await fetch(bust, {
+      cache: "no-store",
+      mode: "cors",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      console.warn(`[overrides] bus-shapes ${label} HTTP`, res.status, url);
+      return null;
+    }
+    const remote = await res.json();
+    if (!Array.isArray(remote?.routes)) {
+      console.warn(`[overrides] bus-shapes ${label} missing routes[]`);
+      return null;
+    }
+    return { data: remote, label, url };
+  } catch (e) {
+    console.warn(`[overrides] bus-shapes ${label} failed`, e);
+    return null;
+  }
+}
+
+/**
+ * Fetch overrides: LRT/access from app bundle; bus shapes from live GitHub (via API).
  */
 export async function loadStaticOverrides() {
   if (loadPromise) return loadPromise;
@@ -148,9 +181,10 @@ export async function loadStaticOverrides() {
         `${root}overrides/bus-shapes.json`,
         window.location.href,
       ).href;
-      const remoteBusUrl = busShapesRemoteUrl();
+      const apiUrl = busShapesRemoteUrl();
+      const githubUrl = busShapesGithubRawUrl();
 
-      const [lrtRes, pinRes, busRemoteRes, busLocalRes] = await Promise.all([
+      const [lrtRes, pinRes] = await Promise.all([
         fetch(new URL(`${root}overrides/lrt.json`, window.location.href).href, {
           cache: "no-cache",
         }),
@@ -159,39 +193,22 @@ export async function loadStaticOverrides() {
             .href,
           { cache: "no-cache" },
         ),
-        remoteBusUrl
-          ? fetch(remoteBusUrl, {
-              cache: "no-cache",
-              mode: "cors",
-              headers: { Accept: "application/json" },
-            }).catch((e) => {
-              console.warn("[overrides] bus-shapes remote failed", e);
-              return null;
-            })
-          : Promise.resolve(null),
-        fetch(localBusUrl, { cache: "no-cache" }),
       ]);
       if (lrtRes.ok) lrtOverrides = await lrtRes.json();
       if (pinRes.ok) mtrAccessOverrides = await pinRes.json();
 
-      // Prefer remote / local-dev API published shapes; fall back to bundled
+      // Prefer live merged shapes: same-origin API (GitHub proxy) → raw GitHub → bundle
       let busSource = "fallback";
-      if (busRemoteRes?.ok) {
-        try {
-          const remote = await busRemoteRes.json();
-          if (Array.isArray(remote?.routes)) {
-            busShapeOverrides = remote;
-            busSource = remoteBusUrl.includes("/api/overrides/")
-              ? "local-dev-api"
-              : "remote";
-          }
-        } catch (e) {
-          console.warn("[overrides] remote JSON parse failed", e);
-        }
-      }
-      if (busSource === "fallback" && busLocalRes.ok) {
-        busShapeOverrides = await busLocalRes.json();
-        busSource = "local-bundle";
+      const hit =
+        (await tryFetchBusShapes(apiUrl, "api-proxy")) ||
+        (await tryFetchBusShapes(githubUrl, "github-raw")) ||
+        (await tryFetchBusShapes(localBusUrl, "local-bundle"));
+
+      if (hit) {
+        busShapeOverrides = hit.data;
+        busSource = hit.label;
+      } else {
+        busShapeOverrides = BUS_SHAPES_FALLBACK;
       }
 
       console.info(
@@ -203,7 +220,10 @@ export async function loadStaticOverrides() {
         "bus shapes",
         busShapeOverrides?.routes?.length ?? 0,
         `(${busSource})`,
-        remoteBusUrl ? remoteBusUrl.slice(0, 72) : "no remote URL",
+        "published",
+        (busShapeOverrides?.routes || []).filter(
+          (r) => !r.status || r.status === "published" || r.status === "approved",
+        ).length,
       );
     } catch (err) {
       console.warn("[overrides] fetch failed — using fallback", err);
@@ -221,11 +241,21 @@ export async function loadStaticOverrides() {
 }
 
 /**
- * Force re-fetch of bus shapes (e.g. after a long session).
+ * Force re-fetch of bus shapes (e.g. after a long session or contribute merge).
  * Clears the load promise so next get/load hits the network again.
  */
 export function invalidateBusShapeOverridesCache() {
   loadPromise = null;
+  busShapeOverrides = BUS_SHAPES_FALLBACK;
+}
+
+/**
+ * Reload bus shapes from network immediately.
+ * @returns {Promise<any>}
+ */
+export async function reloadBusShapeOverrides() {
+  invalidateBusShapeOverridesCache();
+  return loadStaticOverrides();
 }
 
 export function getLrtOverrides() {

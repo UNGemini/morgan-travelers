@@ -33,11 +33,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Fare tables + hand overrides — always network (never stale SW cache)
+  // Fare tables + hand overrides + GitHub raw shapes — always network
   if (
     url.pathname.includes("/fares/") ||
     url.pathname.includes("/overrides/") ||
-    url.pathname.endsWith("hk-fares.json")
+    url.pathname.endsWith("hk-fares.json") ||
+    url.hostname === "raw.githubusercontent.com"
   ) {
     event.respondWith(fetch(request));
     return;
