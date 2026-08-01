@@ -200,9 +200,10 @@ const els = {
   tripDetailHead: document.getElementById("trip-detail-head"),
   tripDetailTimeline: document.getElementById("trip-detail-timeline"),
   inputEtaRoute: document.getElementById("input-eta-route"),
-  etaRouteSuggest: document.getElementById("eta-route-suggest"),
-  etaRouteDropdown: document.getElementById("eta-route-dropdown"),
-  etaRouteHint: document.getElementById("eta-route-hint"),
+  etaSidebarPanel: document.getElementById("eta-sidebar-panel"),
+  tripPlanSidebarPanel: document.getElementById("trip-plan-sidebar-panel"),
+  etaRouteListSidebar: document.getElementById("eta-route-list-sidebar"),
+  etaRouteHintSidebar: document.getElementById("eta-route-hint-sidebar"),
   toolbarEtaSearch: document.getElementById("toolbar-eta-search"),
   modeButtons: () =>
     Array.from(document.querySelectorAll(".toolbar-mode-btn[data-ui-mode]")),
@@ -4481,18 +4482,24 @@ function setUiMode(mode) {
     btn.classList.toggle("is-active", active);
     btn.setAttribute("aria-selected", String(active));
   });
+  // Show ETA route browser vs trip-plan form in the detail sidebar
+  if (els.etaSidebarPanel) {
+    els.etaSidebarPanel.hidden = next !== "eta";
+  }
+  if (els.tripPlanSidebarPanel) {
+    els.tripPlanSidebarPanel.hidden = next === "eta";
+  }
   if (els.detailTitle && sidebarPage !== "trip") {
     els.detailTitle.textContent =
-      next === "eta" ? "ETA · route search" : "Trip Plan";
+      next === "eta" ? "ETA · routes" : "Trip Plan";
   }
-  // Hide ETA suggestions when leaving ETA mode
-  if (next !== "eta") hideEtaRouteSuggest();
-  // Do NOT re-measure dock width on mode switch — mid slot is fixed size;
-  // re-measuring while locked was shrinking the sidebar each toggle.
   if (next === "eta") {
-    // Warm nearby/browse data
+    setSidebarPage("search");
+    setDetailOpen(true);
     void ensureMtrStationLinesMap();
+    void refreshEtaRouteSuggest();
   }
+  // Do NOT re-measure dock width on mode switch — mid slot is fixed size.
 }
 
 // ── ETA mode: bus / MTR / LRT route search ──────────────────────────────────
@@ -4835,38 +4842,21 @@ function searchEtaRoutes(query, limit = 16) {
   return scored.slice(0, limit).map((s) => s.r);
 }
 
-function hideEtaRouteSuggest() {
-  if (els.etaRouteDropdown) {
-    els.etaRouteDropdown.hidden = true;
-  }
-  if (els.etaRouteSuggest) els.etaRouteSuggest.innerHTML = "";
-  if (els.etaRouteHint) {
-    els.etaRouteHint.hidden = true;
-    els.etaRouteHint.textContent = "";
-  }
-  etaRouteHits = [];
-  etaRouteActive = -1;
-}
-
-function showEtaRouteDropdown() {
-  if (els.etaRouteDropdown) els.etaRouteDropdown.hidden = false;
-}
-
 /**
+ * Render ETA routes into the detail sidebar list (always when ETA mode).
  * @param {EtaRouteEntry[]} hits
  * @param {string} [hint]
  */
 function renderEtaRouteSuggest(hits, hint = "") {
-  const list = els.etaRouteSuggest;
+  const list = els.etaRouteListSidebar;
   if (!list) return;
-  showEtaRouteDropdown();
-  if (els.etaRouteHint) {
+  if (els.etaRouteHintSidebar) {
     if (hint) {
-      els.etaRouteHint.hidden = false;
-      els.etaRouteHint.textContent = hint;
+      els.etaRouteHintSidebar.hidden = false;
+      els.etaRouteHintSidebar.textContent = hint;
     } else {
-      els.etaRouteHint.hidden = true;
-      els.etaRouteHint.textContent = "";
+      els.etaRouteHintSidebar.hidden = true;
+      els.etaRouteHintSidebar.textContent = "";
     }
   }
   etaRouteHits = hits;
@@ -4898,15 +4888,15 @@ function renderEtaRouteSuggest(hits, hint = "") {
     })
     .join("");
   list.querySelectorAll("li[data-idx]").forEach((li) => {
-    li.addEventListener("mousedown", (e) => e.preventDefault());
     li.addEventListener("click", () => {
       const idx = Number(li.getAttribute("data-idx"));
+      etaRouteActive = idx;
       selectEtaRoute(etaRouteHits[idx]);
     });
   });
 }
 
-/** Refresh list from current input + filter (async for empty browse). */
+/** Refresh sidebar list from current toolbar input + filter. */
 async function refreshEtaRouteSuggest() {
   if (getUiMode() !== "eta") return;
   const q = String(els.inputEtaRoute?.value || "").trim();
@@ -4914,10 +4904,11 @@ async function refreshEtaRouteSuggest() {
     renderEtaRouteSuggest(searchEtaRoutes(q));
     return;
   }
-  renderEtaRouteSuggest([], "Loading…");
+  renderEtaRouteSuggest([], "Loading nearby / browse…");
   const { hits, hint } = await browseEtaRoutes();
-  // Still empty query?
+  // Query changed while loading?
   if (String(els.inputEtaRoute?.value || "").trim().length >= 1) return;
+  if (getUiMode() !== "eta") return;
   renderEtaRouteSuggest(hits, hint);
 }
 
@@ -4926,7 +4917,6 @@ async function refreshEtaRouteSuggest() {
  */
 function selectEtaRoute(route) {
   if (!route) return;
-  hideEtaRouteSuggest();
   if (els.inputEtaRoute) els.inputEtaRoute.value = route.id;
   const kindLabel =
     route.kind === "mtr"
@@ -4939,6 +4929,8 @@ function selectEtaRoute(route) {
   showToast(`${kindLabel} ${route.id} · ${route.label}`, 2800);
   setDetailOpen(true);
   setSidebarPage("search");
+  // Keep list selection highlight
+  syncEtaActive();
   if (els.planResults) {
     els.planResults.hidden = false;
     els.planResults.innerHTML = `
@@ -4965,10 +4957,8 @@ function syncEtaModeChips() {
 
 function initEtaRouteSearchUi() {
   const input = els.inputEtaRoute;
-  if (!input) return;
 
   document.querySelectorAll(".eta-mode-chip[data-eta-mode]").forEach((btn) => {
-    btn.addEventListener("mousedown", (e) => e.preventDefault());
     btn.addEventListener("click", () => {
       const mode = btn.getAttribute("data-eta-mode") || "all";
       etaTrafficMode =
@@ -4979,55 +4969,52 @@ function initEtaRouteSearchUi() {
   });
   syncEtaModeChips();
 
-  let timer = 0;
-  input.addEventListener("input", () => {
-    clearTimeout(timer);
-    timer = window.setTimeout(() => {
+  if (input) {
+    let timer = 0;
+    input.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        if (getUiMode() !== "eta") return;
+        void refreshEtaRouteSuggest();
+      }, 120);
+    });
+
+    input.addEventListener("keydown", (e) => {
       if (getUiMode() !== "eta") return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        etaRouteActive = Math.min(etaRouteActive + 1, etaRouteHits.length - 1);
+        syncEtaActive();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        etaRouteActive = Math.max(etaRouteActive - 1, 0);
+        syncEtaActive();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (etaRouteActive >= 0) selectEtaRoute(etaRouteHits[etaRouteActive]);
+      }
+    });
+
+    input.addEventListener("focus", () => {
+      if (getUiMode() !== "eta") return;
+      setDetailOpen(true);
       void refreshEtaRouteSuggest();
-    }, 120);
-  });
+    });
+  }
 
-  input.addEventListener("keydown", (e) => {
-    if (els.etaRouteDropdown?.hidden) {
-      if (e.key === "Escape") input.blur();
-      return;
-    }
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      etaRouteActive = Math.min(etaRouteActive + 1, etaRouteHits.length - 1);
-      syncEtaActive();
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      etaRouteActive = Math.max(etaRouteActive - 1, 0);
-      syncEtaActive();
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      if (etaRouteActive >= 0) selectEtaRoute(etaRouteHits[etaRouteActive]);
-    } else if (e.key === "Escape") {
-      hideEtaRouteSuggest();
-    }
-  });
-
-  input.addEventListener("blur", () => {
-    setTimeout(() => {
-      // Keep open if focus moved to filter chips inside dropdown
-      const ae = document.activeElement;
-      if (ae && els.etaRouteDropdown?.contains(ae)) return;
-      hideEtaRouteSuggest();
-    }, 160);
-  });
-
-  input.addEventListener("focus", () => {
+  // Initial ETA mode (default shell): fill sidebar list
+  if (getUiMode() === "eta") {
+    if (els.etaSidebarPanel) els.etaSidebarPanel.hidden = false;
+    if (els.tripPlanSidebarPanel) els.tripPlanSidebarPanel.hidden = true;
+    void ensureMtrStationLinesMap();
     void refreshEtaRouteSuggest();
-  });
+  }
 
-  // Warm catalog + station lines
   void ensureMtrStationLinesMap();
 }
 
 function syncEtaActive() {
-  const list = els.etaRouteSuggest;
+  const list = els.etaRouteListSidebar;
   if (!list) return;
   list.querySelectorAll("li[data-idx]").forEach((li) => {
     const i = Number(li.getAttribute("data-idx"));

@@ -609,7 +609,39 @@
           <div class="detail-sidebar-body">
             <!-- Page: search + plan list -->
             <div id="sidebar-page-search" class="sidebar-page">
-            <section class="panel-section">
+
+            <!-- ETA mode: traffic filter + route list (hidden in Trip Plan) -->
+            <section
+              id="eta-sidebar-panel"
+              class="panel-section eta-sidebar-panel"
+              hidden
+              aria-label="ETA route browser"
+            >
+              <div class="loc-label pref-label">
+                <span class="material-symbols-outlined" aria-hidden="true">directions_transit</span>
+                Traffic method
+              </div>
+              <div
+                class="eta-mode-filter eta-mode-filter-sidebar"
+                role="group"
+                aria-label="Traffic method"
+              >
+                <button type="button" class="eta-mode-chip is-active" data-eta-mode="all">All</button>
+                <button type="button" class="eta-mode-chip" data-eta-mode="mtr">MTR</button>
+                <button type="button" class="eta-mode-chip" data-eta-mode="lrt">LRT</button>
+                <button type="button" class="eta-mode-chip" data-eta-mode="bus">Bus</button>
+              </div>
+              <p id="eta-route-hint-sidebar" class="eta-route-hint-sidebar" hidden></p>
+              <ul
+                id="eta-route-list-sidebar"
+                class="eta-route-list-sidebar"
+                role="listbox"
+                aria-label="Routes"
+              ></ul>
+            </section>
+
+            <!-- Trip Plan mode: origin / destination / prefs -->
+            <section class="panel-section trip-plan-sidebar-panel" id="trip-plan-sidebar-panel">
               <div class="loc-field" data-field="origin">
                 <label class="loc-label" for="input-origin">
                   <span class="material-symbols-outlined" aria-hidden="true">trip_origin</span>
@@ -894,8 +926,9 @@
                 </div>
               </div>
 
-              <div id="plan-results" class="plan-results" hidden></div>
             </section>
+
+              <div id="plan-results" class="plan-results" hidden></div>
             </div>
 
             <!-- Page: full trip detail (all stops) -->
@@ -976,29 +1009,6 @@
                 aria-autocomplete="list"
                 aria-controls="eta-route-suggest"
               />
-              <div
-                id="eta-route-dropdown"
-                class="eta-route-dropdown"
-                hidden
-              >
-                <div
-                  class="eta-mode-filter"
-                  role="group"
-                  aria-label="Traffic method"
-                >
-                  <button type="button" class="eta-mode-chip is-active" data-eta-mode="all">All</button>
-                  <button type="button" class="eta-mode-chip" data-eta-mode="mtr">MTR</button>
-                  <button type="button" class="eta-mode-chip" data-eta-mode="lrt">LRT</button>
-                  <button type="button" class="eta-mode-chip" data-eta-mode="bus">Bus</button>
-                </div>
-                <p id="eta-route-hint" class="eta-route-hint" hidden></p>
-                <ul
-                  id="eta-route-suggest"
-                  class="eta-route-suggest"
-                  role="listbox"
-                  aria-label="Route suggestions"
-                ></ul>
-              </div>
             </div>
             <button
               type="button"
