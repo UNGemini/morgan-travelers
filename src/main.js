@@ -99,7 +99,9 @@ import {
 import { buildTransitPolyline, projectStops } from "./routeSnapper.js";
 import {
   matchBusShapeOverride,
+  matchBusShapeForRoute,
   applyVisualStopsFromShape,
+  busShapeToPolyline,
 } from "./busShapes.js";
 import {
   isIndoorMtrInterchangeWalk,
@@ -205,6 +207,8 @@ const els = {
   tripPlanSidebarPanel: document.getElementById("trip-plan-sidebar-panel"),
   etaRouteListSidebar: document.getElementById("eta-route-list-sidebar"),
   etaRouteHintSidebar: document.getElementById("eta-route-hint-sidebar"),
+  etaRouteActions: document.getElementById("eta-route-actions"),
+  btnEtaRouteDetails: document.getElementById("btn-eta-route-details"),
   toolbarEtaSearch: document.getElementById("toolbar-eta-search"),
   modeButtons: () =>
     Array.from(document.querySelectorAll(".toolbar-mode-btn[data-ui-mode]")),
@@ -5297,9 +5301,15 @@ function renderEtaRouteSuggest(hits, hint = "") {
       // Keep selection on this card
       etaRouteActive = idx;
       renderEtaRouteSuggest(etaRouteHits, hint);
-      // re-apply selection highlight after re-render
       etaRouteActive = idx;
       syncEtaActive();
+      // If this route is selected, reload shape for new bound
+      if (
+        etaSelectedForDetails &&
+        etaRouteKey(etaSelectedForDetails) === etaRouteKey(r)
+      ) {
+        selectEtaRoute(r, idx);
+      }
     });
   });
 }
@@ -5322,6 +5332,280 @@ async function refreshEtaRouteSuggest() {
   renderEtaRouteSuggest(hits, hint);
 }
 
+/** @type {EtaRouteEntry | null} */
+let etaSelectedForDetails = null;
+/** @type {Array<{ seq: number, name: string, stopId?: string, lon?: number, lat?: number }>} */
+let etaSelectedStops = [];
+
+function companyLineColor(route) {
+  const co = String(route?.co || "").toLowerCase();
+  if (route?.kind === "mtr") return "#007bc6";
+  if (route?.kind === "lrt") return "#c9a227";
+  if (route?.kind === "mtr_bus") return "#5b8def";
+  if (co === "gmb") return "#2e9e3e";
+  if (co === "ctb") return "#f7b500";
+  if (co === "nlb") return "#00a651";
+  if (co === "lwb") return "#f5a623";
+  return "#e60012"; // KMB
+}
+
+/**
+ * Load stop sequence + coordinates for selected route/bound.
+ * @param {EtaRouteEntry} route
+ * @returns {Promise<Array<{ seq: number, name: string, stopId?: string, lon: number, lat: number }>>}
+ */
+async function loadEtaRouteStops(route) {
+  const dirs = etaRouteDirections(route);
+  const di = getCardDir(route);
+  const dir = dirs[Math.min(di, dirs.length - 1)] || dirs[0];
+  const bound = String(dir?.bound || "O").toUpperCase();
+
+  // Prefer published bus-shape override (has full polyline + optional visual_stops)
+  if (route.kind === "bus" || route.kind === "mtr_bus" || route.kind === "gmb") {
+    const match = matchBusShapeForRoute({
+      route_short_name: route.id,
+      agency: route.co || "",
+      direction: bound === "I" ? "inbound" : "outbound",
+      from: dir?.orig || "",
+      to: dir?.dest || "",
+    });
+    if (match?.shape?.coordinates?.length >= 2) {
+      const vs = match.shape.visual_stops || [];
+      if (vs.length) {
+        return vs
+          .map((s, i) => {
+            const c = s.visual || s.official;
+            if (!Array.isArray(c) || c.length < 2) return null;
+            return {
+              seq: Number(s.seq) || i + 1,
+              name: String(s.name || `Stop ${i + 1}`),
+              stopId: s.stop_id || "",
+              lon: Number(c[0]),
+              lat: Number(c[1]),
+              _shape: match.shape,
+            };
+          })
+          .filter(Boolean);
+      }
+      // Polyline vertices as lightweight path (no names)
+      return match.shape.coordinates.map((c, i) => ({
+        seq: i + 1,
+        name: i === 0 ? "Start" : i === match.shape.coordinates.length - 1 ? "End" : "",
+        lon: Number(c[0]),
+        lat: Number(c[1]),
+        _shape: match.shape,
+        _polylineOnly: true,
+      }));
+    }
+  }
+
+  // KMB / LWB route-stop + stop coords
+  if (
+    route.kind === "bus" ||
+    route.kind === "mtr_bus" ||
+    (route.co && ["kmb", "lwb"].includes(String(route.co).toLowerCase()))
+  ) {
+    const direction = bound === "I" ? "inbound" : "outbound";
+    const serviceType = "1";
+    try {
+      const rs = await fetch(
+        `/eta/kmb/route-stop/${encodeURIComponent(route.id)}/${direction}/${serviceType}`,
+        { headers: { Accept: "application/json" } },
+      );
+      if (rs.ok) {
+        const j = await rs.json();
+        const rows = (j.data || []).slice().sort((a, b) => Number(a.seq) - Number(b.seq));
+        await ensureKmbStops();
+        const byId = new Map((kmbStopsCache || []).map((s) => [s.stop, s]));
+        const stops = [];
+        for (const row of rows) {
+          const sid = String(row.stop || "");
+          const st = byId.get(sid);
+          if (!st) continue;
+          stops.push({
+            seq: Number(row.seq) || stops.length + 1,
+            name: st.name_tc || st.name_en || sid,
+            stopId: sid,
+            lon: st.lon,
+            lat: st.lat,
+          });
+        }
+        if (stops.length >= 2) return stops;
+      }
+    } catch (e) {
+      console.warn("[eta] route-stop", e);
+    }
+  }
+
+  // CTB route-stop
+  if (String(route.co).toLowerCase() === "ctb" || route.kind === "bus") {
+    try {
+      const direction = bound === "I" ? "inbound" : "outbound";
+      const co = "CTB";
+      const rs = await fetch(
+        `/eta/ctb/route-stop/${co}/${encodeURIComponent(route.id)}/${direction}`,
+        { headers: { Accept: "application/json" } },
+      );
+      if (rs.ok) {
+        const j = await rs.json();
+        const rows = (j.data || []).slice().sort((a, b) => Number(a.seq) - Number(b.seq));
+        const stops = [];
+        // Fetch stop coords in parallel (cap)
+        const limited = rows.slice(0, 80);
+        await Promise.all(
+          limited.map(async (row) => {
+            const sid = String(row.stop || "");
+            try {
+              const sr = await fetch(`/eta/ctb/stop/${encodeURIComponent(sid)}`, {
+                headers: { Accept: "application/json" },
+              });
+              if (!sr.ok) return;
+              const sj = await sr.json();
+              const d = sj.data || {};
+              const lat = Number(d.lat);
+              const lon = Number(d.long ?? d.lon);
+              if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+              stops.push({
+                seq: Number(row.seq) || 0,
+                name: d.name_tc || d.name_en || sid,
+                stopId: sid,
+                lon,
+                lat,
+              });
+            } catch {
+              /* skip */
+            }
+          }),
+        );
+        stops.sort((a, b) => a.seq - b.seq);
+        if (stops.length >= 2) return stops;
+      }
+    } catch (e) {
+      console.warn("[eta] ctb route-stop", e);
+    }
+  }
+
+  // MTR: stations on this line from geojson
+  if (route.kind === "mtr") {
+    await ensureMtrStationLinesMap();
+    const line = String(route.id).toUpperCase();
+    /** @type {Array<{ name: string, lon: number, lat: number, seq: number }>} */
+    const onLine = [];
+    for (const st of MTR_STATIONS) {
+      const lines =
+        mtrStationLinesMap?.get(String(st.name_en || "").toLowerCase()) || [];
+      if (!lines.map((x) => String(x).toUpperCase()).includes(line)) continue;
+      if (!Number.isFinite(st.lat) || !Number.isFinite(st.lon)) continue;
+      onLine.push({
+        name: st.name_zh ? `${st.name_zh} ${st.name_en}` : st.name_en,
+        lon: st.lon,
+        lat: st.lat,
+        seq: 0,
+      });
+    }
+    // Chain nearest-neighbour order for a rough line path
+    if (onLine.length >= 2) {
+      const ordered = [];
+      const left = [...onLine];
+      ordered.push(left.shift());
+      while (left.length) {
+        const last = ordered[ordered.length - 1];
+        let bi = 0;
+        let bd = Infinity;
+        for (let i = 0; i < left.length; i++) {
+          const d = haversineMEta(last.lat, last.lon, left[i].lat, left[i].lon);
+          if (d < bd) {
+            bd = d;
+            bi = i;
+          }
+        }
+        ordered.push(left.splice(bi, 1)[0]);
+      }
+      return ordered.map((s, i) => ({ ...s, seq: i + 1 }));
+    }
+  }
+
+  return [];
+}
+
+/**
+ * Draw selected ETA route on map (polyline + stops).
+ * @param {EtaRouteEntry} route
+ * @param {Array<{ seq: number, name: string, stopId?: string, lon: number, lat: number, _shape?: any, _polylineOnly?: boolean }>} stops
+ */
+function paintEtaRouteOnMap(route, stops) {
+  ensureRouteLayers();
+  const color = companyLineColor(route);
+
+  let lineCoords = [];
+  const shape = stops.find((s) => s._shape)?._shape;
+  if (shape?.coordinates?.length >= 2) {
+    lineCoords = shape.coordinates.map((c) => [Number(c[0]), Number(c[1])]);
+  } else {
+    lineCoords = stops
+      .filter((s) => Number.isFinite(s.lon) && Number.isFinite(s.lat))
+      .map((s) => [s.lon, s.lat]);
+  }
+
+  const stopFeats = stops
+    .filter((s) => !s._polylineOnly && Number.isFinite(s.lon) && Number.isFinite(s.lat))
+    .map((s, i) => ({
+      type: "Feature",
+      properties: {
+        name: s.name || `Stop ${i + 1}`,
+        seq: s.seq || i + 1,
+        role: i === 0 ? "board" : i === stops.length - 1 ? "alight" : "via",
+      },
+      geometry: { type: "Point", coordinates: [s.lon, s.lat] },
+    }));
+
+  const lineFeat =
+    lineCoords.length >= 2
+      ? {
+          type: "Feature",
+          properties: {
+            kind: "transit",
+            color,
+            route: route.id,
+          },
+          geometry: { type: "LineString", coordinates: lineCoords },
+        }
+      : null;
+
+  map.getSource("route-line")?.setData({
+    type: "FeatureCollection",
+    features: lineFeat ? [lineFeat] : [],
+  });
+  map.getSource("route-stops")?.setData({
+    type: "FeatureCollection",
+    features: stopFeats,
+  });
+
+  if (lineCoords.length >= 2) {
+    let minLon = Infinity;
+    let minLat = Infinity;
+    let maxLon = -Infinity;
+    let maxLat = -Infinity;
+    for (const [lon, lat] of lineCoords) {
+      if (lon < minLon) minLon = lon;
+      if (lat < minLat) minLat = lat;
+      if (lon > maxLon) maxLon = lon;
+      if (lat > maxLat) maxLat = lat;
+    }
+    try {
+      map.fitBounds(
+        [
+          [minLon, minLat],
+          [maxLon, maxLat],
+        ],
+        { padding: { top: 60, bottom: 200, left: 40, right: 40 }, maxZoom: 14, duration: 700 },
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 /**
  * Select a card in-place (does NOT write route into the search box).
  * @param {EtaRouteEntry | undefined} route
@@ -5332,6 +5616,7 @@ function selectEtaRoute(route, listIndex) {
   if (typeof listIndex === "number" && listIndex >= 0) {
     etaRouteActive = listIndex;
   }
+  etaSelectedForDetails = route;
   // Do not put route number into the search box
   const dirs = etaRouteDirections(route);
   const di = getCardDir(route);
@@ -5356,9 +5641,85 @@ function selectEtaRoute(route, listIndex) {
   setDetailOpen(true);
   setSidebarPage("search");
   syncEtaActive();
+
+  // Show “Show route details” action
+  if (els.etaRouteActions) els.etaRouteActions.hidden = false;
+  // Clear previous details panel content if any
+  const oldPanel = document.getElementById("eta-route-details-panel");
+  if (oldPanel) oldPanel.remove();
+
+  // Draw shape on map (async)
+  void (async () => {
+    try {
+      setMapRouteLoading(true, `Drawing ${route.id}…`);
+      const stops = await loadEtaRouteStops(route);
+      etaSelectedStops = stops;
+      if (stops.length >= 2) {
+        paintEtaRouteOnMap(route, stops);
+      } else {
+        clearRouteGeometry();
+        showToast(`No path data for ${route.id} yet`, 2200);
+      }
+    } catch (e) {
+      console.warn("[eta] shape", e);
+      showToast("Could not load route shape", 2200);
+    } finally {
+      setMapRouteLoading(false);
+    }
+  })();
+
   if (els.planResults) {
     els.planResults.hidden = true;
     els.planResults.innerHTML = "";
+  }
+}
+
+/**
+ * Expand stop list under the actions button.
+ */
+function showEtaRouteDetailsPanel() {
+  const route = etaSelectedForDetails;
+  if (!route) {
+    showToast("Select a route first", 1800);
+    return;
+  }
+  let panel = document.getElementById("eta-route-details-panel");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "eta-route-details-panel";
+    panel.className = "eta-route-details-panel";
+    els.etaRouteActions?.after(panel);
+  }
+  const dirs = etaRouteDirections(route);
+  const di = getCardDir(route);
+  const dir = dirs[Math.min(di, dirs.length - 1)] || dirs[0];
+  const dest = dir?.destZh || dir?.dest || route.label;
+  const stops = etaSelectedStops.filter((s) => s.name && !s._polylineOnly);
+  const stopRows =
+    stops.length > 0
+      ? stops
+          .map(
+            (s) =>
+              `<li><strong>${escapeHtml(String(s.seq || ""))}</strong> ${escapeHtml(s.name)}${s.stopId ? ` <code style="opacity:.7;font-size:.7em">${escapeHtml(s.stopId.slice(0, 12))}</code>` : ""}</li>`,
+          )
+          .join("")
+      : `<li class="hint">Stop names unavailable — path only on map.</li>`;
+
+  panel.innerHTML = `
+    <h3>${escapeHtml(route.id)} → ${escapeHtml(dest)}</h3>
+    <p class="hint">${escapeHtml(route.label)}${route.nearbyHint ? ` · ${escapeHtml(route.nearbyHint)}` : ""}</p>
+    <ol>${stopRows}</ol>
+  `;
+  panel.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  // Ensure shape is visible
+  if (etaSelectedStops.length >= 2) {
+    paintEtaRouteOnMap(route, etaSelectedStops);
+  } else {
+    void loadEtaRouteStops(route).then((s) => {
+      etaSelectedStops = s;
+      if (s.length >= 2) paintEtaRouteOnMap(route, s);
+      showEtaRouteDetailsPanel();
+    });
   }
 }
 
@@ -5372,6 +5733,10 @@ function syncEtaModeChips() {
 function initEtaRouteSearchUi() {
   const input = els.inputEtaRoute;
 
+  els.btnEtaRouteDetails?.addEventListener("click", () => {
+    showEtaRouteDetailsPanel();
+  });
+
   document.querySelectorAll(".eta-mode-chip[data-eta-mode]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const mode = btn.getAttribute("data-eta-mode") || "bus";
@@ -5380,7 +5745,12 @@ function initEtaRouteSearchUi() {
           ? mode
           : "bus";
       etaRouteActive = -1;
+      etaSelectedForDetails = null;
+      etaSelectedStops = [];
       etaLiveByKey.clear();
+      if (els.etaRouteActions) els.etaRouteActions.hidden = true;
+      document.getElementById("eta-route-details-panel")?.remove();
+      clearRouteGeometry();
       syncEtaModeChips();
       void refreshEtaRouteSuggest();
     });

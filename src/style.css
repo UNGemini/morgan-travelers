@@ -932,6 +932,59 @@ body.mobile-ui [data-acrylic]::before {
   background: rgba(255, 255, 255, 0.45);
 }
 
+/* Show route details (after selection) */
+.eta-route-actions {
+  flex-shrink: 0;
+  padding: 4px 8px 8px;
+}
+
+.eta-route-actions[hidden] {
+  display: none !important;
+}
+
+.eta-route-details-btn {
+  width: 100%;
+  justify-content: center;
+  background: rgba(192, 174, 252, 0.18);
+  border: 1px solid rgba(192, 174, 252, 0.4);
+}
+
+.eta-route-details-btn:hover {
+  background: rgba(192, 174, 252, 0.28);
+}
+
+.eta-route-details-panel {
+  margin: 0 8px 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.78rem;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.eta-route-details-panel h3 {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.eta-route-details-panel ol {
+  margin: 0;
+  padding: 0 0 0 1.2rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.eta-route-details-panel li {
+  margin: 2px 0;
+}
+
+.eta-route-details-panel .hint {
+  margin: 0 0 8px;
+}
+
 .eta-route-suggest .eta-route-badge-bus {
   color: #9fe0b8;
   border-color: rgba(125, 206, 160, 0.35);
