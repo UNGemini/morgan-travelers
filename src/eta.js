@@ -1008,6 +1008,44 @@ export function planTransitBoards(plan) {
 }
 
 /**
+ * True when open-data returned usable live departures.
+ * @param {LegEtaResult | null | undefined} result
+ */
+export function hasLiveEtaSlots(result) {
+  if (!result || result.unsupported || result.scheduled) return false;
+  const slots = Array.isArray(result.etas) ? result.etas : [];
+  return slots.some(
+    (s) =>
+      !s?.scheduled &&
+      (s.waitMins != null || (s.etaIso && String(s.etaIso).length > 0)),
+  );
+}
+
+/**
+ * Attach RAPTOR/GTFS timetable board when live ETA is N/A.
+ * @param {LegEtaResult} result
+ * @param {object} opt
+ * @param {object} plan
+ * @param {number} legIndex
+ * @returns {LegEtaResult}
+ */
+export function withScheduledFallback(result, opt, plan, legIndex) {
+  if (hasLiveEtaSlots(result)) return result;
+  const sched = scheduledSlotFromPlanLeg(opt, plan, legIndex);
+  if (!sched) return result;
+  return {
+    ...result,
+    etas: [sched],
+    waitMins: sched.waitMins,
+    etaIso: null,
+    scheduled: true,
+    unsupported: false,
+    error: result?.error || null,
+    fetchedAt: result?.fetchedAt ?? Date.now(),
+  };
+}
+
+/**
  * @param {object} plan
  * @returns {Promise<Map<number, LegEtaResult>>} map legIndex → eta
  */
@@ -1017,7 +1055,9 @@ export async function fetchPlanBoardEtas(plan) {
   const map = new Map();
   await Promise.all(
     boards.map(async ({ legIndex, opt, alight }) => {
-      const result = await fetchBoardEta(opt, alight);
+      let result = await fetchBoardEta(opt, alight);
+      // No live open-data → compute wait/clock from trip plan timetable
+      result = withScheduledFallback(result, opt, plan, legIndex);
       map.set(legIndex, result);
     }),
   );
@@ -1140,16 +1180,30 @@ export function buildPlanStopTimes(plan, etaByLeg, nowMs = Date.now()) {
         : [opt.from, opt.to].filter(Boolean);
     const rideSec = legDurationSeconds(leg);
     const live = etaByLeg?.get(i);
+    const liveOk = hasLiveEtaSlots(live);
 
     let boardMs = t;
-    if (live && live.waitMins != null && Number.isFinite(live.waitMins)) {
+    if (liveOk && live.waitMins != null && Number.isFinite(live.waitMins)) {
       boardMs = Math.max(t, nowMs + live.waitMins * 60_000);
       usedLive = true;
-    } else if (live?.etaIso) {
+    } else if (liveOk && live?.etaIso) {
       const parsed = Date.parse(live.etaIso);
       if (Number.isFinite(parsed)) {
         boardMs = Math.max(t, parsed);
         usedLive = true;
+      }
+    } else {
+      // Timetable: prefer scheduled wait from plan / injected scheduled slot
+      const schedWait =
+        live?.scheduled && live.waitMins != null && Number.isFinite(live.waitMins)
+          ? live.waitMins
+          : waitMinsFromServiceClock(opt?.start_time, new Date(nowMs));
+      if (schedWait != null && Number.isFinite(schedWait)) {
+        boardMs = Math.max(t, nowMs + schedWait * 60_000);
+      } else if (opt?.start_time) {
+        // Service-clock face without reliable "now" delta — keep chain from t
+        // but still surface clock via stop points below
+        boardMs = t;
       }
     }
     if (leaveMs == null) leaveMs = boardMs;

@@ -126,6 +126,7 @@ import {
   etaOperatorShowsPlatform,
   scheduledSlotFromPlanLeg,
   etaOperator,
+  hasLiveEtaSlots,
 } from "./eta.js";
 import {
   mergeStopSequence,
@@ -3976,7 +3977,7 @@ function applyTripDetailEtaDom(plan, etaMap) {
     }
   });
 
-  // Board ETA card — live open-data, else RAPTOR/GTFS scheduled board time
+  // Board ETA card — live open-data, else timetable (from fetchPlanBoardEtas fallback)
   root.querySelectorAll("[data-eta-card-leg]").forEach((card) => {
     const legIdx = Number(card.getAttribute("data-eta-card-leg"));
     const eta = etaMap?.get(legIdx);
@@ -3985,18 +3986,16 @@ function applyTripDetailEtaDom(plan, etaMap) {
     if (!list) return;
 
     card.classList.remove("is-live", "is-empty", "is-loading", "is-scheduled");
-    // Remove prior scheduled badge
     card.querySelector(".rt-eta-card-badge")?.remove();
 
     const opt = plan?.legs?.[legIdx]?.route_options?.[0] || {};
     const operator = eta?.operator || etaOperator(opt);
-    const liveSlots = Array.isArray(eta?.etas) ? eta.etas.slice(0, 3) : [];
-    const hasLive =
-      liveSlots.length > 0 &&
-      !eta?.unsupported &&
-      liveSlots.some((s) => s.waitMins != null || s.etaIso);
+    const allSlots = Array.isArray(eta?.etas) ? eta.etas.slice(0, 3) : [];
+    const liveSlots = allSlots.filter((s) => !s?.scheduled);
+    const schedSlots = allSlots.filter((s) => s?.scheduled);
+    const useLive = hasLiveEtaSlots(eta) && liveSlots.length > 0;
 
-    if (hasLive) {
+    if (useLive) {
       if (head) head.textContent = formatLiveStatusHead(eta?.fetchedAt);
       list.innerHTML = liveSlots
         .map((slot, i) => {
@@ -4014,29 +4013,36 @@ function applyTripDetailEtaDom(plan, etaMap) {
       return;
     }
 
-    // Fallback: scheduled departure from trip plan timetable
-    const sched = scheduledSlotFromPlanLeg(opt, plan, legIdx);
-    if (sched) {
-      if (head) {
-        head.textContent = "Timetable";
-      }
-      const line = formatEtaCardLine(sched, { operator, showPlatform: false });
-      const nowArrived = sched.waitMins != null && sched.waitMins <= 0;
-      const dest = sched.dest
-        ? ` title="${escapeHtml(`To ${sched.dest} (scheduled)`)}"`
-        : ` title="Scheduled departure from trip plan"`;
-      list.innerHTML = `<li class="rt-eta-card-row is-scheduled-row${nowArrived ? " is-due is-now" : ""} is-next"${dest}><span class="rt-eta-card-line">${escapeHtml(line)}</span></li>`;
+    // Timetable calculation (injected by withScheduledFallback, or compute now)
+    let slots = schedSlots;
+    if (!slots.length) {
+      const sched = scheduledSlotFromPlanLeg(opt, plan, legIdx);
+      if (sched) slots = [sched];
+    }
+    if (slots.length) {
+      if (head) head.textContent = "Timetable";
+      list.innerHTML = slots
+        .map((slot, i) => {
+          const line = formatEtaCardLine(
+            { ...slot, scheduled: true },
+            { operator, showPlatform: false },
+          );
+          const nowArrived = slot.waitMins != null && slot.waitMins <= 0;
+          const dest = slot.dest
+            ? ` title="${escapeHtml(`To ${slot.dest} (scheduled)`)}"`
+            : ` title="Scheduled departure from trip plan timetable"`;
+          return `<li class="rt-eta-card-row is-scheduled-row${nowArrived ? " is-due is-now" : ""}${i === 0 ? " is-next" : ""}"${dest}><span class="rt-eta-card-line">${escapeHtml(line)}</span></li>`;
+        })
+        .join("");
       card.classList.add("is-scheduled");
       card.insertAdjacentHTML(
         "beforeend",
-        `<div class="rt-eta-card-badge" title="From trip plan timetable">SCHEDULED</div>`,
+        `<div class="rt-eta-card-badge" title="From trip plan timetable (GTFS)">SCHEDULED</div>`,
       );
       return;
     }
 
-    if (head) {
-      head.textContent = formatLiveStatusHead(eta?.fetchedAt);
-    }
+    if (head) head.textContent = formatLiveStatusHead(eta?.fetchedAt);
     card.classList.add("is-empty");
     list.innerHTML = `<li class="rt-eta-card-row is-empty">${escapeHtml(
       eta?.error || "N/A",
@@ -4101,15 +4107,22 @@ async function refreshTripDetailEtas(gen) {
       }
     }
     if (statusEl) {
-      const n = [...etaMap.values()].filter((e) => e.waitMins != null).length;
+      const vals = [...etaMap.values()];
+      const liveN = vals.filter((e) => hasLiveEtaSlots(e)).length;
+      const schedN = vals.filter((e) => e?.scheduled && !hasLiveEtaSlots(e)).length;
       const total = etaMap.size;
       const t = formatHkClock(Date.now());
-      statusEl.textContent =
-        total === 0
-          ? "No transit legs for live ETA"
-          : n > 0
-            ? `Live ETAs · ${n}/${total} routes · ${t} · refreshes every 1 min`
-            : `Live ETAs unavailable · checked ${t}`;
+      if (total === 0) {
+        statusEl.textContent = "No transit legs for ETA";
+      } else if (liveN > 0 && schedN > 0) {
+        statusEl.textContent = `Live ${liveN} · Scheduled ${schedN} · ${total} routes · ${t}`;
+      } else if (liveN > 0) {
+        statusEl.textContent = `Live ETAs · ${liveN}/${total} routes · ${t} · refreshes every 1 min`;
+      } else if (schedN > 0) {
+        statusEl.textContent = `Timetable · ${schedN}/${total} routes · ${t}`;
+      } else {
+        statusEl.textContent = `ETA unavailable · checked ${t}`;
+      }
     }
   } catch (err) {
     console.warn("[eta] trip detail", err);
