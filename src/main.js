@@ -6748,17 +6748,21 @@ function etaRouteCardInnerHtml(r, dir, eta = {}) {
 }
 
 /**
- * Per-card direction dots (Wheels).
+ * Per-card direction switch — same control as route detail (Opposite).
  * @param {EtaRouteEntry} r
  * @param {number} dirCount
  * @param {number} activeDir
  */
 function etaCardDotsHtml(r, dirCount, activeDir) {
   if (dirCount < 2) return "";
-  return `<div class="eta-card-dots" role="tablist" aria-label="Direction" data-route-key="${escapeHtml(etaRouteKey(r))}">
-    <button type="button" class="eta-dir-dot ${activeDir === 0 ? "is-active" : ""}" data-dir="0" aria-label="Direction 1"></button>
-    <button type="button" class="eta-dir-dot ${activeDir === 1 ? "is-active" : ""}" data-dir="1" aria-label="Direction 2"></button>
-  </div>`;
+  return `<button type="button" class="wheels-dir-switch eta-card-dir-switch" data-route-key="${escapeHtml(etaRouteKey(r))}" aria-label="Switch direction">
+    <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
+    <span>Opposite</span>
+    <span class="wheels-dir-dots" aria-hidden="true">
+      <i class="${activeDir === 0 ? "is-on" : ""}"></i>
+      <i class="${activeDir === 1 ? "is-on" : ""}"></i>
+    </span>
+  </button>`;
 }
 
 /**
@@ -6833,32 +6837,31 @@ function renderEtaRouteSuggest(hits, hint = "", opts = {}) {
 
   list.querySelectorAll("li[data-idx]").forEach((li) => {
     li.addEventListener("click", (e) => {
-      // Clicks on direction dots handled separately
-      if (e.target.closest?.(".eta-card-dots")) return;
+      // Direction switch handled separately
+      if (e.target.closest?.(".eta-card-dir-switch, .wheels-dir-switch")) return;
       const idx = Number(li.getAttribute("data-idx"));
       etaRouteActive = idx;
       selectEtaRoute(etaRouteHits[idx], idx);
     });
   });
 
-  list.querySelectorAll(".eta-card-dots").forEach((dots) => {
-    dots.addEventListener("click", (e) => {
+  list.querySelectorAll(".eta-card-dir-switch").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      const btn = e.target.closest?.("[data-dir]");
-      if (!btn) return;
-      const li = dots.closest("li[data-idx]");
+      const li = btn.closest("li[data-idx]");
       const idx = Number(li?.getAttribute("data-idx"));
       const r = etaRouteHits[idx];
       if (!r) return;
-      setCardDir(r, Number(btn.getAttribute("data-dir")) || 0);
-      // Switch live ETA + stop to the slot for this direction (may be another bay)
+      const dirs = etaRouteDirections(r);
+      if (dirs.length < 2) return;
+      const cur = Math.min(getCardDir(r), dirs.length - 1);
+      const next = cur === 0 ? 1 : 0;
+      setCardDir(r, next);
       applyNearbyDirLive(r);
-      // Keep selection on this card
       etaRouteActive = idx;
       renderEtaRouteSuggest(etaRouteHits, hint, { skipPrefetch: true });
       etaRouteActive = idx;
       syncEtaActive();
-      // If this route is open in detail, refresh detail for new bound
       if (
         etaSelectedForDetails &&
         etaRouteKey(etaSelectedForDetails) === etaRouteKey(r) &&
@@ -7959,8 +7962,8 @@ async function renderEtaRouteDetailBody(route, ctx) {
     });
   });
 
-  // Pin button: pins this specific stop of the route
-  const pinBtn = els.etaRouteDetailHead?.querySelector("#btn-eta-detail-pin");
+  // Pin in liquid-glass bottom chrome — this specific stop
+  const pinBtn = document.getElementById("btn-eta-detail-pin");
   if (pinBtn) {
     const pinnedNow = isRoutePinned(route, boardStop);
     pinBtn.classList.toggle("is-pinned", pinnedNow);
@@ -7969,6 +7972,8 @@ async function renderEtaRouteDetailBody(route, ctx) {
       "aria-label",
       pinnedNow ? "Unpin stop" : "Pin this stop",
     );
+    const labelEl = pinBtn.querySelector(".eta-detail-chrome-label");
+    if (labelEl) labelEl.textContent = pinnedNow ? "Pinned" : "Pin stop";
     const ic = pinBtn.querySelector(".material-symbols-outlined");
     if (ic) ic.textContent = pinnedNow ? "keep" : "push_pin";
     pinBtn.onclick = () => {
@@ -7984,6 +7989,7 @@ async function renderEtaRouteDetailBody(route, ctx) {
         "aria-label",
         nowPinned ? "Unpin stop" : "Pin this stop",
       );
+      if (labelEl) labelEl.textContent = nowPinned ? "Pinned" : "Pin stop";
       if (ic) ic.textContent = nowPinned ? "keep" : "push_pin";
     };
   }
@@ -8029,15 +8035,13 @@ async function showEtaRouteDetailsPanel() {
   const coLabel = etaOperatorDisplayName(route);
 
   if (els.etaRouteDetailHead) {
+    // Hero only — Back + Pin live in liquid-glass bottom chrome
     els.etaRouteDetailHead.innerHTML = `
       <div class="wheels-route-hero">
         <div class="wheels-route-hero-brand">
           <span class="wheels-route-co" style="color:${escapeHtml(color)}">${escapeHtml(coLabel)}</span>
           <span class="wheels-route-id" style="color:${escapeHtml(color)}">${escapeHtml(route.id)}</span>
         </div>
-        <button type="button" class="wheels-route-pin" id="btn-eta-detail-pin" title="Pin this stop" aria-label="Pin this stop">
-          <span class="material-symbols-outlined" aria-hidden="true">push_pin</span>
-        </button>
       </div>`;
   }
   if (els.etaRouteDetailBody) {

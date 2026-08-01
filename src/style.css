@@ -1285,10 +1285,6 @@ body.mobile-ui [data-acrylic]::before {
   overflow: hidden;
 }
 
-#sidebar-page-eta-route .trip-detail-bar {
-  flex-shrink: 0;
-}
-
 .eta-route-detail-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -1296,6 +1292,70 @@ body.mobile-ui [data-acrylic]::before {
   padding: 0 12px 0;
   display: flex;
   flex-direction: column;
+}
+
+/* Route detail liquid-glass bottom bar (Back + Pin) */
+.eta-route-detail-chrome {
+  flex-shrink: 0;
+  gap: 10px;
+}
+
+.eta-detail-chrome-btn {
+  appearance: none;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 48px;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--lg-border, rgba(255, 255, 255, 0.14));
+  background: var(--lg-fill, rgba(40, 42, 48, 0.55));
+  box-shadow:
+    var(--lg-highlight, inset 0 1px 0 rgba(255, 255, 255, 0.18)),
+    var(--lg-shadow, 0 8px 28px rgba(0, 0, 0, 0.35));
+  -webkit-backdrop-filter: var(--lg-blur, blur(28px) saturate(1.6));
+  backdrop-filter: var(--lg-blur, blur(28px) saturate(1.6));
+  color: rgba(255, 255, 255, 0.9);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.eta-detail-chrome-btn .material-symbols-outlined {
+  font-size: 22px !important;
+  flex-shrink: 0;
+}
+
+.eta-detail-chrome-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eta-detail-chrome-btn:hover {
+  background: var(--lg-fill-strong, rgba(48, 50, 56, 0.72));
+  color: #fff;
+}
+
+.eta-detail-chrome-btn.eta-detail-pin.is-pinned {
+  color: var(--accent);
+  border-color: rgba(192, 174, 252, 0.4);
+  background: rgba(192, 174, 252, 0.14);
+}
+
+.eta-detail-chrome-btn.eta-detail-pin.is-pinned .material-symbols-outlined {
+  font-variation-settings: "FILL" 1, "wght" 500, "GRAD" 0, "opsz" 24;
 }
 
 /* ── Wheels-style route detail page ── */
@@ -1558,44 +1618,71 @@ body.mobile-ui [data-acrylic]::before {
   }
 }
 
-/* Opposite direction switcher */
+/* Opposite direction switcher (route detail + search cards) */
 .wheels-dir-switch {
   appearance: none;
   align-self: center;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   margin: 2px 0 0;
-  padding: 8px 14px;
-  border: none;
+  padding: 10px 16px;
+  min-height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 999px;
-  background: transparent;
-  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.88);
   font: inherit;
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: 0.82rem;
+  font-weight: 650;
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .wheels-dir-switch:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 .wheels-dir-switch .material-symbols-outlined {
-  font-size: 18px !important;
+  font-size: 20px !important;
+}
+
+/* Search list: full-width liquid glass Opposite control */
+.eta-route-card .eta-card-dir-switch,
+.eta-route-card .wheels-dir-switch.eta-card-dir-switch {
+  align-self: stretch;
+  width: 100%;
+  margin: 8px 0 0;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--lg-border, rgba(255, 255, 255, 0.14));
+  background: var(--lg-fill, rgba(40, 42, 48, 0.55));
+  box-shadow:
+    var(--lg-highlight, inset 0 1px 0 rgba(255, 255, 255, 0.18)),
+    0 4px 14px rgba(0, 0, 0, 0.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(20px) saturate(1.4);
+}
+
+.eta-route-card .eta-card-dir-switch:hover {
+  background: var(--lg-fill-strong, rgba(48, 50, 56, 0.72));
 }
 
 .wheels-dir-dots {
   display: inline-flex;
-  gap: 5px;
+  gap: 6px;
   align-items: center;
 }
 
 .wheels-dir-dots i {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.22);
   display: block;
@@ -1868,7 +1955,7 @@ body.mobile-ui [data-acrylic]::before {
 
 
 
-/* Per-card direction dots (larger hit target on search list) */
+/* Legacy small dots (pinned page still uses .eta-dir-dot) */
 .eta-card-dots {
   display: flex;
   justify-content: center;
@@ -1885,7 +1972,6 @@ body.mobile-ui [data-acrylic]::before {
   height: 14px;
   border-radius: 999px;
   padding: 0;
-  /* Expand tap area without growing the visible disc further */
   box-shadow: 0 0 0 10px transparent;
   background: rgba(255, 255, 255, 0.28);
   cursor: pointer;

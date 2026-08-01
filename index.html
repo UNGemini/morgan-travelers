@@ -1057,21 +1057,31 @@
 
             <!-- Page: ETA route details (stop list for selected route) -->
             <div id="sidebar-page-eta-route" class="sidebar-page" hidden>
-              <div class="trip-detail-bar">
+              <div id="eta-route-detail-head" class="trip-detail-head"></div>
+              <div id="eta-route-detail-body" class="eta-route-detail-body"></div>
+              <!-- Liquid-glass bottom chrome (same family as search toolbar) -->
+              <div class="eta-sidebar-bottom-chrome eta-route-detail-chrome" id="eta-route-detail-chrome">
                 <button
                   type="button"
                   id="btn-eta-route-back"
-                  class="btn btn-ghost trip-back-btn"
-                  data-acrylic
+                  class="eta-detail-chrome-btn eta-detail-back"
+                  title="Back to search"
+                  aria-label="Back to search"
                 >
-                  <span class="btn-row">
-                    <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
-                    Back to routes
-                  </span>
+                  <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
+                  <span class="eta-detail-chrome-label">Back to search</span>
+                </button>
+                <button
+                  type="button"
+                  id="btn-eta-detail-pin"
+                  class="eta-detail-chrome-btn eta-detail-pin"
+                  title="Pin this stop"
+                  aria-label="Pin this stop"
+                >
+                  <span class="material-symbols-outlined" aria-hidden="true">push_pin</span>
+                  <span class="eta-detail-chrome-label">Pin stop</span>
                 </button>
               </div>
-              <div id="eta-route-detail-head" class="trip-detail-head"></div>
-              <div id="eta-route-detail-body" class="eta-route-detail-body"></div>
             </div>
 
             <!-- Page: Pinned routes (plan-style cards + live/scheduled ETA) -->
