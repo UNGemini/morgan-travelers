@@ -547,8 +547,8 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 /*
- * One fixed mid slot. Search + Plan trip are absolute faces that fill it —
- * so height and width are always identical across ETA / Trip Plan modes.
+ * One fixed mid slot. Pinned Route + Plan trip are absolute faces —
+ * same footprint across ETA / Trip Plan modes.
  */
 .toolbar-mid-slot {
   position: relative;
@@ -573,7 +573,7 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 /* Faces fill the slot completely */
-.toolbar-eta-search,
+.toolbar-pinned-btn,
 .toolbar-plan-btn {
   position: absolute;
   inset: 0;
@@ -596,51 +596,39 @@ body.mobile-ui [data-acrylic]::before {
   appearance: none !important;
   box-shadow: none !important;
   overflow: hidden;
-}
-
-/* ETA search face */
-.toolbar-eta-search {
-  background: rgba(0, 0, 0, 0.35);
+  cursor: pointer;
   color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.35);
   justify-content: flex-start;
 }
 
-.app-shell[data-ui-mode="eta"] .toolbar-eta-search {
+.app-shell[data-ui-mode="eta"] .toolbar-pinned-btn {
   display: flex !important;
 }
 
-.toolbar-eta-input {
-  flex: 1;
-  min-width: 0;
-  appearance: none;
-  border: none !important;
-  background: transparent !important;
-  color: inherit;
-  font: inherit;
-  line-height: inherit;
-  padding: 0 !important;
-  margin: 0 !important;
-  height: 18px !important;
-  outline: none;
-  box-shadow: none !important;
+.toolbar-pinned-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
-.toolbar-eta-input::placeholder {
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
-.toolbar-eta-search:focus-within {
+.toolbar-pinned-btn:not(:disabled):hover {
   border-color: rgba(192, 174, 252, 0.35) !important;
   background: rgba(0, 0, 0, 0.45);
 }
 
-.toolbar-eta-search:focus-within .toolbar-mid-icon {
+.toolbar-pinned-btn .toolbar-mid-icon {
+  color: var(--text-muted);
+}
+
+.toolbar-pinned-btn:not(:disabled) .toolbar-mid-icon {
   color: var(--accent);
 }
 
-.toolbar-eta-search .toolbar-mid-icon {
-  color: var(--text-muted);
+.toolbar-pinned-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ETA sidebar panel (visible when data-ui-mode=eta) — Wheels-inspired cards */
@@ -651,10 +639,62 @@ body.mobile-ui [data-acrylic]::before {
   min-height: 0;
   flex: 1 1 auto;
   height: 100%;
+  padding-bottom: 4px;
 }
 
 .eta-sidebar-panel[hidden] {
   display: none !important;
+}
+
+/* Search box in sidebar (moved from toolbar) */
+.eta-sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin: 0 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-sizing: border-box;
+}
+
+.eta-sidebar-search:focus-within {
+  border-color: rgba(192, 174, 252, 0.4);
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.eta-sidebar-search-icon {
+  color: var(--text-muted);
+  font-size: 20px !important;
+  flex-shrink: 0;
+}
+
+.eta-sidebar-search:focus-within .eta-sidebar-search-icon {
+  color: var(--accent);
+}
+
+.eta-sidebar-search-input {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  border: none !important;
+  background: transparent !important;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 0 !important;
+  margin: 0 !important;
+  outline: none;
+  box-shadow: none !important;
+}
+
+.eta-sidebar-search-input::placeholder {
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .app-shell[data-ui-mode="eta"] .trip-plan-sidebar-panel {
@@ -709,6 +749,30 @@ body.mobile-ui [data-acrylic]::before {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-start;
+}
+
+/* Bottom filter bar — easier thumb reach on mobile */
+.eta-mode-filter-bottom {
+  flex-shrink: 0;
+  justify-content: center;
+  padding: 10px 6px calc(8px + env(safe-area-inset-bottom, 0px));
+  margin: 0 -2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.35) 0%,
+    rgba(0, 0, 0, 0.12) 70%,
+    transparent 100%
+  );
+}
+
+.eta-mode-filter-bottom .eta-mode-chip {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: center;
+  min-height: 44px; /* touch target */
+  padding: 10px 8px;
+  font-size: 0.7rem;
 }
 
 .eta-mode-chip {
@@ -1055,25 +1119,43 @@ body.mobile-ui [data-acrylic]::before {
   background: rgba(255, 255, 255, 0.45);
 }
 
-/* Show route details (after selection) */
+/* Show route details + pin (after selection) */
 .eta-route-actions {
   flex-shrink: 0;
-  padding: 4px 8px 8px;
+  padding: 4px 8px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .eta-route-actions[hidden] {
   display: none !important;
 }
 
-.eta-route-details-btn {
+.eta-route-details-btn,
+.eta-route-pin-btn {
   width: 100%;
   justify-content: center;
+}
+
+.eta-route-details-btn {
   background: rgba(192, 174, 252, 0.18);
   border: 1px solid rgba(192, 174, 252, 0.4);
 }
 
 .eta-route-details-btn:hover {
   background: rgba(192, 174, 252, 0.28);
+}
+
+.eta-route-pin-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.eta-route-pin-btn:hover,
+.eta-route-pin-btn.is-pinned {
+  background: rgba(192, 174, 252, 0.14);
+  border-color: rgba(192, 174, 252, 0.35);
 }
 
 .eta-route-details-panel {

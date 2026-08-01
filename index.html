@@ -610,35 +610,32 @@
             <!-- Page: search + plan list -->
             <div id="sidebar-page-search" class="sidebar-page">
 
-            <!-- ETA mode: traffic filter + route list (hidden in Trip Plan) -->
+            <!-- ETA mode: search + route list + bottom filters (hidden in Trip Plan) -->
             <section
               id="eta-sidebar-panel"
               class="panel-section eta-sidebar-panel"
               hidden
               aria-label="ETA route browser"
             >
-              <div
-                class="eta-mode-filter eta-mode-filter-sidebar"
-                role="group"
-                aria-label="Traffic method"
-              >
-                <button type="button" class="eta-mode-chip is-active" data-eta-mode="bus" title="Bus">
-                  <span class="material-symbols-outlined" aria-hidden="true">directions_bus</span>
-                  <span>Bus</span>
-                </button>
-                <button type="button" class="eta-mode-chip" data-eta-mode="mtr" title="MTR">
-                  <span class="material-symbols-outlined" aria-hidden="true">subway</span>
-                  <span>MTR</span>
-                </button>
-                <button type="button" class="eta-mode-chip" data-eta-mode="gmb" title="GMB">
-                  <span class="material-symbols-outlined" aria-hidden="true">airport_shuttle</span>
-                  <span>GMB</span>
-                </button>
-                <button type="button" class="eta-mode-chip" data-eta-mode="lrt" title="LRT">
-                  <span class="material-symbols-outlined" aria-hidden="true">tram</span>
-                  <span>LRT</span>
-                </button>
+              <!-- Search at top of sidebar -->
+              <div class="eta-sidebar-search" id="eta-sidebar-search">
+                <span class="material-symbols-outlined eta-sidebar-search-icon" aria-hidden="true"
+                  >search</span
+                >
+                <input
+                  id="input-eta-route"
+                  class="eta-sidebar-search-input"
+                  type="search"
+                  enterkeyhint="search"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="Route no. or MTR line"
+                  aria-label="Search bus, MTR or LRT route"
+                  aria-autocomplete="list"
+                  aria-controls="eta-route-list-sidebar"
+                />
               </div>
+
               <p id="eta-route-hint-sidebar" class="eta-route-hint-sidebar" hidden></p>
 
               <div class="eta-route-list-wrap">
@@ -661,6 +658,42 @@
                     <span class="material-symbols-outlined" aria-hidden="true">route</span>
                     Show route details
                   </span>
+                </button>
+                <button
+                  type="button"
+                  id="btn-eta-pin-route"
+                  class="btn eta-route-pin-btn"
+                  data-acrylic
+                  title="Pin this route to the toolbar"
+                >
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">push_pin</span>
+                    Pin route
+                  </span>
+                </button>
+              </div>
+
+              <!-- Filters at bottom for easier thumb reach on mobile -->
+              <div
+                class="eta-mode-filter eta-mode-filter-sidebar eta-mode-filter-bottom"
+                role="group"
+                aria-label="Traffic method"
+              >
+                <button type="button" class="eta-mode-chip is-active" data-eta-mode="bus" title="Bus">
+                  <span class="material-symbols-outlined" aria-hidden="true">directions_bus</span>
+                  <span>Bus</span>
+                </button>
+                <button type="button" class="eta-mode-chip" data-eta-mode="mtr" title="MTR">
+                  <span class="material-symbols-outlined" aria-hidden="true">subway</span>
+                  <span>MTR</span>
+                </button>
+                <button type="button" class="eta-mode-chip" data-eta-mode="gmb" title="GMB">
+                  <span class="material-symbols-outlined" aria-hidden="true">airport_shuttle</span>
+                  <span>GMB</span>
+                </button>
+                <button type="button" class="eta-mode-chip" data-eta-mode="lrt" title="LRT">
+                  <span class="material-symbols-outlined" aria-hidden="true">tram</span>
+                  <span>LRT</span>
                 </button>
               </div>
             </section>
@@ -1037,23 +1070,19 @@
             </button>
           </div>
 
-          <!-- One fixed mid slot: ETA search and Plan trip swap inside it (same size) -->
+          <!-- One fixed mid slot: Pinned Route (ETA) / Plan trip swap (same size) -->
           <div class="toolbar-mid-slot" id="toolbar-mid-slot">
-            <div class="toolbar-eta-search" id="toolbar-eta-search">
-              <span class="material-symbols-outlined toolbar-mid-icon" aria-hidden="true">search</span>
-              <input
-                id="input-eta-route"
-                class="toolbar-eta-input"
-                type="search"
-                enterkeyhint="search"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="Route no. or MTR line"
-                aria-label="Search bus, MTR or LRT route"
-                aria-autocomplete="list"
-                aria-controls="eta-route-suggest"
-              />
-            </div>
+            <button
+              type="button"
+              id="btn-eta-pinned"
+              class="toolbar-pinned-btn"
+              disabled
+              title="Open pinned route"
+              aria-label="Open pinned route"
+            >
+              <span class="material-symbols-outlined toolbar-mid-icon" aria-hidden="true">push_pin</span>
+              <span class="toolbar-pinned-label" id="toolbar-pinned-label">Pinned Route</span>
+            </button>
             <button
               type="button"
               id="btn-plan"

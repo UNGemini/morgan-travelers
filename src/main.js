@@ -227,10 +227,94 @@ const els = {
   etaRouteHintSidebar: document.getElementById("eta-route-hint-sidebar"),
   etaRouteActions: document.getElementById("eta-route-actions"),
   btnEtaRouteDetails: document.getElementById("btn-eta-route-details"),
-  toolbarEtaSearch: document.getElementById("toolbar-eta-search"),
+  btnEtaPinRoute: document.getElementById("btn-eta-pin-route"),
+  btnEtaPinned: document.getElementById("btn-eta-pinned"),
+  toolbarPinnedLabel: document.getElementById("toolbar-pinned-label"),
   modeButtons: () =>
     Array.from(document.querySelectorAll(".toolbar-mode-btn[data-ui-mode]")),
 };
+
+const ETA_PINNED_KEY = "morgan.etaPinnedRoute";
+
+/**
+ * @returns {EtaRouteEntry | null}
+ */
+function loadPinnedEtaRoute() {
+  try {
+    const raw = localStorage.getItem(ETA_PINNED_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o?.id) return null;
+    return {
+      id: String(o.id),
+      label: String(o.label || o.id),
+      kind: o.kind || "bus",
+      co: o.co || undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {EtaRouteEntry | null} route
+ */
+function savePinnedEtaRoute(route) {
+  try {
+    if (!route) {
+      localStorage.removeItem(ETA_PINNED_KEY);
+      return;
+    }
+    localStorage.setItem(
+      ETA_PINNED_KEY,
+      JSON.stringify({
+        id: route.id,
+        label: route.label,
+        kind: route.kind,
+        co: route.co || "",
+      }),
+    );
+  } catch {
+    /* ignore quota */
+  }
+}
+
+function syncPinnedRouteToolbar() {
+  const pinned = loadPinnedEtaRoute();
+  const btn = els.btnEtaPinned;
+  const label = els.toolbarPinnedLabel;
+  if (!btn) return;
+  if (pinned) {
+    btn.disabled = false;
+    const co =
+      pinned.kind === "mtr"
+        ? "MTR"
+        : pinned.kind === "lrt"
+          ? "LRT"
+          : String(pinned.co || "bus").toUpperCase();
+    const text = `${pinned.id}`;
+    if (label) label.textContent = text;
+    btn.title = `Pinned: ${co} ${pinned.id} · ${pinned.label}`;
+    btn.setAttribute("aria-label", `Open pinned route ${pinned.id}`);
+  } else {
+    btn.disabled = true;
+    if (label) label.textContent = "Pinned Route";
+    btn.title = "Pin a route from the ETA list";
+    btn.setAttribute("aria-label", "No pinned route");
+  }
+  // Sync pin button in actions if selection matches
+  const pinBtn = els.btnEtaPinRoute;
+  if (pinBtn && etaSelectedForDetails) {
+    const on =
+      pinned &&
+      pinned.id === etaSelectedForDetails.id &&
+      (pinned.co || "") === (etaSelectedForDetails.co || "") &&
+      pinned.kind === etaSelectedForDetails.kind;
+    pinBtn.classList.toggle("is-pinned", !!on);
+    const row = pinBtn.querySelector(".btn-row span:last-child");
+    if (row) row.textContent = on ? "Pinned" : "Pin route";
+  }
+}
 
 /**
  * @typedef {{
@@ -6807,8 +6891,9 @@ function selectEtaRoute(route, listIndex) {
   setSidebarPage("search");
   syncEtaActive();
 
-  // Show “Show route details” action
+  // Show route details + pin actions
   if (els.etaRouteActions) els.etaRouteActions.hidden = false;
+  syncPinnedRouteToolbar();
   // Clear previous details panel content if any
   const oldPanel = document.getElementById("eta-route-details-panel");
   if (oldPanel) oldPanel.remove();
@@ -6962,6 +7047,66 @@ function initEtaRouteSearchUi() {
     setSidebarPage("search");
   });
 
+  els.btnEtaPinRoute?.addEventListener("click", () => {
+    const route = etaSelectedForDetails;
+    if (!route) {
+      showToast("Select a route first", 1600);
+      return;
+    }
+    const pinned = loadPinnedEtaRoute();
+    const same =
+      pinned &&
+      pinned.id === route.id &&
+      (pinned.co || "") === (route.co || "") &&
+      pinned.kind === route.kind;
+    if (same) {
+      savePinnedEtaRoute(null);
+      showToast("Unpinned route", 1600);
+    } else {
+      savePinnedEtaRoute(route);
+      showToast(`Pinned ${route.id}`, 1800);
+    }
+    syncPinnedRouteToolbar();
+  });
+
+  els.btnEtaPinned?.addEventListener("click", () => {
+    if (getUiMode() !== "eta") setUiMode("eta");
+    setDetailOpen(true);
+    setSidebarPage("search");
+    const pinned = loadPinnedEtaRoute();
+    if (!pinned) {
+      showToast("No pinned route — select one and tap Pin route", 2200);
+      return;
+    }
+    if (!etaRouteCatalog.length) buildEtaRouteCatalog();
+    const hit =
+      etaRouteCatalog.find(
+        (r) =>
+          r.id === pinned.id &&
+          r.kind === pinned.kind &&
+          (r.co || "") === (pinned.co || ""),
+      ) || pinned;
+    const idx = etaRouteHits.findIndex(
+      (r) =>
+        r.id === hit.id &&
+        r.kind === hit.kind &&
+        (r.co || "") === (hit.co || ""),
+    );
+    if (idx >= 0) {
+      etaRouteActive = idx;
+      selectEtaRoute(etaRouteHits[idx], idx);
+    } else {
+      etaRouteHits = [
+        hit,
+        ...etaRouteHits.filter((r) => etaRouteKey(r) !== etaRouteKey(hit)),
+      ];
+      etaRouteActive = 0;
+      renderEtaRouteSuggest(etaRouteHits, `Pinned · ${hit.label}`);
+      selectEtaRoute(hit, 0);
+    }
+    syncEtaActive();
+  });
+
   document.querySelectorAll(".eta-mode-chip[data-eta-mode]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const mode = btn.getAttribute("data-eta-mode") || "bus";
@@ -6982,6 +7127,7 @@ function initEtaRouteSearchUi() {
     });
   });
   syncEtaModeChips();
+  syncPinnedRouteToolbar();
 
   if (input) {
     let timer = 0;
