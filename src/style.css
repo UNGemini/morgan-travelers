@@ -1432,11 +1432,12 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 .wheels-eta-wait {
-  font-size: 2.15rem;
+  font-size: clamp(1.35rem, 5.5vw, 1.85rem);
   font-weight: 750;
-  letter-spacing: -0.03em;
-  line-height: 1;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .wheels-eta-slot.is-due .wheels-eta-wait {
@@ -1449,31 +1450,49 @@ body.mobile-ui [data-acrylic]::before {
 
 .wheels-eta-slot.is-empty .wheels-eta-wait {
   opacity: 0.7;
-  font-size: 1.6rem;
+  font-size: 1.5rem;
 }
 
 .wheels-eta-clock {
   font-size: 0.78rem;
-  font-weight: 550;
-  color: rgba(255, 255, 255, 0.78);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.82);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
 }
 
-.wheels-eta-tag {
-  position: absolute;
-  top: -2px;
-  right: -6px;
-  font-size: 0.55rem;
+/* Highlight stop that the big ETA card is for */
+.eta-route-line .rt-step.rt-stop-eta-active .rt-marker-dot {
+  width: 12px;
+  height: 12px;
+  margin: calc((1.3em - 12px) / 2) 0;
+  box-shadow:
+    0 0 0 2px rgba(0, 0, 0, 0.45),
+    0 0 0 5px color-mix(in srgb, var(--rt-color) 35%, transparent);
+}
+
+.eta-route-line .rt-stop-name.is-eta-stop {
   font-weight: 750;
-  letter-spacing: 0.04em;
-  padding: 1px 4px;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.22);
-  color: rgba(255, 255, 255, 0.9);
+  color: #fff;
 }
 
-.wheels-eta-tag.is-live {
-  background: rgba(255, 255, 255, 0.22);
+.eta-route-line .rt-stop-eta-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rt-color);
+  opacity: 0.95;
+}
+
+@supports not (background: color-mix(in srgb, red 50%, blue)) {
+  .eta-route-line .rt-step.rt-stop-eta-active .rt-marker-dot {
+    box-shadow:
+      0 0 0 2px rgba(0, 0, 0, 0.45),
+      0 0 0 5px rgba(192, 174, 252, 0.28);
+  }
 }
 
 /* Opposite direction switcher */

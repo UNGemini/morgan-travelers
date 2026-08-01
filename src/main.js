@@ -7308,14 +7308,15 @@ function selectEtaRoute(route, listIndex) {
 }
 
 /**
- * Compact wait label for Wheels-style big ETA (“5m”, “Now”, “N/A”).
+ * Wait label for Wheels-style big ETA (“+5 Minutes”, “Now”, “N/A”).
  * @param {number | null | undefined} mins
  */
 function formatWaitCompact(mins) {
   if (mins == null || !Number.isFinite(Number(mins))) return "N/A";
   const n = Math.round(Number(mins));
   if (n <= 0) return "Now";
-  return `${n}m`;
+  if (n === 1) return "+1 Minute";
+  return `+${n} Minutes`;
 }
 
 /**
@@ -7475,10 +7476,14 @@ async function showEtaRouteDetailsPanel() {
             (slot.etaIso ? formatHkClock(slot.etaIso) : "") ||
             "—";
           const due = slot.waitMins != null && slot.waitMins <= 0;
+          // Clock + source on one line: 21:52・LIVE
+          const clockBase = clock && clock !== "—" ? clock : "—";
+          const clockLine = slot.scheduled
+            ? `${clockBase}・SCHEDULED`
+            : `${clockBase}・LIVE`;
           return `<div class="wheels-eta-slot${due ? " is-due" : ""}${slot.scheduled ? " is-scheduled" : ""}">
             <span class="wheels-eta-wait">${escapeHtml(wait)}</span>
-            <span class="wheels-eta-clock">${escapeHtml(clock)}</span>
-            ${slot.scheduled ? `<span class="wheels-eta-tag">SCH</span>` : hasLive && !slot.scheduled ? `<span class="wheels-eta-tag is-live">LIVE</span>` : ""}
+            <span class="wheels-eta-clock">${escapeHtml(clockLine)}</span>
           </div>`;
         })
         .join("")
@@ -7526,12 +7531,22 @@ async function showEtaRouteDetailsPanel() {
     for (let i = 0; i < named.length; i++) {
       const s = named[i];
       const isLast = i === named.length - 1;
+      const isEtaStop =
+        boardStop &&
+        ((s.stopId && boardStop.stopId && s.stopId === boardStop.stopId) ||
+          s === boardStop ||
+          (boardName && s.name === boardName));
       rows.push({
         kind: "stop",
         line: isLast ? "none" : "solid",
         color,
         last: isLast,
-        bodyHtml: `<span class="rt-stop-name">${escapeHtml(s.name)}</span>`,
+        extraClass: isEtaStop ? "rt-stop-eta-active" : "",
+        bodyHtml: `<span class="rt-stop-name${isEtaStop ? " is-eta-stop" : ""}">${escapeHtml(s.name)}</span>${
+          isEtaStop
+            ? `<span class="rt-stop-eta-hint">${hasLive ? "ETA stop" : "Showing ETA"}</span>`
+            : ""
+        }`,
       });
     }
     stopsHtml = `<div class="plan-timeline plan-route-line plan-route-line-full eta-route-line" aria-label="Stops on route">${rows
