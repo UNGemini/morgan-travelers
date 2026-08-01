@@ -1277,16 +1277,30 @@ body.mobile-ui [data-acrylic]::before {
   );
 }
 
+/* Route detail: only the stop list scrolls */
+#sidebar-page-eta-route {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#sidebar-page-eta-route .trip-detail-bar {
+  flex-shrink: 0;
+}
+
 .eta-route-detail-body {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
-  padding: 0 12px 20px;
-  -webkit-overflow-scrolling: touch;
+  overflow: hidden;
+  padding: 0 12px 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ── Wheels-style route detail page ── */
 #sidebar-page-eta-route .trip-detail-head {
+  flex-shrink: 0;
   border-bottom: none;
   margin-bottom: 0;
   padding: 0 14px 6px;
@@ -1366,7 +1380,18 @@ body.mobile-ui [data-acrylic]::before {
 .wheels-route-detail {
   display: flex;
   flex-direction: column;
+  gap: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wheels-route-detail-fixed {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
+  padding-bottom: 4px;
 }
 
 .wheels-route-loading {
@@ -1577,7 +1602,18 @@ body.mobile-ui [data-acrylic]::before {
   color: var(--text-muted);
 }
 
-.wheels-stop-panel.is-collapsed {
+.wheels-stop-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 2px 16px;
+  overscroll-behavior: contain;
+}
+
+.wheels-stop-panel.is-collapsed,
+.wheels-route-detail.is-stops-collapsed .wheels-stop-panel {
   display: none;
 }
 
@@ -1590,6 +1626,29 @@ body.mobile-ui [data-acrylic]::before {
 .wheels-stop-panel .eta-route-line .rt-step-stop .rt-marker-dot {
   /* Operator/route colour already via --rt-color */
   background: var(--rt-color);
+}
+
+/* Tap a stop to load that stop’s ETA */
+.eta-route-line .rt-step.eta-pick-stop {
+  cursor: pointer;
+  border-radius: 10px;
+  margin: 0 -4px;
+  padding-left: 4px;
+  padding-right: 4px;
+  transition: background 0.12s ease;
+}
+
+.eta-route-line .rt-step.eta-pick-stop:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.eta-route-line .rt-step.eta-pick-stop:focus-visible {
+  outline: 2px solid rgba(192, 174, 252, 0.55);
+  outline-offset: 1px;
+}
+
+.eta-route-line .rt-step.eta-pick-stop.rt-stop-eta-active {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 /* Wheels-like ETA route card — rounded selection */
