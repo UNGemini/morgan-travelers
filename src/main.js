@@ -7401,13 +7401,15 @@ function selectEtaRoute(route, listIndex) {
 }
 
 /**
- * Compact wait / time-to-stop label (“5m”, “Now”, “N/A”) — Wheels-style.
+ * Compact wait / time-to-stop label (“5m”, “-3m”, “Now”, “N/A”) — Wheels-style.
+ * Negative = vehicle already passed that stop relative to selected-stop ETA.
  * @param {number | null | undefined} mins
  */
 function formatWaitCompact(mins) {
   if (mins == null || !Number.isFinite(Number(mins))) return "N/A";
   const n = Math.round(Number(mins));
-  if (n <= 0) return "Now";
+  if (n < 0) return `${n}m`;
+  if (n === 0) return "Now";
   return `${n}m`;
 }
 
@@ -7449,8 +7451,8 @@ function estimateEtaRouteRideSeconds(stops, kind) {
 
 /**
  * Minutes from *now* until the next vehicle reaches each stop.
- * Anchored on board-stop wait, then travel offsets along the route (Wheels-style).
- * Stops before the board stop are null (no label).
+ * Anchored on selected-stop wait + travel along the route.
+ * Stops before the selected stop get negative times (“-5m” = already passed).
  *
  * @param {Array<{ stopId?: string, name?: string, lon?: number, lat?: number }>} named
  * @param {number} boardIndex
@@ -7463,23 +7465,16 @@ function etaStopReachMinutes(named, boardIndex, boardWaitMins, kind) {
   /** @type {(number | null)[]} */
   const out = Array(n).fill(null);
   if (!n || boardIndex < 0 || boardIndex >= n) return out;
-  if (boardWaitMins == null || !Number.isFinite(Number(boardWaitMins))) {
-    // Still show travel-only offsets from board as relative times when no ETA
-    const rideSec = estimateEtaRouteRideSeconds(named, kind);
-    const offsets = stopOffsetMinutesFromBoard({}, named, rideSec);
-    const base = offsets[boardIndex] ?? 0;
-    for (let i = boardIndex; i < n; i++) {
-      out[i] = Math.max(0, (offsets[i] ?? base) - base);
-    }
-    return out;
-  }
-  const wait = Number(boardWaitMins);
   const rideSec = estimateEtaRouteRideSeconds(named, kind);
   const offsets = stopOffsetMinutesFromBoard({}, named, rideSec);
   const base = offsets[boardIndex] ?? 0;
-  for (let i = boardIndex; i < n; i++) {
-    const travel = Math.max(0, (offsets[i] ?? base) - base);
-    out[i] = wait + travel;
+  const wait =
+    boardWaitMins != null && Number.isFinite(Number(boardWaitMins))
+      ? Number(boardWaitMins)
+      : 0;
+  for (let i = 0; i < n; i++) {
+    // Relative to selected stop: wait + (offset_i − offset_selected)
+    out[i] = wait + ((offsets[i] ?? base) - base);
   }
   return out;
 }

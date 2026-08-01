@@ -1517,7 +1517,7 @@ body.mobile-ui [data-acrylic]::before {
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.45);
 }
 
-/* Reach time under stop name (Wheels “5m” style) — no row/name recolor */
+/* Reach time under stop name (Wheels “5m” / “-3m”) — no row/name recolor */
 .eta-route-line .rt-stop-role.rt-stop-eta-mins {
   display: block;
   margin-top: 2px;
@@ -1528,6 +1528,22 @@ body.mobile-ui [data-acrylic]::before {
   color: var(--rt-color);
   opacity: 0.95;
   font-variant-numeric: tabular-nums;
+}
+
+/* Stops before selected: grey rail already applied via --rt-color; mute labels */
+.eta-route-line .rt-step.eta-stop-before .rt-stop-name.is-past,
+.eta-route-line .rt-step.eta-stop-before .rt-stop-name {
+  color: var(--text-muted);
+  opacity: 0.72;
+}
+
+.eta-route-line .rt-step.eta-stop-before .rt-stop-role.rt-stop-eta-mins.is-past {
+  color: rgba(255, 255, 255, 0.38);
+  opacity: 1;
+}
+
+.eta-route-line .rt-step.eta-stop-before .rt-line-solid {
+  opacity: 0.55;
 }
 
 @supports not (background: color-mix(in srgb, red 50%, blue)) {
