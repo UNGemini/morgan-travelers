@@ -1485,8 +1485,20 @@ body.mobile-ui [data-acrylic]::before {
   letter-spacing: 0.01em;
 }
 
-/* Highlight stop that the board ETA is for */
-.eta-route-line .rt-step.rt-stop-eta-active .rt-marker-dot {
+/*
+ * Stop focus ring lives only on the rail circle.
+ * Hover moves the ring to that stop’s circle (selected ring drops while hovering another).
+ */
+.eta-route-line .rt-step.eta-pick-stop .rt-marker-dot {
+  transition:
+    width 0.15s ease,
+    height 0.15s ease,
+    margin 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.eta-route-line .rt-step.eta-pick-stop.rt-stop-eta-active .rt-marker-dot,
+.eta-route-line .rt-step.eta-pick-stop:hover .rt-marker-dot {
   width: 12px;
   height: 12px;
   margin: calc((1.3em - 12px) / 2) 0;
@@ -1495,12 +1507,17 @@ body.mobile-ui [data-acrylic]::before {
     0 0 0 5px color-mix(in srgb, var(--rt-color) 35%, transparent);
 }
 
-.eta-route-line .rt-stop-name.is-eta-stop {
-  font-weight: 750;
-  color: #fff;
+/* While hovering a different stop, only the hovered circle stays enlarged */
+.eta-route-line:has(.eta-pick-stop:hover)
+  .rt-step.eta-pick-stop.rt-stop-eta-active:not(:hover)
+  .rt-marker-dot {
+  width: 9px;
+  height: 9px;
+  margin: calc((1.3em - 9px) / 2) 0;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.45);
 }
 
-/* Reach time under stop name (Wheels “5m” style) */
+/* Reach time under stop name (Wheels “5m” style) — no row/name recolor */
 .eta-route-line .rt-stop-role.rt-stop-eta-mins {
   display: block;
   margin-top: 2px;
@@ -1514,7 +1531,8 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 @supports not (background: color-mix(in srgb, red 50%, blue)) {
-  .eta-route-line .rt-step.rt-stop-eta-active .rt-marker-dot {
+  .eta-route-line .rt-step.eta-pick-stop.rt-stop-eta-active .rt-marker-dot,
+  .eta-route-line .rt-step.eta-pick-stop:hover .rt-marker-dot {
     box-shadow:
       0 0 0 2px rgba(0, 0, 0, 0.45),
       0 0 0 5px rgba(192, 174, 252, 0.28);
@@ -1628,27 +1646,20 @@ body.mobile-ui [data-acrylic]::before {
   background: var(--rt-color);
 }
 
-/* Tap a stop to load that stop’s ETA */
+/* Tap a stop to load that stop’s ETA — no row fill; ring moves on the circle only */
 .eta-route-line .rt-step.eta-pick-stop {
   cursor: pointer;
-  border-radius: 10px;
-  margin: 0 -4px;
-  padding-left: 4px;
-  padding-right: 4px;
-  transition: background 0.12s ease;
+  background: transparent;
 }
 
-.eta-route-line .rt-step.eta-pick-stop:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.eta-route-line .rt-step.eta-pick-stop:focus-visible {
-  outline: 2px solid rgba(192, 174, 252, 0.55);
-  outline-offset: 1px;
-}
-
+.eta-route-line .rt-step.eta-pick-stop:hover,
 .eta-route-line .rt-step.eta-pick-stop.rt-stop-eta-active {
-  background: rgba(255, 255, 255, 0.06);
+  background: transparent;
+}
+
+.eta-route-line .rt-step.eta-pick-stop:focus-visible .rt-marker-dot {
+  outline: 2px solid rgba(192, 174, 252, 0.55);
+  outline-offset: 2px;
 }
 
 /* Wheels-like ETA route card — rounded selection */
