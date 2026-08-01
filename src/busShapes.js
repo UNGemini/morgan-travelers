@@ -459,18 +459,26 @@ export function matchBusShapeForRoute(query) {
 
     let score = 40; // route number match
 
-    if (r.agency) {
-      const ag = String(r.agency).toUpperCase();
-      if (
-        !agency ||
+    if (agency) {
+      // When caller specifies operator, require agency match (no cross-company reuse)
+      const ag = String(r.agency || "").toUpperCase();
+      if (!ag) {
+        score -= 20; // untagged shape must not win for a tagged operator
+      } else if (
         agency.includes(ag) ||
         ag.includes(agency) ||
-        ag.includes("JOINT")
+        ag.includes("JOINT") ||
+        ((agency === "KMB" || agency === "LWB") &&
+          (ag.includes("KMB") || ag.includes("LWB"))) ||
+        (agency === "CTB" &&
+          (ag.includes("CTB") || ag.includes("CITYBUS") || ag.includes("NWFB")))
       ) {
-        score += 15;
+        score += 20;
       } else {
-        score -= 8;
+        score -= 40; // hard reject different operator
       }
+    } else if (r.agency) {
+      score += 5;
     }
 
     if (r.from_match?.length) {

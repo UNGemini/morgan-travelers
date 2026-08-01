@@ -249,6 +249,18 @@ let mtrStationLinesMap = null;
 let kmbRouteBoundsMap = null;
 /** @type {Promise<Map<string, any[]>> | null} */
 let kmbRouteBoundsPromise = null;
+/** CTB route → O/I directions (never reuse KMB bounds for same number). */
+/** @type {Map<string, Array<{ dest: string, destZh?: string, bound: string, orig?: string }>>} */
+const ctbRouteBoundsMap = new Map();
+/** @type {Map<string, Promise<any>>} */
+const ctbRouteBoundPromises = new Map();
+/** NLB routeNo → variants (each NLB direction is its own routeId). */
+/** @type {Map<string, Array<{ dest: string, destZh?: string, bound: string, orig?: string, routeId?: string }>> | null} */
+let nlbRouteBoundsMap = null;
+/** @type {Promise<Map<string, any[]>> | null} */
+let nlbRouteBoundsPromise = null;
+/** Invalidate in-flight shape loads when selection changes. */
+let etaShapeGen = 0;
 /** Per-card direction index 0|1 keyed by routeKey */
 /** @type {Map<string, number>} */
 const etaCardDirIndex = new Map();
@@ -4781,12 +4793,12 @@ async function ensureKmbStops() {
 
 /**
  * Destination labels for a catalog route (up to 2 directions).
+ * Operator-strict: never use KMB OD for CTB/NLB/GMB with the same route number.
  * @param {EtaRouteEntry} r
- * @returns {Array<{ dest: string, destZh?: string, bound?: string, orig?: string }>}
+ * @returns {Array<{ dest: string, destZh?: string, bound?: string, orig?: string, routeId?: string }>}
  */
 function etaRouteDirections(r) {
   if (!r) return [{ dest: "—" }];
-  // Live nearby payload may pin dest for current bound
   const live = etaLiveByKey.get(etaRouteKey(r));
   if (r.kind === "mtr") {
     return [{ dest: r.label, bound: "line" }];
@@ -4794,15 +4806,39 @@ function etaRouteDirections(r) {
   if (r.kind === "lrt") {
     return [{ dest: r.label, bound: "lrt" }];
   }
-  const bounds = kmbRouteBoundsMap?.get(String(r.id).toUpperCase());
-  if (bounds?.length) {
-    return bounds.map((b) => ({
-      dest: b.dest_en || b.dest_tc || "—",
-      destZh: b.dest_tc || "",
-      bound: b.bound,
-      orig: b.orig_en || b.orig_tc || "",
-    }));
+
+  const co = String(r.co || "").toLowerCase();
+  const rid = String(r.id || "").toUpperCase();
+  const isKmbFamily =
+    r.kind === "mtr_bus" ||
+    co === "kmb" ||
+    co === "lwb" ||
+    co === "lrtfeeder" ||
+    (r.kind === "bus" && !co);
+
+  // KMB / LWB / MTR Bus only — must not apply to CTB/NLB/GMB
+  if (isKmbFamily && co !== "gmb" && co !== "ctb" && co !== "nlb") {
+    const bounds = kmbRouteBoundsMap?.get(rid);
+    if (bounds?.length) {
+      return bounds.map((b) => ({
+        dest: b.dest_en || b.dest_tc || "—",
+        destZh: b.dest_tc || "",
+        bound: b.bound,
+        orig: b.orig_en || b.orig_tc || "",
+      }));
+    }
   }
+
+  if (co === "ctb") {
+    const bounds = ctbRouteBoundsMap.get(rid);
+    if (bounds?.length) return bounds;
+  }
+
+  if (co === "nlb") {
+    const bounds = nlbRouteBoundsMap?.get(rid);
+    if (bounds?.length) return bounds;
+  }
+
   if (live?.dest) {
     return [
       {
@@ -4816,7 +4852,119 @@ function etaRouteDirections(r) {
     /^(KMB\/LWB|CTB|NLB|GMB|MTR Bus)\s+/i,
     "",
   );
-  return [{ dest: lab || r.id, bound: "0" }];
+  return [{ dest: lab || r.id, bound: "O" }];
+}
+
+/**
+ * Fetch CTB OD for one route number (O + reverse I).
+ * @param {string} routeId
+ */
+async function ensureCtbRouteBound(routeId) {
+  const id = String(routeId || "").toUpperCase();
+  if (!id) return [];
+  if (ctbRouteBoundsMap.has(id)) return ctbRouteBoundsMap.get(id) || [];
+  if (ctbRouteBoundPromises.has(id)) return ctbRouteBoundPromises.get(id);
+
+  const p = (async () => {
+    try {
+      const res = await fetch(
+        `/eta/ctb/route/CTB/${encodeURIComponent(id)}`,
+        { headers: { Accept: "application/json" } },
+      );
+      if (!res.ok) throw new Error(String(res.status));
+      const j = await res.json();
+      const d = j.data || {};
+      const dirs = [
+        {
+          dest: String(d.dest_en || d.dest_tc || "—").trim(),
+          destZh: String(d.dest_tc || "").trim(),
+          bound: "O",
+          orig: String(d.orig_en || d.orig_tc || "").trim(),
+        },
+        {
+          dest: String(d.orig_en || d.orig_tc || "—").trim(),
+          destZh: String(d.orig_tc || "").trim(),
+          bound: "I",
+          orig: String(d.dest_en || d.dest_tc || "").trim(),
+        },
+      ];
+      ctbRouteBoundsMap.set(id, dirs);
+      return dirs;
+    } catch (e) {
+      console.warn("[eta] CTB route", id, e);
+      ctbRouteBoundsMap.set(id, []);
+      return [];
+    } finally {
+      ctbRouteBoundPromises.delete(id);
+    }
+  })();
+  ctbRouteBoundPromises.set(id, p);
+  return p;
+}
+
+/**
+ * NLB list once → directions per routeNo (each variant = one routeId).
+ */
+async function ensureNlbRouteBounds() {
+  if (nlbRouteBoundsMap) return nlbRouteBoundsMap;
+  if (nlbRouteBoundsPromise) return nlbRouteBoundsPromise;
+  nlbRouteBoundsPromise = (async () => {
+    /** @type {Map<string, Array<{ dest: string, destZh?: string, bound: string, orig?: string, routeId?: string }>>} */
+    const map = new Map();
+    try {
+      const res = await fetch("/eta/nlb/route.php?action=list", {
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const j = await res.json();
+      const routes = j.routes || j.data || [];
+      for (const row of routes) {
+        const no = String(row.routeNo || row.route || "")
+          .trim()
+          .toUpperCase();
+        if (!no) continue;
+        const nameE = String(row.routeName_e || "");
+        const nameC = String(row.routeName_c || "");
+        const partsE = nameE.split(/\s*>\s*/);
+        const partsC = nameC.split(/\s*>\s*/);
+        const orig = (partsE[0] || "").trim();
+        const dest = (partsE[1] || partsE[0] || nameE || "—").trim();
+        const destZh = (partsC[1] || partsC[0] || "").trim();
+        const entry = {
+          dest: dest || "—",
+          destZh,
+          bound: map.has(no) && map.get(no).length ? "I" : "O",
+          orig,
+          routeId: String(row.routeId || row.route_id || ""),
+        };
+        if (!map.has(no)) map.set(no, []);
+        map.get(no).push(entry);
+      }
+      console.info("[eta] NLB route bounds", map.size);
+    } catch (e) {
+      console.warn("[eta] NLB route list", e);
+    }
+    nlbRouteBoundsMap = map;
+    return map;
+  })();
+  return nlbRouteBoundsPromise;
+}
+
+/**
+ * Prefetch OD labels for visible non-KMB hits so cards don't show wrong company dest.
+ * @param {EtaRouteEntry[]} hits
+ */
+async function prefetchEtaDirections(hits) {
+  if (!hits?.length) return;
+  const tasks = [];
+  let needNlb = false;
+  for (const r of hits.slice(0, 40)) {
+    const co = String(r.co || "").toLowerCase();
+    if (co === "ctb") tasks.push(ensureCtbRouteBound(r.id));
+    if (co === "nlb") needNlb = true;
+  }
+  if (needNlb) tasks.push(ensureNlbRouteBounds());
+  if (tasks.length) await Promise.all(tasks);
 }
 
 /**
@@ -5239,7 +5387,12 @@ function etaCardDotsHtml(r, dirCount, activeDir) {
  * @param {EtaRouteEntry[]} hits
  * @param {string} [hint]
  */
-function renderEtaRouteSuggest(hits, hint = "") {
+/**
+ * @param {EtaRouteEntry[]} hits
+ * @param {string} [hint]
+ * @param {{ skipPrefetch?: boolean }} [opts]
+ */
+function renderEtaRouteSuggest(hits, hint = "", opts = {}) {
   const list = els.etaRouteListSidebar;
   if (!list) return;
   if (els.etaRouteHintSidebar) {
@@ -5255,6 +5408,16 @@ function renderEtaRouteSuggest(hits, hint = "") {
   // Keep selection index if still in range; do not auto-select 0
   if (etaRouteActive >= hits.length) etaRouteActive = hits.length ? 0 : -1;
 
+  // Prefetch CTB/NLB OD so cards don't reuse KMB destinations for same #
+  if (!opts.skipPrefetch && hits.some((r) => r.co === "ctb" || r.co === "nlb")) {
+    void prefetchEtaDirections(hits).then(() => {
+      // Re-render once OD arrives (skipPrefetch to avoid loop)
+      if (etaRouteHits === hits) {
+        renderEtaRouteSuggest(hits, hint, { skipPrefetch: true });
+      }
+    });
+  }
+
   if (!hits.length) {
     list.innerHTML = `<li class="eta-route-empty" role="presentation">No matching routes</li>`;
     return;
@@ -5266,9 +5429,13 @@ function renderEtaRouteSuggest(hits, hint = "") {
       const di = Math.min(getCardDir(r), Math.max(0, dirs.length - 1));
       const dir = dirs[di] || dirs[0] || { dest: r.label };
       const live = etaLiveByKey.get(etaRouteKey(r));
-      // Prefer live dest when bound matches
+      // Prefer live dest only for same company key (live is KMB-only nearby today)
       let useDir = dir;
-      if (live?.dest && (dirs.length < 2 || live.bound === dir.bound)) {
+      if (
+        live?.dest &&
+        (r.co === "kmb" || r.co === "lwb" || !r.co) &&
+        (dirs.length < 2 || live.bound === dir.bound)
+      ) {
         useDir = {
           dest: live.dest,
           destZh: live.destZh || live.dest,
@@ -5279,8 +5446,12 @@ function renderEtaRouteSuggest(hits, hint = "") {
       return `<li role="option" data-idx="${i}" class="eta-route-card ${active}" aria-selected="${active ? "true" : "false"}">
         <div class="eta-route-card-body">
           ${etaRouteCardInnerHtml(r, useDir, {
-            minutes: live?.minutes,
-            stopLabel: live?.stopLabel || r.nearbyHint,
+            minutes:
+              r.co === "kmb" || r.co === "lwb" || !r.co ? live?.minutes : null,
+            stopLabel:
+              r.co === "kmb" || r.co === "lwb" || !r.co
+                ? live?.stopLabel || r.nearbyHint
+                : r.nearbyHint,
           })}
         </div>
         ${etaCardDotsHtml(r, dirs.length, di)}
@@ -5310,7 +5481,7 @@ function renderEtaRouteSuggest(hits, hint = "") {
       setCardDir(r, Number(btn.getAttribute("data-dir")) || 0);
       // Keep selection on this card
       etaRouteActive = idx;
-      renderEtaRouteSuggest(etaRouteHits, hint);
+      renderEtaRouteSuggest(etaRouteHits, hint, { skipPrefetch: true });
       etaRouteActive = idx;
       syncEtaActive();
       // If this route is selected, reload shape for new bound
@@ -5363,7 +5534,37 @@ function companyLineColor(route) {
  * Load stop sequence + coordinates — strict by operator (never mix CTB/NLB with KMB).
  * @param {EtaRouteEntry} route
  */
+/**
+ * Whether a published bus-shape agency is allowed for this operator.
+ * Empty shape agency is never reused across operators (prevents KMB shape on CTB #).
+ * @param {string} co
+ * @param {string} shapeAg
+ */
+function shapeAgencyMatchesCo(co, shapeAg) {
+  const c = String(co || "").toLowerCase();
+  const a = String(shapeAg || "").toLowerCase();
+  if (!c) return true; // unknown operator — allow
+  if (!a) return false; // tagged route must have tagged shape
+  if (a.includes("joint")) return true;
+  if (a.includes(c) || c.includes(a)) return true;
+  if ((c === "kmb" || c === "lwb") && (a.includes("kmb") || a.includes("lwb")))
+    return true;
+  if (
+    c === "ctb" &&
+    (a.includes("ctb") || a.includes("citybus") || a.includes("nwfb"))
+  )
+    return true;
+  if (c === "nlb" && a.includes("nlb")) return true;
+  if (c === "gmb" && (a.includes("gmb") || a.includes("minibus"))) return true;
+  return false;
+}
+
 async function loadEtaRouteStops(route) {
+  // Ensure OD/bounds for non-KMB before reading direction
+  const coPre = String(route.co || "").toLowerCase();
+  if (coPre === "ctb") await ensureCtbRouteBound(route.id);
+  if (coPre === "nlb") await ensureNlbRouteBounds();
+
   const dirs = etaRouteDirections(route);
   const di = getCardDir(route);
   const dir = dirs[Math.min(di, dirs.length - 1)] || dirs[0];
@@ -5381,13 +5582,7 @@ async function loadEtaRouteStops(route) {
     });
     if (match?.shape?.coordinates?.length >= 2 && !match.similar) {
       const shapeAg = String(match.shape.agency || "").toLowerCase();
-      const agOk =
-        !co ||
-        !shapeAg ||
-        shapeAg.includes(co) ||
-        co.includes(shapeAg) ||
-        shapeAg.includes("joint");
-      if (agOk) {
+      if (shapeAgencyMatchesCo(co, shapeAg)) {
         const vs = match.shape.visual_stops || [];
         if (vs.length) {
           return vs
@@ -5422,7 +5617,7 @@ async function loadEtaRouteStops(route) {
     }
   }
 
-  // ── KMB / LWB only ──
+  // ── KMB / LWB only (never fall through for CTB/NLB) ──
   if (co === "kmb" || co === "lwb" || route.kind === "mtr_bus") {
     const direction = bound === "I" ? "inbound" : "outbound";
     try {
@@ -5507,52 +5702,70 @@ async function loadEtaRouteStops(route) {
     }
   }
 
-  // ── NLB: list routes then match routeNo ──
+  // ── NLB: pick routeId for selected direction (each OD is its own routeId) ──
   if (co === "nlb") {
     try {
-      const lr = await fetch("/eta/nlb/route.php?action=list", {
-        headers: { Accept: "application/json" },
-      });
-      if (lr.ok) {
-        const lj = await lr.json();
-        const routes = lj.routes || lj.data || [];
-        const want = String(route.id).toUpperCase();
-        const hit = routes.find(
-          (r) => String(r.routeNo || r.route || "").toUpperCase() === want,
-        );
-        const routeId = hit?.routeId || hit?.route_id;
-        if (routeId) {
-          // Try common NLB stop list endpoints
-          for (const path of [
-            `/eta/nlb/stop.php?action=list&routeId=${encodeURIComponent(routeId)}`,
-            `/eta/nlb/route.stop.list.php?routeId=${encodeURIComponent(routeId)}`,
-          ]) {
-            try {
-              const sr = await fetch(path, {
-                headers: { Accept: "application/json" },
-              });
-              if (!sr.ok) continue;
-              const sj = await sr.json();
-              const raw = sj.stops || sj.data || [];
-              const stops = raw
-                .map((s, i) => {
-                  const lat = Number(s.latitude ?? s.lat);
-                  const lon = Number(s.longitude ?? s.long ?? s.lon);
-                  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-                  return {
-                    seq: Number(s.stopSequence ?? s.seq) || i + 1,
-                    name: s.stopName_c || s.stopName_e || s.name_tc || s.name || "",
-                    stopId: String(s.stopId || s.stop || ""),
-                    lon,
-                    lat,
-                  };
-                })
-                .filter(Boolean)
-                .sort((a, b) => a.seq - b.seq);
-              if (stops.length >= 2) return stops;
-            } catch {
-              /* try next */
-            }
+      await ensureNlbRouteBounds();
+      const want = String(route.id).toUpperCase();
+      const variants = nlbRouteBoundsMap?.get(want) || [];
+      let routeId = dir?.routeId || "";
+      if (!routeId && variants.length) {
+        const pick =
+          variants.find((v) => String(v.bound || "").toUpperCase() === bound) ||
+          variants[Math.min(di, variants.length - 1)] ||
+          variants[0];
+        routeId = pick?.routeId || "";
+      }
+      if (!routeId) {
+        // Fallback: list API
+        const lr = await fetch("/eta/nlb/route.php?action=list", {
+          headers: { Accept: "application/json" },
+        });
+        if (lr.ok) {
+          const lj = await lr.json();
+          const routes = lj.routes || lj.data || [];
+          const matches = routes.filter(
+            (r) => String(r.routeNo || r.route || "").toUpperCase() === want,
+          );
+          const hit = matches[Math.min(di, Math.max(0, matches.length - 1))] || matches[0];
+          routeId = hit?.routeId || hit?.route_id || "";
+        }
+      }
+      if (routeId) {
+        for (const path of [
+          `/eta/nlb/stop.php?action=list&routeId=${encodeURIComponent(routeId)}`,
+          `/eta/nlb/route.stop.list.php?routeId=${encodeURIComponent(routeId)}`,
+        ]) {
+          try {
+            const sr = await fetch(path, {
+              headers: { Accept: "application/json" },
+            });
+            if (!sr.ok) continue;
+            const sj = await sr.json();
+            const raw = sj.stops || sj.data || [];
+            const stops = raw
+              .map((s, i) => {
+                const lat = Number(s.latitude ?? s.lat);
+                const lon = Number(s.longitude ?? s.long ?? s.lon);
+                if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+                return {
+                  seq: Number(s.stopSequence ?? s.seq) || i + 1,
+                  name:
+                    s.stopName_c ||
+                    s.stopName_e ||
+                    s.name_tc ||
+                    s.name ||
+                    "",
+                  stopId: String(s.stopId || s.stop || ""),
+                  lon,
+                  lat,
+                };
+              })
+              .filter(Boolean)
+              .sort((a, b) => a.seq - b.seq);
+            if (stops.length >= 2) return stops;
+          } catch {
+            /* try next */
           }
         }
       }
@@ -5669,15 +5882,20 @@ async function paintEtaRouteOnMap(route, stops) {
     .filter(
       (s) => !s._polylineOnly && Number.isFinite(s.lon) && Number.isFinite(s.lat),
     )
-    .map((s, i, arr) => ({
-      type: "Feature",
-      properties: {
-        name: s.name || `Stop ${i + 1}`,
-        seq: s.seq || i + 1,
-        role: i === 0 ? "board" : i === arr.length - 1 ? "alight" : "via",
-      },
-      geometry: { type: "Point", coordinates: [s.lon, s.lat] },
-    }));
+    .map((s, i, arr) => {
+      const label = s.name || `Stop ${i + 1}`;
+      return {
+        type: "Feature",
+        properties: {
+          name: label,
+          stop_name: label, // label layer reads stop_name
+          seq: s.seq || i + 1,
+          role: i === 0 ? "board" : i === arr.length - 1 ? "alight" : "via",
+          color,
+        },
+        geometry: { type: "Point", coordinates: [s.lon, s.lat] },
+      };
+    });
 
   const lineFeat =
     lineCoords.length >= 2
@@ -5699,6 +5917,9 @@ async function paintEtaRouteOnMap(route, stops) {
     return;
   }
 
+  // Clear first so MapLibre always re-evaluates paint
+  lineSrc.setData({ type: "FeatureCollection", features: [] });
+  stopSrc.setData({ type: "FeatureCollection", features: [] });
   lineSrc.setData({
     type: "FeatureCollection",
     features: lineFeat ? [lineFeat] : [],
@@ -5708,7 +5929,7 @@ async function paintEtaRouteOnMap(route, stops) {
     features: stopFeats,
   });
 
-  // Keep line above basemap / MTR layers
+  // Keep line + stops above basemap / MTR layers
   try {
     for (const id of [
       "route-line-casing",
@@ -5716,10 +5937,23 @@ async function paintEtaRouteOnMap(route, stops) {
       "route-stops-circle",
       "route-stops-label",
     ]) {
-      if (map.getLayer(id)) map.moveLayer(id);
+      if (map.getLayer(id)) {
+        map.setLayoutProperty(id, "visibility", "visible");
+        map.moveLayer(id);
+      }
     }
   } catch {
     /* ignore */
+  }
+
+  if (!lineFeat) {
+    console.warn(
+      "[eta] no line coords for",
+      route.co || route.kind,
+      route.id,
+      "stops",
+      stops.length,
+    );
   }
 
   if (lineCoords.length >= 2) {
@@ -5762,6 +5996,11 @@ function selectEtaRoute(route, listIndex) {
     etaRouteActive = listIndex;
   }
   etaSelectedForDetails = route;
+  // Drop previous path immediately so we never show another company's shape
+  const gen = ++etaShapeGen;
+  etaSelectedStops = [];
+  clearRouteGeometry();
+
   // Do not put route number into the search box
   const dirs = etaRouteDirections(route);
   const di = getCardDir(route);
@@ -5780,7 +6019,9 @@ function selectEtaRoute(route, listIndex) {
               ? "CTB"
               : route.co === "nlb"
                 ? "NLB"
-                : "Bus";
+                : route.co === "kmb" || route.co === "lwb"
+                  ? "KMB"
+                  : "Bus";
   const dest = live?.destZh || live?.dest || dir?.destZh || dir?.dest || route.label;
   showToast(`${kindLabel} ${route.id} → ${dest}`, 2000);
   setDetailOpen(true);
@@ -5796,23 +6037,30 @@ function selectEtaRoute(route, listIndex) {
   // Draw shape on map (async)
   void (async () => {
     try {
-      setMapRouteLoading(true, `Drawing ${route.id}…`);
+      setMapRouteLoading(true, `Drawing ${kindLabel} ${route.id}…`);
+      // Prefetch OD so direction + path use correct company
+      const co = String(route.co || "").toLowerCase();
+      if (co === "ctb") await ensureCtbRouteBound(route.id);
+      if (co === "nlb") await ensureNlbRouteBounds();
+      if (gen !== etaShapeGen) return;
       const stops = await loadEtaRouteStops(route);
+      if (gen !== etaShapeGen) return;
       etaSelectedStops = stops;
       if (stops.length >= 2) {
         await paintEtaRouteOnMap(route, stops);
       } else {
         clearRouteGeometry();
         showToast(
-          `No path for ${String(route.co || route.kind).toUpperCase()} ${route.id}`,
+          `No path for ${kindLabel} ${route.id}`,
           2400,
         );
       }
     } catch (e) {
+      if (gen !== etaShapeGen) return;
       console.warn("[eta] shape", e);
       showToast("Could not load route shape", 2200);
     } finally {
-      setMapRouteLoading(false);
+      if (gen === etaShapeGen) setMapRouteLoading(false);
     }
   })();
 
@@ -5831,8 +6079,14 @@ async function showEtaRouteDetailsPanel() {
     showToast("Select a route first", 1800);
     return;
   }
+  const gen = ++etaShapeGen;
   setDetailOpen(true);
   setSidebarPage("eta-route");
+
+  const co = String(route.co || "").toLowerCase();
+  if (co === "ctb") await ensureCtbRouteBound(route.id);
+  if (co === "nlb") await ensureNlbRouteBounds();
+  if (gen !== etaShapeGen) return;
 
   const dirs = etaRouteDirections(route);
   const di = getCardDir(route);
@@ -5871,19 +6125,25 @@ async function showEtaRouteDetailsPanel() {
     els.etaRouteDetailBody.innerHTML = `<p class="hint">Loading stops…</p>`;
   }
 
-  // Ensure path + stops loaded
-  if (etaSelectedStops.length < 2) {
-    try {
-      etaSelectedStops = await loadEtaRouteStops(route);
-      if (etaSelectedStops.length >= 2) {
-        await paintEtaRouteOnMap(route, etaSelectedStops);
-      }
-    } catch (e) {
-      console.warn("[eta] details load", e);
+  // Always reload for this operator+route (avoids stale KMB stops on same #)
+  try {
+    setMapRouteLoading(true, `Loading ${coLabel} ${route.id}…`);
+    const stops = await loadEtaRouteStops(route);
+    if (gen !== etaShapeGen) return;
+    etaSelectedStops = stops;
+    if (stops.length >= 2) {
+      await paintEtaRouteOnMap(route, stops);
+    } else {
+      clearRouteGeometry();
     }
-  } else {
-    await paintEtaRouteOnMap(route, etaSelectedStops);
+  } catch (e) {
+    if (gen !== etaShapeGen) return;
+    console.warn("[eta] details load", e);
+  } finally {
+    if (gen === etaShapeGen) setMapRouteLoading(false);
   }
+
+  if (gen !== etaShapeGen) return;
 
   const named = etaSelectedStops.filter((s) => s.name && !s._polylineOnly);
   if (els.etaRouteDetailBody) {
