@@ -661,12 +661,24 @@ body.mobile-ui [data-acrylic]::before {
   display: none !important;
 }
 
+/* Plan cards live outside the trip-plan section — must hide in ETA mode */
+.app-shell[data-ui-mode="eta"] .plan-results {
+  display: none !important;
+}
+
 .app-shell[data-ui-mode="route"] .eta-sidebar-panel {
   display: none !important;
 }
 
 .app-shell[data-ui-mode="eta"] .eta-sidebar-panel {
   display: flex !important;
+}
+
+/* Search page is a column: ETA list or trip form + results */
+#sidebar-page-search {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* Search / detail pages fill the open sidebar in every mode */

@@ -4700,10 +4700,12 @@ function setUiMode(mode) {
     btn.setAttribute("aria-selected", String(active));
   });
 
-  // Leaving trip/ETA-route nested pages prevents a broken empty sidebar
+  // Leave nested detail pages so search page (ETA list / plan form) is visible
   if (sidebarPage === "trip") {
     closeTripDetailPage();
   } else if (sidebarPage === "eta-route") {
+    setSidebarPage("search");
+  } else {
     setSidebarPage("search");
   }
 
@@ -4718,12 +4720,27 @@ function setUiMode(mode) {
     els.detailTitle.textContent =
       next === "eta" ? "ETA · routes" : "Route planner";
   }
-  // Always land on the search page for the active mode
-  setSidebarPage("search");
+
+  // plan-results is a sibling of the mode panels — hide in ETA so it doesn't
+  // stack under the route list and collapse/break the flex sidebar.
+  if (els.planResults) {
+    if (next === "eta") {
+      els.planResults.hidden = true;
+    } else if (plans?.length) {
+      // Restore plan cards when returning to Trip Plan (content kept in DOM)
+      els.planResults.hidden = false;
+    }
+  }
+
   if (next === "eta") {
     setDetailOpen(true);
+    // Clear ETA route selection chrome so list fills cleanly
+    if (els.etaRouteActions) els.etaRouteActions.hidden = true;
     void ensureMtrStationLinesMap();
     void refreshEtaRouteSuggest();
+  } else {
+    // Trip Plan: keep detail open if user already has plans
+    if (plans?.length) setDetailOpen(true);
   }
   // Keep sidebar width stable across ETA ↔ Trip Plan (no remeasure / no shrink)
   requestAnimationFrame(() => resizeMapSoon());
@@ -6802,9 +6819,9 @@ function selectEtaRoute(route, listIndex) {
     }
   })();
 
+  // Hide plan cards in ETA mode only — do not wipe them (user may switch back)
   if (els.planResults) {
     els.planResults.hidden = true;
-    els.planResults.innerHTML = "";
   }
 }
 
