@@ -641,12 +641,14 @@
               </div>
               <p id="eta-route-hint-sidebar" class="eta-route-hint-sidebar" hidden></p>
 
-              <ul
-                id="eta-route-list-sidebar"
-                class="eta-route-list-sidebar"
-                role="listbox"
-                aria-label="Routes"
-              ></ul>
+              <div class="eta-route-list-wrap">
+                <ul
+                  id="eta-route-list-sidebar"
+                  class="eta-route-list-sidebar"
+                  role="listbox"
+                  aria-label="Routes"
+                ></ul>
+              </div>
 
               <div id="eta-route-actions" class="eta-route-actions" hidden>
                 <button
@@ -971,6 +973,25 @@
               </div>
               <div id="trip-detail-head" class="trip-detail-head"></div>
               <div id="trip-detail-timeline" class="trip-detail-timeline"></div>
+            </div>
+
+            <!-- Page: ETA route details (stop list for selected route) -->
+            <div id="sidebar-page-eta-route" class="sidebar-page" hidden>
+              <div class="trip-detail-bar">
+                <button
+                  type="button"
+                  id="btn-eta-route-back"
+                  class="btn btn-ghost trip-back-btn"
+                  data-acrylic
+                >
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
+                    Back to routes
+                  </span>
+                </button>
+              </div>
+              <div id="eta-route-detail-head" class="trip-detail-head"></div>
+              <div id="eta-route-detail-body" class="eta-route-detail-body"></div>
             </div>
           </div>
         </aside>
