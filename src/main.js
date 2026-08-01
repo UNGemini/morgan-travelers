@@ -115,6 +115,7 @@ import {
 } from "./mtrInterchange.js";
 import {
   fetchPlanBoardEtas,
+  fetchBoardEta,
   buildPlanStopTimes,
   formatEtaCardLine,
   formatWaitMins,
@@ -132,6 +133,7 @@ import {
   headwayTimetableSlots,
   defaultHeadwayMins,
   expandTimetableSlots,
+  withScheduledFallback,
 } from "./eta.js";
 import {
   mergeStopSequence,
@@ -214,6 +216,9 @@ const els = {
   sidebarPageSearch: document.getElementById("sidebar-page-search"),
   sidebarPageTrip: document.getElementById("sidebar-page-trip"),
   sidebarPageEtaRoute: document.getElementById("sidebar-page-eta-route"),
+  sidebarPagePinned: document.getElementById("sidebar-page-pinned"),
+  pinnedRouteBody: document.getElementById("pinned-route-body"),
+  btnPinnedBack: document.getElementById("btn-pinned-back"),
   etaRouteDetailHead: document.getElementById("eta-route-detail-head"),
   etaRouteDetailBody: document.getElementById("eta-route-detail-body"),
   btnEtaRouteBack: document.getElementById("btn-eta-route-back"),
@@ -314,6 +319,217 @@ function syncPinnedRouteToolbar() {
     const row = pinBtn.querySelector(".btn-row span:last-child");
     if (row) row.textContent = on ? "Pinned" : "Pin route";
   }
+}
+
+/**
+ * Resolve pinned entry against catalog for full metadata.
+ * @param {EtaRouteEntry} pinned
+ */
+function resolvePinnedRouteEntry(pinned) {
+  if (!pinned) return null;
+  if (!etaRouteCatalog.length) buildEtaRouteCatalog();
+  return (
+    etaRouteCatalog.find(
+      (r) =>
+        r.id === pinned.id &&
+        r.kind === pinned.kind &&
+        (r.co || "") === (pinned.co || ""),
+    ) || pinned
+  );
+}
+
+/**
+ * Open dedicated Pinned Route page (plan-style card + live/scheduled ETAs).
+ */
+async function openPinnedRoutePage() {
+  if (getUiMode() !== "eta") setUiMode("eta");
+  setDetailOpen(true);
+  const pinned = loadPinnedEtaRoute();
+  if (!pinned) {
+    setSidebarPage("pinned");
+    if (els.pinnedRouteBody) {
+      els.pinnedRouteBody.innerHTML = `
+        <div class="pinned-empty">
+          <span class="material-symbols-outlined" aria-hidden="true">push_pin</span>
+          <p>No pinned route yet</p>
+          <p class="hint">Select a route in the list and tap <strong>Pin route</strong>.</p>
+        </div>`;
+    }
+    return;
+  }
+  setSidebarPage("pinned");
+  await renderPinnedRoutePage();
+}
+
+/**
+ * Render plan-card-style pinned route with up to 3 live/scheduled departures.
+ */
+async function renderPinnedRoutePage() {
+  const body = els.pinnedRouteBody;
+  if (!body) return;
+  const pinned = loadPinnedEtaRoute();
+  if (!pinned) {
+    body.innerHTML = `
+      <div class="pinned-empty">
+        <span class="material-symbols-outlined" aria-hidden="true">push_pin</span>
+        <p>No pinned route yet</p>
+        <p class="hint">Select a route in the list and tap <strong>Pin route</strong>.</p>
+      </div>`;
+    return;
+  }
+
+  const route = resolvePinnedRouteEntry(pinned);
+  body.innerHTML = `<p class="hint" style="padding:12px">Loading ${escapeHtml(route.id)}…</p>`;
+
+  // Prefetch OD for correct destination labels
+  const co = String(route.co || "").toLowerCase();
+  if (co === "ctb") await ensureCtbRouteBound(route.id);
+  if (co === "nlb") await ensureNlbRouteBounds();
+  if (route.kind === "bus" || route.kind === "mtr_bus") {
+    await ensureKmbRouteBounds();
+  }
+
+  const dirs = etaRouteDirections(route);
+  const di = Math.min(getCardDir(route), Math.max(0, dirs.length - 1));
+  const dir = dirs[di] || dirs[0] || { dest: route.label };
+  const dest = dir.destZh || dir.dest || route.label;
+  const color = companyLineColor(route);
+  const coLabel =
+    route.kind === "mtr"
+      ? "MTR"
+      : route.kind === "lrt"
+        ? "LRT"
+        : route.kind === "mtr_bus"
+          ? "MTR Bus"
+          : String(route.co || "bus").toUpperCase();
+
+  // Load stops + paint path
+  let stops = [];
+  try {
+    stops = await loadEtaRouteStops(route);
+    etaSelectedForDetails = route;
+    etaSelectedStops = stops;
+    if (stops.length >= 2) await paintEtaRouteOnMap(route, stops);
+  } catch (e) {
+    console.warn("[pinned] stops", e);
+  }
+
+  // Live ETA from board stop (first stop with id) + timetable fill to 3
+  const boardStop = stops.find((s) => s.stopId && !s._polylineOnly) || stops[0];
+  const opt = etaRouteAsOption(route, stops, dir);
+  let etaResult = null;
+  if (boardStop && Number.isFinite(boardStop.lon)) {
+    try {
+      etaResult = await fetchBoardEta(opt);
+      etaResult = withScheduledFallback(etaResult, opt, null, 0);
+    } catch (e) {
+      console.warn("[pinned] eta", e);
+    }
+  }
+  if (!etaResult || !etaResult.etas?.length) {
+    const headwaySlots = headwayTimetableSlots({
+      dest,
+      operator: co || route.kind,
+      mode: route.kind === "mtr" ? "subway" : route.kind === "lrt" ? "tram" : "bus",
+      count: 3,
+    });
+    etaResult = {
+      operator: co || route.kind,
+      route: route.id,
+      stopId: boardStop?.stopId || "",
+      etas: headwaySlots,
+      waitMins: headwaySlots[0]?.waitMins ?? null,
+      etaIso: null,
+      scheduled: true,
+    };
+  }
+
+  const slots = (etaResult.etas || []).slice(0, 3);
+  const hasLive = slots.some((s) => !s.scheduled);
+  const boardName =
+    boardStop?.name ||
+    etaLiveByKey.get(etaRouteKey(route))?.stopLabel ||
+    dir.orig ||
+    "";
+
+  const etaRows = slots.length
+    ? slots
+        .map((slot, i) => {
+          const line = formatEtaCardLine(slot, {
+            operator: etaResult.operator,
+            showPlatform:
+              !slot.scheduled && etaOperatorShowsPlatform(etaResult.operator),
+          });
+          const tag = slot.scheduled
+            ? `<span class="rt-eta-card-tag">SCHEDULED</span>`
+            : `<span class="rt-eta-card-tag rt-eta-card-tag-live">LIVE</span>`;
+          const nowArrived = slot.waitMins != null && slot.waitMins <= 0;
+          return `<li class="rt-eta-card-row${nowArrived ? " is-due is-now" : ""}${slot.scheduled ? " is-scheduled-row" : ""}${i === 0 ? " is-next" : ""}"><span class="rt-eta-card-line">${escapeHtml(line)}</span>${tag}</li>`;
+        })
+        .join("")
+    : `<li class="rt-eta-card-row is-empty">N/A</li>`;
+
+  const dirDots =
+    dirs.length >= 2
+      ? `<div class="eta-card-dots pinned-dir-dots" role="tablist" aria-label="Direction">
+          <button type="button" class="eta-dir-dot ${di === 0 ? "is-active" : ""}" data-pinned-dir="0" aria-label="Direction 1"></button>
+          <button type="button" class="eta-dir-dot ${di === 1 ? "is-active" : ""}" data-pinned-dir="1" aria-label="Direction 2"></button>
+        </div>`
+      : "";
+
+  body.innerHTML = `
+    <article class="plan-card pinned-route-card active" aria-label="Pinned route ${escapeHtml(route.id)}">
+      <div class="plan-head">
+        <span class="duration">
+          <span class="eta-card-route ${etaCompanyColorClass(route)}" style="color:${escapeHtml(color)};font-size:1.35rem">${escapeHtml(route.id)}</span>
+          <span class="pinned-co">${escapeHtml(coLabel)}</span>
+        </span>
+        <span class="material-symbols-outlined pinned-badge-icon" aria-hidden="true">push_pin</span>
+      </div>
+      <div class="pinned-dest-row">
+        <span class="eta-card-arrow" aria-hidden="true">→</span>
+        <strong>${escapeHtml(dest)}</strong>
+      </div>
+      ${boardName ? `<p class="pinned-board-stop">${escapeHtml(boardName)}</p>` : ""}
+      ${dirDots}
+      <div class="rt-eta-card ${hasLive ? "is-live" : "is-scheduled"}" style="margin-top:10px">
+        <div class="rt-eta-card-head">${hasLive ? formatLiveStatusHead(etaResult.fetchedAt) : "Timetable"}</div>
+        <ul class="rt-eta-card-list">${etaRows}</ul>
+      </div>
+      <div class="pinned-actions">
+        <button type="button" class="btn eta-route-details-btn" id="btn-pinned-details" data-acrylic>
+          <span class="btn-row">
+            <span class="material-symbols-outlined" aria-hidden="true">route</span>
+            Show route details
+          </span>
+        </button>
+        <button type="button" class="btn eta-route-pin-btn is-pinned" id="btn-pinned-unpin" data-acrylic>
+          <span class="btn-row">
+            <span class="material-symbols-outlined" aria-hidden="true">keep_off</span>
+            Unpin
+          </span>
+        </button>
+      </div>
+    </article>
+    <p class="hint pinned-foot">Pinned route · ${escapeHtml(route.label || route.id)}</p>
+  `;
+
+  body.querySelector("#btn-pinned-details")?.addEventListener("click", () => {
+    etaSelectedForDetails = route;
+    void showEtaRouteDetailsPanel();
+  });
+  body.querySelector("#btn-pinned-unpin")?.addEventListener("click", () => {
+    savePinnedEtaRoute(null);
+    syncPinnedRouteToolbar();
+    showToast("Unpinned route", 1600);
+    void renderPinnedRoutePage();
+  });
+  body.querySelectorAll("[data-pinned-dir]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setCardDir(route, Number(btn.getAttribute("data-pinned-dir")) || 0);
+      void renderPinnedRoutePage();
+    });
+  });
 }
 
 /**
@@ -3893,12 +4109,13 @@ function renderPlans(list, ms, opts = {}) {
 }
 
 /**
- * Sidebar navigation: search ↔ trip detail ↔ ETA route detail.
- * @param {"search"|"trip"|"eta-route"} page
+ * Sidebar navigation: search ↔ trip detail ↔ ETA route detail ↔ pinned.
+ * @param {"search"|"trip"|"eta-route"|"pinned"} page
  */
 function setSidebarPage(page) {
   if (page === "trip") sidebarPage = "trip";
   else if (page === "eta-route") sidebarPage = "eta-route";
+  else if (page === "pinned") sidebarPage = "pinned";
   else sidebarPage = "search";
 
   if (els.sidebarPageSearch) {
@@ -3910,21 +4127,35 @@ function setSidebarPage(page) {
   if (els.sidebarPageEtaRoute) {
     els.sidebarPageEtaRoute.hidden = sidebarPage !== "eta-route";
   }
+  if (els.sidebarPagePinned) {
+    els.sidebarPagePinned.hidden = sidebarPage !== "pinned";
+  }
   if (els.detailTitle) {
     if (sidebarPage === "trip") {
       els.detailTitle.textContent = "Trip detail";
     } else if (sidebarPage === "eta-route") {
       els.detailTitle.textContent = "Route detail";
+    } else if (sidebarPage === "pinned") {
+      els.detailTitle.textContent = "Pinned route";
     } else {
       const mode = getUiMode();
       els.detailTitle.textContent =
         mode === "eta" ? "ETA · routes" : "Route planner";
     }
   }
-  if (sidebarPage === "trip" || sidebarPage === "eta-route") {
+  if (
+    sidebarPage === "trip" ||
+    sidebarPage === "eta-route" ||
+    sidebarPage === "pinned"
+  ) {
     setDetailOpen(true);
   }
-  if ((sidebarPage === "trip" || sidebarPage === "eta-route") && els.panel) {
+  if (
+    (sidebarPage === "trip" ||
+      sidebarPage === "eta-route" ||
+      sidebarPage === "pinned") &&
+    els.panel
+  ) {
     const body = els.panel.querySelector(".detail-sidebar-body");
     if (body) body.scrollTop = 0;
   }
@@ -4811,9 +5042,11 @@ function setUiMode(mode) {
   // Leave nested detail pages so search page (ETA list / plan form) is visible
   if (sidebarPage === "trip") {
     closeTripDetailPage();
-  } else if (sidebarPage === "eta-route") {
-    setSidebarPage("search");
-  } else {
+  } else if (
+    sidebarPage === "eta-route" ||
+    sidebarPage === "pinned" ||
+    sidebarPage !== "search"
+  ) {
     setSidebarPage("search");
   }
 
@@ -7070,41 +7303,10 @@ function initEtaRouteSearchUi() {
   });
 
   els.btnEtaPinned?.addEventListener("click", () => {
-    if (getUiMode() !== "eta") setUiMode("eta");
-    setDetailOpen(true);
+    void openPinnedRoutePage();
+  });
+  els.btnPinnedBack?.addEventListener("click", () => {
     setSidebarPage("search");
-    const pinned = loadPinnedEtaRoute();
-    if (!pinned) {
-      showToast("No pinned route — select one and tap Pin route", 2200);
-      return;
-    }
-    if (!etaRouteCatalog.length) buildEtaRouteCatalog();
-    const hit =
-      etaRouteCatalog.find(
-        (r) =>
-          r.id === pinned.id &&
-          r.kind === pinned.kind &&
-          (r.co || "") === (pinned.co || ""),
-      ) || pinned;
-    const idx = etaRouteHits.findIndex(
-      (r) =>
-        r.id === hit.id &&
-        r.kind === hit.kind &&
-        (r.co || "") === (hit.co || ""),
-    );
-    if (idx >= 0) {
-      etaRouteActive = idx;
-      selectEtaRoute(etaRouteHits[idx], idx);
-    } else {
-      etaRouteHits = [
-        hit,
-        ...etaRouteHits.filter((r) => etaRouteKey(r) !== etaRouteKey(hit)),
-      ];
-      etaRouteActive = 0;
-      renderEtaRouteSuggest(etaRouteHits, `Pinned · ${hit.label}`);
-      selectEtaRoute(hit, 0);
-    }
-    syncEtaActive();
   });
 
   document.querySelectorAll(".eta-mode-chip[data-eta-mode]").forEach((btn) => {

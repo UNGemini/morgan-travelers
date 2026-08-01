@@ -724,10 +724,103 @@ body.mobile-ui [data-acrylic]::before {
 /* Search / detail pages fill the open sidebar in every mode */
 #sidebar-page-search:not([hidden]),
 #sidebar-page-trip:not([hidden]),
-#sidebar-page-eta-route:not([hidden]) {
+#sidebar-page-eta-route:not([hidden]),
+#sidebar-page-pinned:not([hidden]) {
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;
+}
+
+/* Pinned route page — plan-card style */
+.pinned-route-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 12px 16px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pinned-route-card {
+  cursor: default;
+}
+
+.pinned-route-card .plan-head {
+  align-items: center;
+}
+
+.pinned-co {
+  margin-left: 8px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.pinned-badge-icon {
+  color: var(--accent);
+  font-variation-settings: "FILL" 1, "wght" 500, "GRAD" 0, "opsz" 20;
+}
+
+.pinned-dest-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 4px 0 2px;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+.pinned-dest-row .eta-card-arrow {
+  color: var(--text-muted);
+}
+
+.pinned-board-stop {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.pinned-dir-dots {
+  margin: 6px 0 0;
+}
+
+.pinned-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.pinned-foot {
+  margin: 10px 4px 0;
+  text-align: center;
+}
+
+.pinned-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 36px 16px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.pinned-empty .material-symbols-outlined {
+  font-size: 2.2rem;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.pinned-empty p {
+  margin: 0;
+}
+
+.pinned-empty .hint {
+  max-width: 16rem;
 }
 
 .app-shell[data-detail="open"] .detail-sidebar-body {

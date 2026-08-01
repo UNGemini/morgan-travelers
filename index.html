@@ -1026,6 +1026,24 @@
               <div id="eta-route-detail-head" class="trip-detail-head"></div>
               <div id="eta-route-detail-body" class="eta-route-detail-body"></div>
             </div>
+
+            <!-- Page: Pinned route (planned-style card + live/scheduled ETA) -->
+            <div id="sidebar-page-pinned" class="sidebar-page" hidden>
+              <div class="trip-detail-bar">
+                <button
+                  type="button"
+                  id="btn-pinned-back"
+                  class="btn btn-ghost trip-back-btn"
+                  data-acrylic
+                >
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
+                    Back to routes
+                  </span>
+                </button>
+              </div>
+              <div id="pinned-route-body" class="pinned-route-body"></div>
+            </div>
           </div>
         </aside>
 
