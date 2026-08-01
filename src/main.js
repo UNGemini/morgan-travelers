@@ -4524,6 +4524,8 @@ function setToolbarOpen(open) {
 
 /** Toolbar / sidebar width boost vs natural chrome content. */
 const DOCK_WIDTH_SCALE = 1.05;
+/** Locked dock width (px) shared by ETA + Trip Plan until viewport resize. */
+let dockLockedWidthPx = 0;
 
 function dockPadPx() {
   const raw = getComputedStyle(document.documentElement)
@@ -4534,96 +4536,117 @@ function dockPadPx() {
 }
 
 /**
- * Lock dock width to chrome content × scale (collapsed + expanded).
- * ETA and Trip Plan share the same width: we never shrink on mode switch.
- * Shrink only when allowShrink (viewport resize).
- *
- * @param {{ force?: boolean, allowShrink?: boolean }} [opts]
+ * Apply a fixed dock width (ETA and Trip Plan use the same value).
+ * @param {number} px
  */
-function syncDockChromeWidth({ force = false, allowShrink = false } = {}) {
+function applyDockWidth(px) {
   const dock = els.mainToolbar;
-  if (!dock || dock.offsetParent === null) return;
-  const inner = dock.querySelector(".toolbar-inner");
-  if (!inner) return;
-
-  const prevW =
-    parseFloat(dock.style.getPropertyValue("--dock-chrome-w").trim()) || 0;
+  if (!dock) return;
   const pad = dockPadPx();
   const maxW = Math.max(200, Math.floor(window.innerWidth - 2 * pad));
+  const w = Math.min(Math.max(Math.round(px), 200), maxW);
+  dockLockedWidthPx = w;
+  dock.style.setProperty("--dock-chrome-w", `${w}px`);
+  dock.style.width = `${w}px`;
+  dock.style.minWidth = `${w}px`;
+  dock.style.maxWidth = `${maxW}px`;
+}
+
+/**
+ * Measure toolbar chrome only (not detail body content).
+ * Mid-slot is forced to a fixed footprint so ETA / Trip Plan faces match.
+ * @returns {number}
+ */
+function measureDockChromeNatural() {
+  const dock = els.mainToolbar;
+  const inner = dock?.querySelector?.(".toolbar-inner");
+  if (!dock || !inner) return 0;
 
   const mid = dock.querySelector(".toolbar-mid-slot");
-  const prevTransition = dock.style.transition;
-  const prevInlineWidth = dock.style.width;
-  const midPrev = mid
-    ? {
-        flex: mid.style.flex,
-        width: mid.style.width,
-        minWidth: mid.style.minWidth,
-        maxWidth: mid.style.maxWidth,
-      }
-    : null;
+  const prev = {
+    transition: dock.style.transition,
+    width: dock.style.width,
+    minWidth: dock.style.minWidth,
+    maxWidth: dock.style.maxWidth,
+    chromeW: dock.style.getPropertyValue("--dock-chrome-w"),
+    midFlex: mid?.style.flex,
+    midW: mid?.style.width,
+    midMin: mid?.style.minWidth,
+    midMax: mid?.style.maxWidth,
+  };
 
-  // Pause transitions so measure isn't mid-animation
   dock.style.transition = "none";
   dock.style.removeProperty("--dock-chrome-w");
-  // Measure chrome only: mid slot at its min footprint (not flex-grown)
-  // Same footprint for ETA + Trip Plan (faces are absolute in the mid slot)
   dock.style.width = "max-content";
+  dock.style.minWidth = "0";
+  dock.style.maxWidth = "none";
   if (mid) {
     mid.style.flex = "0 0 auto";
     mid.style.width = "7.5rem";
     mid.style.minWidth = "7.5rem";
     mid.style.maxWidth = "7.5rem";
   }
-
-  // Force layout
   void dock.offsetWidth;
   const natural = Math.ceil(
     Math.max(inner.scrollWidth, inner.getBoundingClientRect().width, 1),
   );
 
-  // Restore mid-slot + temporary width
-  if (mid && midPrev) {
-    mid.style.flex = midPrev.flex;
-    mid.style.width = midPrev.width;
-    mid.style.minWidth = midPrev.minWidth;
-    mid.style.maxWidth = midPrev.maxWidth;
+  dock.style.transition = prev.transition;
+  dock.style.width = prev.width;
+  dock.style.minWidth = prev.minWidth;
+  dock.style.maxWidth = prev.maxWidth;
+  if (prev.chromeW) dock.style.setProperty("--dock-chrome-w", prev.chromeW);
+  else dock.style.removeProperty("--dock-chrome-w");
+  if (mid) {
+    mid.style.flex = prev.midFlex || "";
+    mid.style.width = prev.midW || "";
+    mid.style.minWidth = prev.midMin || "";
+    mid.style.maxWidth = prev.midMax || "";
   }
-  dock.style.width = prevInlineWidth || "";
+  return natural;
+}
 
-  if (natural <= 40) {
-    if (prevW > 40) {
-      dock.style.setProperty(
-        "--dock-chrome-w",
-        `${Math.min(prevW, maxW)}px`,
-      );
-    }
-    dock.style.transition = prevTransition;
+/**
+ * Lock dock width to chrome content × scale.
+ * Default: keep existing lock (no grow/shrink) so ETA ↔ Trip Plan stay identical.
+ * @param {{ remount?: boolean, allowShrink?: boolean }} [opts]
+ *   remount — remeasure chrome (first open / rare)
+ *   allowShrink — viewport resize may shrink
+ */
+function syncDockChromeWidth({ remount = false, allowShrink = false } = {}) {
+  const dock = els.mainToolbar;
+  if (!dock || dock.offsetParent === null) return;
+  const pad = dockPadPx();
+  const maxW = Math.max(200, Math.floor(window.innerWidth - 2 * pad));
+
+  // Already locked: only clamp to viewport (or remeasure when allowed)
+  if (dockLockedWidthPx > 40 && !remount && !allowShrink) {
+    applyDockWidth(Math.min(dockLockedWidthPx, maxW));
     return;
   }
 
-  const boosted = Math.ceil(natural * DOCK_WIDTH_SCALE);
-  let next = Math.min(boosted, maxW);
-  // Keep a stable width across ETA ↔ Trip Plan (never shrink unless viewport resize)
-  if (!allowShrink && prevW > 40) {
-    next = Math.max(prevW, next);
-  }
-  next = Math.min(next, maxW);
-
-  dock.style.setProperty("--dock-chrome-w", `${next}px`);
-  // Keep min-width in sync so flex children can't collapse the dock
-  dock.style.minWidth = `${next}px`;
-
-  // Keep map-tool offset in sync with real chrome height
-  const chromeH = Math.ceil(inner.getBoundingClientRect().height);
-  if (chromeH >= 40 && chromeH <= 80) {
-    document.documentElement.style.setProperty("--toolbar-h", `${chromeH}px`);
+  const natural = measureDockChromeNatural();
+  if (natural <= 40) {
+    if (dockLockedWidthPx > 40) applyDockWidth(Math.min(dockLockedWidthPx, maxW));
+    return;
   }
 
-  // Re-enable transitions after layout settles
-  requestAnimationFrame(() => {
-    dock.style.transition = prevTransition;
-  });
+  let next = Math.min(Math.ceil(natural * DOCK_WIDTH_SCALE), maxW);
+  if (dockLockedWidthPx > 40 && !allowShrink) {
+    // Never shrink or grow on mode/detail toggles
+    next = Math.min(Math.max(dockLockedWidthPx, next), maxW);
+    // If remount is false we already returned; remount can raise the lock once
+    if (!remount) next = Math.min(dockLockedWidthPx, maxW);
+  }
+  applyDockWidth(next);
+
+  const inner = dock.querySelector(".toolbar-inner");
+  if (inner) {
+    const chromeH = Math.ceil(inner.getBoundingClientRect().height);
+    if (chromeH >= 40 && chromeH <= 80) {
+      document.documentElement.style.setProperty("--toolbar-h", `${chromeH}px`);
+    }
+  }
 }
 
 // Viewport / visualViewport resize: debounced full remeasure + map resize
@@ -4631,7 +4654,8 @@ let dockResizeTimer = null;
 function onViewportChromeResize() {
   clearTimeout(dockResizeTimer);
   dockResizeTimer = setTimeout(() => {
-    syncDockChromeWidth({ force: true, allowShrink: true });
+    dockLockedWidthPx = 0; // allow full remeasure
+    syncDockChromeWidth({ remount: true, allowShrink: true });
     resizeMapSoon();
   }, 80);
 }
@@ -4644,10 +4668,10 @@ try {
 
 function setDetailOpen(open) {
   if (!els.app) return;
-  // Always keep +20% width lock (collapsed and expanded)
-  syncDockChromeWidth({ force: true });
+  // Do NOT remeasure width here — Trip Plan open was growing the dock
+  // and ETA mode kept the larger size. Keep locked width only.
+  if (dockLockedWidthPx > 40) applyDockWidth(dockLockedWidthPx);
   els.app.dataset.detail = open ? "open" : "closed";
-  // Keep --dock-chrome-w when collapsing so compact dock also stays +20%
   if (els.panel) {
     els.panel.setAttribute("aria-hidden", open ? "false" : "true");
     els.panel.classList.toggle("collapsed", !open);
@@ -7028,8 +7052,11 @@ initEtaRouteSearchUi();
 
 // Keep toolbar open (close control removed from chrome)
 setToolbarOpen(true);
-// Initial +20% dock width from chrome
-requestAnimationFrame(() => syncDockChromeWidth({ force: true }));
+// Initial dock width from chrome (locked for ETA + Trip Plan)
+requestAnimationFrame(() => {
+  dockLockedWidthPx = 0;
+  syncDockChromeWidth({ remount: true, allowShrink: true });
+});
 
 // Detail expand/collapse (same dock, height grows/shrinks)
 els.btnDetailOpen?.addEventListener("click", () => {
