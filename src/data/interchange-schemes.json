@@ -22,6 +22,26 @@
       "api": "https://www.citybus.com.hk/concessionApi/public/bbi/api/v1/scheme/{lang}",
       "api_detail": "https://www.citybus.com.hk/concessionApi/public/bbi/api/v1/scheme/{lang}/{packageId}",
       "note": "SPA loads packages via concessionApi. Full bus–bus matrices not bundled; use npm run schemes:sync when API reachable."
+    },
+    {
+      "id": "kmb_bbi",
+      "title": "KMB / LWB Octopus & E-payment Bus–Bus Interchange",
+      "url": "https://www.kmb.hk/interchange_bbi.html",
+      "note": "UI is search-only. Full matrices ship as static JSON (~12MB×4) under /storage/en.BBI_route{F1,F2,B1,B2}.js loaded client-side. Optional PHP: /ajax/BBI/get_BBI2-en.php?routeno=&buscompany=&bound=F|B (often unused when static hit).",
+      "data": {
+        "F1": "https://www.kmb.hk/storage/en.BBI_routeF1.js",
+        "F2": "https://www.kmb.hk/storage/en.BBI_routeF2.js",
+        "B1": "https://www.kmb.hk/storage/en.BBI_routeB1.js",
+        "B2": "https://www.kmb.hk/storage/en.BBI_routeB2.js"
+      },
+      "window_symbols": {
+        "^": 30,
+        "#": 60,
+        "*": 90,
+        "@": 120,
+        "!": "special",
+        "default_minutes": 150
+      }
     }
   ],
   "mtr_pt": {
@@ -315,13 +335,18 @@
   },
   "bus_bus": {
     "enabled": false,
-    "note": "Citybus SPA lists ~90 BBI packages via concessionApi (pair matrices are large; not applied until rules[] is filled). Run npm run schemes:sync to refresh package index. Same-itinerary only when enabled.",
+    "note": "Citybus ~90 packages via API; KMB/LWB ~776 routes via static JSON (search UI only). Full pair matrices not applied until rules[] filled. npm run schemes:sync refreshes indexes.",
     "sources": [
       {
         "id": "citybus_bbi",
         "url": "https://www.citybus.com.hk/concession/en/scheme",
         "api_list": "https://www.citybus.com.hk/concessionApi/public/bbi/api/v1/scheme/en",
         "api_detail": "https://www.citybus.com.hk/concessionApi/public/bbi/api/v1/scheme/en/{packageId}"
+      },
+      {
+        "id": "kmb_bbi",
+        "url": "https://www.kmb.hk/interchange_bbi.html",
+        "data_f1": "https://www.kmb.hk/storage/en.BBI_routeF1.js"
       }
     ],
     "citybus_packages": [
@@ -695,6 +720,3890 @@
       }
     ],
     "rules": [],
-    "citybus_synced_at": "2026-08-01"
+    "citybus_synced_at": "2026-08-01",
+    "kmb_routes": [
+      {
+        "route": "1",
+        "dest": "STAR FERRY",
+        "pairs": 58
+      },
+      {
+        "route": "1A",
+        "dest": "STAR FERRY",
+        "pairs": 152
+      },
+      {
+        "route": "2",
+        "dest": "STAR FERRY",
+        "pairs": 60
+      },
+      {
+        "route": "2A",
+        "dest": "MEI FOO",
+        "pairs": 93
+      },
+      {
+        "route": "2B",
+        "dest": "CHEUNG SHA WAN",
+        "pairs": 20
+      },
+      {
+        "route": "2D",
+        "dest": "CHAK ON ESTATE",
+        "pairs": 20
+      },
+      {
+        "route": "2E",
+        "dest": "KOWLOON CITY FERRY",
+        "pairs": 26
+      },
+      {
+        "route": "2F",
+        "dest": "CHEUNG SHA WAN",
+        "pairs": 57
+      },
+      {
+        "route": "2P",
+        "dest": "CHEUNG SHA WAN",
+        "pairs": 0
+      },
+      {
+        "route": "2X",
+        "dest": "MEI FOO",
+        "pairs": 29
+      },
+      {
+        "route": "3B",
+        "dest": "HUNG HOM (HUNG LUEN ROAD)",
+        "pairs": 60
+      },
+      {
+        "route": "3C",
+        "dest": "CHINA FERRY TERMINAL",
+        "pairs": 64
+      },
+      {
+        "route": "3D",
+        "dest": "KWUN TONG (YUE MAN SQUARE)",
+        "pairs": 96
+      },
+      {
+        "route": "3M",
+        "dest": "CHOI WAN",
+        "pairs": 73
+      },
+      {
+        "route": "3S",
+        "dest": "DIAMOND HILL CEMETERY ",
+        "pairs": 2
+      },
+      {
+        "route": "3X",
+        "dest": "CHINA FERRY TERMINAL",
+        "pairs": 60
+      },
+      {
+        "route": "5",
+        "dest": "STAR FERRY",
+        "pairs": 68
+      },
+      {
+        "route": "5A",
+        "dest": "STAR FERRY",
+        "pairs": 66
+      },
+      {
+        "route": "5C",
+        "dest": "STAR FERRY",
+        "pairs": 65
+      },
+      {
+        "route": "5D",
+        "dest": "HUNG HOM ",
+        "pairs": 22
+      },
+      {
+        "route": "5M",
+        "dest": "KOWLOON BAY STATION ",
+        "pairs": 66
+      },
+      {
+        "route": "5P",
+        "dest": "STAR FERRY",
+        "pairs": 66
+      },
+      {
+        "route": "5R",
+        "dest": "KAI TAK CRUISE TERMINAL",
+        "pairs": 6
+      },
+      {
+        "route": "6",
+        "dest": "STAR FERRY",
+        "pairs": 99
+      },
+      {
+        "route": "6C",
+        "dest": "KOWLOON CITY FERRY",
+        "pairs": 25
+      },
+      {
+        "route": "6D",
+        "dest": "MEI FOO",
+        "pairs": 85
+      },
+      {
+        "route": "6E",
+        "dest": "CHEUNG SHA WAN (SO UK ESTATE)",
+        "pairs": 43
+      },
+      {
+        "route": "6F",
+        "dest": "KOWLOON CITY FERRY",
+        "pairs": 26
+      },
+      {
+        "route": "6P",
+        "dest": "CHEUNG SHA WAN (SO UK ESTATE)",
+        "pairs": 47
+      },
+      {
+        "route": "6R",
+        "dest": "NGONG SHUEN CHAU BARRACKS ",
+        "pairs": 1178
+      },
+      {
+        "route": "7",
+        "dest": "STAR FERRY",
+        "pairs": 59
+      },
+      {
+        "route": "7B",
+        "dest": "HUNG HOM (HUNG LUEN ROAD)",
+        "pairs": 25
+      },
+      {
+        "route": "7M",
+        "dest": "LOK FU",
+        "pairs": 20
+      },
+      {
+        "route": "8",
+        "dest": "KOWLOON STATION",
+        "pairs": 33
+      },
+      {
+        "route": "8A",
+        "dest": "TSIM SHA TSUI ",
+        "pairs": 25
+      },
+      {
+        "route": "8P",
+        "dest": "TSIM SHA TSUI ",
+        "pairs": 25
+      },
+      {
+        "route": "9",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 111
+      },
+      {
+        "route": "10",
+        "dest": "TAI KOK TSUI ",
+        "pairs": 33
+      },
+      {
+        "route": "11",
+        "dest": "KOWLOON STATION",
+        "pairs": 71
+      },
+      {
+        "route": "11B",
+        "dest": "KOWLOON CITY FERRY",
+        "pairs": 116
+      },
+      {
+        "route": "11C",
+        "dest": "CHUK YUEN ESTATE",
+        "pairs": 89
+      },
+      {
+        "route": "11D",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 87
+      },
+      {
+        "route": "11K",
+        "dest": "HUNG HOM STATION",
+        "pairs": 20
+      },
+      {
+        "route": "11X",
+        "dest": "HUNG HOM STATION",
+        "pairs": 104
+      },
+      {
+        "route": "12",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 32
+      },
+      {
+        "route": "12A",
+        "dest": "CHEUNG SHA WAN (HOI TAT ESTATE)",
+        "pairs": 23
+      },
+      {
+        "route": "13",
+        "dest": "SHAM SHUI PO (YEN CHOW ST)",
+        "pairs": 289
+      },
+      {
+        "route": "13D",
+        "dest": "ISLAND HARBOURVIEW",
+        "pairs": 74
+      },
+      {
+        "route": "13M",
+        "dest": "KWUN TONG (ELEGANCE ROAD)",
+        "pairs": 60
+      },
+      {
+        "route": "13P",
+        "dest": "CHEUNG SHA WAN (LAI KOK ESTATE)",
+        "pairs": 74
+      },
+      {
+        "route": "13X",
+        "dest": "TSIM SHA TSUI EAST",
+        "pairs": 75
+      },
+      {
+        "route": "14",
+        "dest": "CHINA FERRY TERMINAL",
+        "pairs": 124
+      },
+      {
+        "route": "14B",
+        "dest": "NGAU TAU KOK",
+        "pairs": 64
+      },
+      {
+        "route": "14D",
+        "dest": "YAU TONG",
+        "pairs": 25
+      },
+      {
+        "route": "14H",
+        "dest": "YAU TONG",
+        "pairs": 21
+      },
+      {
+        "route": "14S",
+        "dest": "TSEUNG KWAN O CHINESE PERMANENT CEMETERY",
+        "pairs": 4
+      },
+      {
+        "route": "14X",
+        "dest": "TSIM SHA TSUI ",
+        "pairs": 126
+      },
+      {
+        "route": "15",
+        "dest": "HUNG HOM (HUNG LUEN ROAD)",
+        "pairs": 119
+      },
+      {
+        "route": "15A",
+        "dest": "TSZ WAN SHAN (NORTH)",
+        "pairs": 81
+      },
+      {
+        "route": "15X",
+        "dest": "HUNG HOM STATION",
+        "pairs": 64
+      },
+      {
+        "route": "16",
+        "dest": "MONG KOK (PARK AVENUE)",
+        "pairs": 115
+      },
+      {
+        "route": "16M",
+        "dest": "KWUN TONG (YUE MAN SQUARE)",
+        "pairs": 62
+      },
+      {
+        "route": "16P",
+        "dest": "MONG KOK (PARK AVENUE)",
+        "pairs": 109
+      },
+      {
+        "route": "16X",
+        "dest": "MONG KOK (PARK AVENUE)",
+        "pairs": 69
+      },
+      {
+        "route": "17",
+        "dest": "KWUN TONG (YUE MAN SQUARE)",
+        "pairs": 82
+      },
+      {
+        "route": "18",
+        "dest": "CHEUNG SHA WAN (HOI TAT ESTATE)",
+        "pairs": 35
+      },
+      {
+        "route": "19",
+        "dest": "DIAMOND HILL (KAI CHEUNG COURT)",
+        "pairs": 244
+      },
+      {
+        "route": "21",
+        "dest": "HUNG HOM STATION",
+        "pairs": 71
+      },
+      {
+        "route": "23",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 22
+      },
+      {
+        "route": "23M",
+        "dest": "SHUN LEE ",
+        "pairs": 76
+      },
+      {
+        "route": "24",
+        "dest": "MONG KOK ",
+        "pairs": 62
+      },
+      {
+        "route": "26",
+        "dest": "TSIM SHA TSUI EAST",
+        "pairs": 150
+      },
+      {
+        "route": "26M",
+        "dest": "KWUN TONG ",
+        "pairs": 28
+      },
+      {
+        "route": "26X",
+        "dest": "SHUN TIN",
+        "pairs": 24
+      },
+      {
+        "route": "27",
+        "dest": "MONG KOK ",
+        "pairs": 108
+      },
+      {
+        "route": "27X",
+        "dest": "OLYMPIC STATION",
+        "pairs": 71
+      },
+      {
+        "route": "28",
+        "dest": "STAR FERRY",
+        "pairs": 46
+      },
+      {
+        "route": "28B",
+        "dest": "KAI TAK (KAI CHING ESTATE)",
+        "pairs": 58
+      },
+      {
+        "route": "28S",
+        "dest": "LOK WAH",
+        "pairs": 22
+      },
+      {
+        "route": "29M",
+        "dest": "SAN PO KONG ",
+        "pairs": 66
+      },
+      {
+        "route": "30",
+        "dest": "CHEUNG SHA WAN",
+        "pairs": 64
+      },
+      {
+        "route": "30X",
+        "dest": "WHAMPOA GARDEN",
+        "pairs": 63
+      },
+      {
+        "route": "31",
+        "dest": "SHEK LEI ",
+        "pairs": 38
+      },
+      {
+        "route": "31A",
+        "dest": "KWAI CHUNG ESTATE",
+        "pairs": 20
+      },
+      {
+        "route": "31B",
+        "dest": "OLYMPIC STATION",
+        "pairs": 22
+      },
+      {
+        "route": "31M",
+        "dest": "KWAI FONG STATION",
+        "pairs": 47
+      },
+      {
+        "route": "31P",
+        "dest": "KWAI FONG STATION",
+        "pairs": 20
+      },
+      {
+        "route": "32",
+        "dest": "OLYMPIC STATION",
+        "pairs": 22
+      },
+      {
+        "route": "32H",
+        "dest": "LAI CHI KOK",
+        "pairs": 20
+      },
+      {
+        "route": "32M",
+        "dest": "KWAI FONG STATION",
+        "pairs": 39
+      },
+      {
+        "route": "32P",
+        "dest": "YUEN YUEN INSTITUTE",
+        "pairs": 4
+      },
+      {
+        "route": "33",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 53
+      },
+      {
+        "route": "33A",
+        "dest": "MONG KOK (PARK AVENUE)",
+        "pairs": 64
+      },
+      {
+        "route": "33B",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 52
+      },
+      {
+        "route": "33R",
+        "dest": "TSUEN WAN (DISCOVERY PARK)",
+        "pairs": 4
+      },
+      {
+        "route": "33X",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 30
+      },
+      {
+        "route": "34",
+        "dest": "KWAI SHING (CENTRAL)",
+        "pairs": 20
+      },
+      {
+        "route": "34M",
+        "dest": "TSUEN WAN STATION ",
+        "pairs": 28
+      },
+      {
+        "route": "35A",
+        "dest": "TSIM SHA TSUI EAST",
+        "pairs": 61
+      },
+      {
+        "route": "35X",
+        "dest": "TSIM SHA TSUI EAST",
+        "pairs": 59
+      },
+      {
+        "route": "36",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 39
+      },
+      {
+        "route": "36A",
+        "dest": "CHEUNG SHA WAN (HOI TAT ESTATE)(Circular)",
+        "pairs": 64
+      },
+      {
+        "route": "36B",
+        "dest": "HIGH SPEED RAIL WEST KOWLOON STATION",
+        "pairs": 27
+      },
+      {
+        "route": "36M",
+        "dest": "KWAI FONG STATION",
+        "pairs": 27
+      },
+      {
+        "route": "36R",
+        "dest": "HONG KONG COLISEUM",
+        "pairs": 0
+      },
+      {
+        "route": "36X",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 56
+      },
+      {
+        "route": "37",
+        "dest": "OLYMPIC STATION",
+        "pairs": 64
+      },
+      {
+        "route": "37M",
+        "dest": "KWAI HING STATION",
+        "pairs": 23
+      },
+      {
+        "route": "37X",
+        "dest": "YAU MA TEI",
+        "pairs": 40
+      },
+      {
+        "route": "38",
+        "dest": "PING TIN",
+        "pairs": 98
+      },
+      {
+        "route": "38A",
+        "dest": "MEI FOO",
+        "pairs": 61
+      },
+      {
+        "route": "38B",
+        "dest": "TSUEN WAN (RIVIERA GARDENS)",
+        "pairs": 41
+      },
+      {
+        "route": "38P",
+        "dest": "PING TIN",
+        "pairs": 22
+      },
+      {
+        "route": "38S",
+        "dest": "TSUEN WAN CHINESE CEMETERY",
+        "pairs": 4
+      },
+      {
+        "route": "39A",
+        "dest": "ALLWAY GARDENS ",
+        "pairs": 21
+      },
+      {
+        "route": "39M",
+        "dest": "TSUEN WAN STATION ",
+        "pairs": 45
+      },
+      {
+        "route": "40",
+        "dest": "LAGUNA CITY",
+        "pairs": 142
+      },
+      {
+        "route": "40A",
+        "dest": "PING TIN",
+        "pairs": 131
+      },
+      {
+        "route": "40B",
+        "dest": "PING TIN",
+        "pairs": 112
+      },
+      {
+        "route": "40E",
+        "dest": "KWAI CHUNG (KWAI FONG ESTATE)",
+        "pairs": 56
+      },
+      {
+        "route": "40P",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 96
+      },
+      {
+        "route": "40X",
+        "dest": "KWAI CHUNG ESTATE",
+        "pairs": 66
+      },
+      {
+        "route": "41A",
+        "dest": "TSIM SHA TSUI EAST",
+        "pairs": 60
+      },
+      {
+        "route": "41M",
+        "dest": "TSUEN WAN STATION",
+        "pairs": 33
+      },
+      {
+        "route": "41R",
+        "dest": "TSING YI (CHEUNG CHING ESTATE)",
+        "pairs": 4
+      },
+      {
+        "route": "42",
+        "dest": "SHUN LEE",
+        "pairs": 112
+      },
+      {
+        "route": "42A",
+        "dest": "HIGH SPEED RAIL WEST KOWLOON STATION",
+        "pairs": 65
+      },
+      {
+        "route": "42C",
+        "dest": "LAM TIN STATION",
+        "pairs": 97
+      },
+      {
+        "route": "42M",
+        "dest": "TSUEN WAN (DISCOVERY PARK)",
+        "pairs": 59
+      },
+      {
+        "route": "43",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 26
+      },
+      {
+        "route": "43A",
+        "dest": "SHEK LEI (TAI LOONG STREET)",
+        "pairs": 32
+      },
+      {
+        "route": "43B",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 38
+      },
+      {
+        "route": "43C",
+        "dest": "ISLAND HARBOURVIEW",
+        "pairs": 24
+      },
+      {
+        "route": "43D",
+        "dest": "KWAI SHING",
+        "pairs": 22
+      },
+      {
+        "route": "43M",
+        "dest": "KWAI FONG STATION",
+        "pairs": 22
+      },
+      {
+        "route": "43P",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 44
+      },
+      {
+        "route": "43S",
+        "dest": "SHEK YAM",
+        "pairs": 3
+      },
+      {
+        "route": "43X",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 58
+      },
+      {
+        "route": "44",
+        "dest": "MONG KOK EAST STATION",
+        "pairs": 63
+      },
+      {
+        "route": "44M",
+        "dest": "KWAI CHUNG ESTATE",
+        "pairs": 22
+      },
+      {
+        "route": "45",
+        "dest": "KOWLOON CITY FERRY",
+        "pairs": 62
+      },
+      {
+        "route": "46",
+        "dest": "HIGH SPEED RAIL WEST KOWLOON STATION",
+        "pairs": 65
+      },
+      {
+        "route": "46P",
+        "dest": "KWAI FONG STATION",
+        "pairs": 42
+      },
+      {
+        "route": "46R",
+        "dest": "NGONG SHUEN CHAU BARRACKS",
+        "pairs": 1198
+      },
+      {
+        "route": "46S",
+        "dest": "TSUEN WAN (NINA TOWER)",
+        "pairs": 87
+      },
+      {
+        "route": "46X",
+        "dest": "MEI FOO",
+        "pairs": 142
+      },
+      {
+        "route": "47A",
+        "dest": "KWAI FONG (SOUTH)",
+        "pairs": 46
+      },
+      {
+        "route": "47X",
+        "dest": "KWAI SHING (EAST)",
+        "pairs": 47
+      },
+      {
+        "route": "48P",
+        "dest": "TSING LUNG TAU",
+        "pairs": 42
+      },
+      {
+        "route": "48X",
+        "dest": "TSUEN WAN (BAYVIEW GARDEN)",
+        "pairs": 49
+      },
+      {
+        "route": "49",
+        "dest": "CHING FU COURT",
+        "pairs": 90
+      },
+      {
+        "route": "49A",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 55
+      },
+      {
+        "route": "49M",
+        "dest": "Tsing Yi Station (Circular)",
+        "pairs": 61
+      },
+      {
+        "route": "49P",
+        "dest": "TSING YI FERRY",
+        "pairs": 46
+      },
+      {
+        "route": "49X",
+        "dest": "TSING YI FERRY",
+        "pairs": 51
+      },
+      {
+        "route": "51",
+        "dest": "TSUEN WAN (NINA TOWER)",
+        "pairs": 24
+      },
+      {
+        "route": "52X",
+        "dest": "MONG KOK (PARK AVENUE)",
+        "pairs": 65
+      },
+      {
+        "route": "53",
+        "dest": "TSUEN WAN (NINA TOWER)",
+        "pairs": 64
+      },
+      {
+        "route": "54",
+        "dest": "YUEN LONG (WEST)",
+        "pairs": 36
+      },
+      {
+        "route": "57M",
+        "dest": "LAI KING (NORTH)",
+        "pairs": 96
+      },
+      {
+        "route": "58M",
+        "dest": "KWAI FONG STATION",
+        "pairs": 101
+      },
+      {
+        "route": "58P",
+        "dest": "KWAI FONG STATION",
+        "pairs": 2
+      },
+      {
+        "route": "58X",
+        "dest": "MONG KOK EAST STATION",
+        "pairs": 25
+      },
+      {
+        "route": "59A",
+        "dest": "KWAI FONG (KWAI TSUI ESTATE)",
+        "pairs": 21
+      },
+      {
+        "route": "59M",
+        "dest": "TSUEN WAN STATION",
+        "pairs": 95
+      },
+      {
+        "route": "59X",
+        "dest": "MONG KOK EAST STATION",
+        "pairs": 66
+      },
+      {
+        "route": "60M",
+        "dest": "TSUEN WAN STATION",
+        "pairs": 96
+      },
+      {
+        "route": "60X",
+        "dest": "HIGH SPEED RAIL WEST KOWLOON STATION",
+        "pairs": 66
+      },
+      {
+        "route": "61M",
+        "dest": "LAI KING (NORTH)",
+        "pairs": 104
+      },
+      {
+        "route": "61P",
+        "dest": "TSUEN WAN STATION",
+        "pairs": 91
+      },
+      {
+        "route": "61X",
+        "dest": "KOWLOON CITY FERRY",
+        "pairs": 125
+      },
+      {
+        "route": "62P",
+        "dest": "LEI YUE MUN ESTATE",
+        "pairs": 98
+      },
+      {
+        "route": "62X",
+        "dest": "LEI YUE MUN ESTATE",
+        "pairs": 143
+      },
+      {
+        "route": "63",
+        "dest": "TUEN MUN ROAD BBI (TUEN MUN BOUND)",
+        "pairs": 77
+      },
+      {
+        "route": "63R",
+        "dest": "LAM TSUEN WISHING TREE",
+        "pairs": 0
+      },
+      {
+        "route": "63X",
+        "dest": "HIGH SPEED RAIL WEST KOWLOON STATION",
+        "pairs": 70
+      },
+      {
+        "route": "64K",
+        "dest": "YUEN LONG (WEST)",
+        "pairs": 67
+      },
+      {
+        "route": "64P",
+        "dest": "TAI PO MARKET STATION",
+        "pairs": 58
+      },
+      {
+        "route": "64S",
+        "dest": "KAM SHEUNG ROAD STATION",
+        "pairs": 34
+      },
+      {
+        "route": "64X",
+        "dest": "HONG KONG SCIENCE PARK",
+        "pairs": 60
+      },
+      {
+        "route": "65K",
+        "dest": "NG TUNG CHAI (PAK NGAU SHEK)",
+        "pairs": 20
+      },
+      {
+        "route": "65X",
+        "dest": "HONG KONG SCIENCE PARK",
+        "pairs": 58
+      },
+      {
+        "route": "66M",
+        "dest": "TSUEN WAN (NINA TOWER)",
+        "pairs": 95
+      },
+      {
+        "route": "66X",
+        "dest": "OLYMPIC STATION",
+        "pairs": 65
+      },
+      {
+        "route": "67A",
+        "dest": "KWAI FONG (KWAI TSUI ESTATE)",
+        "pairs": 97
+      },
+      {
+        "route": "67M",
+        "dest": "KWAI FONG STATION",
+        "pairs": 99
+      },
+      {
+        "route": "67X",
+        "dest": "MONG KOK EAST STATION",
+        "pairs": 68
+      },
+      {
+        "route": "68",
+        "dest": "PARK YOHO",
+        "pairs": 39
+      },
+      {
+        "route": "68A",
+        "dest": "TSING YI STATION",
+        "pairs": 101
+      },
+      {
+        "route": "68E",
+        "dest": "TSING YI STATION",
+        "pairs": 67
+      },
+      {
+        "route": "68F",
+        "dest": "PARK YOHO",
+        "pairs": 39
+      },
+      {
+        "route": "68M",
+        "dest": "TSUEN WAN STATION",
+        "pairs": 77
+      },
+      {
+        "route": "68R",
+        "dest": "TAI TONG",
+        "pairs": 4
+      },
+      {
+        "route": "68X",
+        "dest": "MONG KOK (PARK AVENUE)",
+        "pairs": 70
+      },
+      {
+        "route": "69",
+        "dest": "YUEN LONG (TAK YIP STREET)",
+        "pairs": 51
+      },
+      {
+        "route": "69C",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 130
+      },
+      {
+        "route": "69M",
+        "dest": "KWAI FONG STATION",
+        "pairs": 78
+      },
+      {
+        "route": "69P",
+        "dest": "KWAI FONG STATION",
+        "pairs": 75
+      },
+      {
+        "route": "69X",
+        "dest": "HIGH SPEED RAIL WEST KOWLOON STATION",
+        "pairs": 68
+      },
+      {
+        "route": "70K",
+        "dest": "CHING HO ",
+        "pairs": 62
+      },
+      {
+        "route": "70S",
+        "dest": "HUNG HOM STATION",
+        "pairs": 26
+      },
+      {
+        "route": "71A",
+        "dest": "TAI PO MARKET STATION",
+        "pairs": 41
+      },
+      {
+        "route": "71B",
+        "dest": "TAI PO CENTRAL ",
+        "pairs": 21
+      },
+      {
+        "route": "71K",
+        "dest": "TAI PO MARKET STATION",
+        "pairs": 58
+      },
+      {
+        "route": "71S",
+        "dest": "KWONG FUK ",
+        "pairs": 20
+      },
+      {
+        "route": "72",
+        "dest": "CHEUNG SHA WAN",
+        "pairs": 66
+      },
+      {
+        "route": "72A",
+        "dest": "TAI WAI STATION",
+        "pairs": 100
+      },
+      {
+        "route": "72C",
+        "dest": "TAI PO MARKET STATION",
+        "pairs": 20
+      },
+      {
+        "route": "72K",
+        "dest": "TAI WO ",
+        "pairs": 70
+      },
+      {
+        "route": "72X",
+        "dest": "MONG KOK (PARK AVENUE)",
+        "pairs": 95
+      },
+      {
+        "route": "73",
+        "dest": "TAI PO INDUSTRIAL ESTATE",
+        "pairs": 61
+      },
+      {
+        "route": "73A",
+        "dest": "YU CHUI COURT",
+        "pairs": 63
+      },
+      {
+        "route": "73B",
+        "dest": "SHEUNG SHUI ",
+        "pairs": 34
+      },
+      {
+        "route": "73D",
+        "dest": "TSUEN WAN (NINA TOWER)",
+        "pairs": 48
+      },
+      {
+        "route": "73F",
+        "dest": "TSUEN WAN (NINA TOWER)",
+        "pairs": 45
+      },
+      {
+        "route": "73K",
+        "dest": "SHEUNG SHUI",
+        "pairs": 61
+      },
+      {
+        "route": "73P",
+        "dest": "TSUEN WAN (NINA TOWER)",
+        "pairs": 46
+      },
+      {
+        "route": "73S",
+        "dest": "FANLING STATION",
+        "pairs": 4
+      },
+      {
+        "route": "73X",
+        "dest": "TSUEN WAN (NINA TOWER)",
+        "pairs": 78
+      },
+      {
+        "route": "74",
+        "dest": "YAU TONG",
+        "pairs": 170
+      },
+      {
+        "route": "74A",
+        "dest": "KAI YIP",
+        "pairs": 139
+      },
+      {
+        "route": "74B",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 149
+      },
+      {
+        "route": "74C",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 134
+      },
+      {
+        "route": "74D",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 168
+      },
+      {
+        "route": "74E",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 108
+      },
+      {
+        "route": "74F",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 89
+      },
+      {
+        "route": "74K",
+        "dest": "TAI PO MARKET STATION",
+        "pairs": 59
+      },
+      {
+        "route": "74P",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 89
+      },
+      {
+        "route": "74R",
+        "dest": "TAI PO (TAI WO)",
+        "pairs": 4
+      },
+      {
+        "route": "74S",
+        "dest": "PING TIN",
+        "pairs": 4
+      },
+      {
+        "route": "74X",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 165
+      },
+      {
+        "route": "75K",
+        "dest": "TAI PO MARKET STATION",
+        "pairs": 58
+      },
+      {
+        "route": "75P",
+        "dest": "TAI PO MARKET STATION",
+        "pairs": 40
+      },
+      {
+        "route": "75X",
+        "dest": "KOWLOON CITY FERRY",
+        "pairs": 152
+      },
+      {
+        "route": "76",
+        "dest": "YAU POK ROAD PUBLIC HOUSING (SOUTH)",
+        "pairs": 25
+      },
+      {
+        "route": "76K",
+        "dest": "LONG PING ESTATE",
+        "pairs": 31
+      },
+      {
+        "route": "76S",
+        "dest": "FANLING STATION",
+        "pairs": 4
+      },
+      {
+        "route": "77K",
+        "dest": "YUEN LONG (FUNG CHEUNG ROAD)",
+        "pairs": 71
+      },
+      {
+        "route": "78",
+        "dest": "SHEUNG SHUI (TAI PING)",
+        "pairs": 46
+      },
+      {
+        "route": "78A",
+        "dest": "FANLING STATION ",
+        "pairs": 59
+      },
+      {
+        "route": "78B",
+        "dest": "SHEUNG SHUI (CHOI YUEN)",
+        "pairs": 63
+      },
+      {
+        "route": "78K",
+        "dest": "SHEUNG SHUI (TAI PING)",
+        "pairs": 79
+      },
+      {
+        "route": "78S",
+        "dest": "SHEUNG SHUI",
+        "pairs": 76
+      },
+      {
+        "route": "79K",
+        "dest": "CHOI SHEK ESTATE",
+        "pairs": 89
+      },
+      {
+        "route": "80",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 160
+      },
+      {
+        "route": "80A",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 93
+      },
+      {
+        "route": "80K",
+        "dest": "SUN CHUI",
+        "pairs": 66
+      },
+      {
+        "route": "80P",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 130
+      },
+      {
+        "route": "80X",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 138
+      },
+      {
+        "route": "81",
+        "dest": "HIGH SPEED RAIL WEST KOWLOON STATION",
+        "pairs": 34
+      },
+      {
+        "route": "81C",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 135
+      },
+      {
+        "route": "81K",
+        "dest": "SUN TIN WAI",
+        "pairs": 59
+      },
+      {
+        "route": "81X",
+        "dest": "MONG KOK (BUTE STREET)",
+        "pairs": 80
+      },
+      {
+        "route": "82B",
+        "dest": "TAI WAI STATION",
+        "pairs": 58
+      },
+      {
+        "route": "82C",
+        "dest": "KWONG YUEN",
+        "pairs": 24
+      },
+      {
+        "route": "82D",
+        "dest": "TAI WAI STATION",
+        "pairs": 68
+      },
+      {
+        "route": "82K",
+        "dest": "YU CHUI COURT",
+        "pairs": 72
+      },
+      {
+        "route": "82X",
+        "dest": "WONG TAI SIN ",
+        "pairs": 96
+      },
+      {
+        "route": "83A",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 104
+      },
+      {
+        "route": "83K",
+        "dest": "SHA TIN CENTRAL ",
+        "pairs": 30
+      },
+      {
+        "route": "83P",
+        "dest": "WO CHE",
+        "pairs": 25
+      },
+      {
+        "route": "83S",
+        "dest": "SHATIN CENTRAL",
+        "pairs": 25
+      },
+      {
+        "route": "83X",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 141
+      },
+      {
+        "route": "84M",
+        "dest": "LOK FU",
+        "pairs": 107
+      },
+      {
+        "route": "85",
+        "dest": "KOWLOON CITY FERRY",
+        "pairs": 99
+      },
+      {
+        "route": "85A",
+        "dest": "KOWLOON CITY FERRY",
+        "pairs": 65
+      },
+      {
+        "route": "85B",
+        "dest": "KOWLOON CITY FERRY",
+        "pairs": 93
+      },
+      {
+        "route": "85K",
+        "dest": "SHATIN STATION",
+        "pairs": 46
+      },
+      {
+        "route": "85M",
+        "dest": "WONG TAI SIN ",
+        "pairs": 97
+      },
+      {
+        "route": "85P",
+        "dest": "HUNG HOM (HUNG LUEN ROAD)",
+        "pairs": 128
+      },
+      {
+        "route": "85S",
+        "dest": "HUNG HOM (HUNG LUEN ROAD)",
+        "pairs": 137
+      },
+      {
+        "route": "85X",
+        "dest": "HUNG HOM (HUNG LUEN ROAD)",
+        "pairs": 146
+      },
+      {
+        "route": "86",
+        "dest": "MEI FOO",
+        "pairs": 88
+      },
+      {
+        "route": "86A",
+        "dest": "CHEUNG SHA WAN (KOM TSUN STREET)",
+        "pairs": 89
+      },
+      {
+        "route": "86C",
+        "dest": "CHEUNG SHA WAN",
+        "pairs": 86
+      },
+      {
+        "route": "86K",
+        "dest": "SHATIN STATION",
+        "pairs": 51
+      },
+      {
+        "route": "86S",
+        "dest": "SHATIN STATION",
+        "pairs": 25
+      },
+      {
+        "route": "87B",
+        "dest": "ISLAND HARBOURVIEW",
+        "pairs": 93
+      },
+      {
+        "route": "87C",
+        "dest": "HUNG HOM STATION",
+        "pairs": 74
+      },
+      {
+        "route": "87D",
+        "dest": "HUNG HOM STATION",
+        "pairs": 111
+      },
+      {
+        "route": "87E",
+        "dest": "TSIM SHA TSUI",
+        "pairs": 93
+      },
+      {
+        "route": "87K",
+        "dest": "UNIVERSITY STATION",
+        "pairs": 49
+      },
+      {
+        "route": "87P",
+        "dest": "CHUNG ON",
+        "pairs": 24
+      },
+      {
+        "route": "87R",
+        "dest": "HONG KONG COLISEUM",
+        "pairs": 0
+      },
+      {
+        "route": "87S",
+        "dest": "UNIVERSITY STATION ",
+        "pairs": 24
+      },
+      {
+        "route": "88",
+        "dest": "SAU MAU PING (CENTRAL)",
+        "pairs": 148
+      },
+      {
+        "route": "88K",
+        "dest": "HIN KENG",
+        "pairs": 87
+      },
+      {
+        "route": "88X",
+        "dest": "PING TIN",
+        "pairs": 81
+      },
+      {
+        "route": "89",
+        "dest": "KWUN TONG (TSUI PING NORTH ESTATE)",
+        "pairs": 137
+      },
+      {
+        "route": "89B",
+        "dest": "NGAU TAU KOK",
+        "pairs": 159
+      },
+      {
+        "route": "89C",
+        "dest": "KWUN TONG (TSUI PING ROAD)",
+        "pairs": 151
+      },
+      {
+        "route": "89D",
+        "dest": "LAM TIN STATION",
+        "pairs": 156
+      },
+      {
+        "route": "89P",
+        "dest": "LAM TIN STATION",
+        "pairs": 123
+      },
+      {
+        "route": "89S",
+        "dest": "SHUI CHUEN O",
+        "pairs": 41
+      },
+      {
+        "route": "89X",
+        "dest": "KWUN TONG (TSUI PING ROAD)",
+        "pairs": 141
+      },
+      {
+        "route": "90",
+        "dest": "TSEUNG KWAN O (CHOI MING)",
+        "pairs": 139
+      },
+      {
+        "route": "91",
+        "dest": "DIAMOND HILL STATION",
+        "pairs": 142
+      },
+      {
+        "route": "91B",
+        "dest": "HANG HAU STATION",
+        "pairs": 0
+      },
+      {
+        "route": "91M",
+        "dest": "DIAMOND HILL STATION",
+        "pairs": 188
+      },
+      {
+        "route": "91P",
+        "dest": "PING SHEK / CHOI HUNG STATION",
+        "pairs": 169
+      },
+      {
+        "route": "91R",
+        "dest": "CLEAR WATER BAY",
+        "pairs": 4
+      },
+      {
+        "route": "91S",
+        "dest": "KWUN TONG",
+        "pairs": 148
+      },
+      {
+        "route": "92",
+        "dest": "DIAMOND HILL STATION",
+        "pairs": 138
+      },
+      {
+        "route": "92R",
+        "dest": "STAR FERRY",
+        "pairs": 99
+      },
+      {
+        "route": "93A",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 71
+      },
+      {
+        "route": "93K",
+        "dest": "MONG KOK EAST STATION",
+        "pairs": 111
+      },
+      {
+        "route": "93M",
+        "dest": "PO LAM",
+        "pairs": 84
+      },
+      {
+        "route": "93P",
+        "dest": "MONG KOK (PARK AVENUE)",
+        "pairs": 70
+      },
+      {
+        "route": "94",
+        "dest": "WONG SHEK PIER",
+        "pairs": 20
+      },
+      {
+        "route": "95",
+        "dest": "KOWLOON STATION",
+        "pairs": 115
+      },
+      {
+        "route": "95M",
+        "dest": "KWUN TONG (ELEGANCE ROAD)",
+        "pairs": 69
+      },
+      {
+        "route": "96",
+        "dest": "HONG SING GARDEN",
+        "pairs": 144
+      },
+      {
+        "route": "96R",
+        "dest": "DIAMOND HILL STATION",
+        "pairs": 9
+      },
+      {
+        "route": "97",
+        "dest": "HONG SING GARDEN",
+        "pairs": 138
+      },
+      {
+        "route": "98",
+        "dest": "NGAU TAU KOK STATION ",
+        "pairs": 151
+      },
+      {
+        "route": "98A",
+        "dest": "NGAU TAU KOK STATION ",
+        "pairs": 170
+      },
+      {
+        "route": "98C",
+        "dest": "MEI FOO",
+        "pairs": 125
+      },
+      {
+        "route": "98D",
+        "dest": "TSIM SHA TSUI EAST",
+        "pairs": 99
+      },
+      {
+        "route": "98E",
+        "dest": "MEI FOO",
+        "pairs": 115
+      },
+      {
+        "route": "98P",
+        "dest": "TSIM SHA TSUI EAST",
+        "pairs": 97
+      },
+      {
+        "route": "98R",
+        "dest": "HONG KONG COLISEUM",
+        "pairs": 4
+      },
+      {
+        "route": "98S",
+        "dest": "MEI FOO",
+        "pairs": 73
+      },
+      {
+        "route": "99",
+        "dest": "SAI KUNG",
+        "pairs": 22
+      },
+      {
+        "route": "99R",
+        "dest": "UNIVERSITY STATION",
+        "pairs": 6
+      },
+      {
+        "route": "101",
+        "dest": "KENNEDY TOWN",
+        "pairs": 29
+      },
+      {
+        "route": "101R",
+        "dest": "KWUN TONG (YUE MAN SQUARE)",
+        "pairs": 4
+      },
+      {
+        "route": "101X",
+        "dest": "KENNEDY TOWN",
+        "pairs": 4
+      },
+      {
+        "route": "102",
+        "dest": "SHAU KEI WAN",
+        "pairs": 28
+      },
+      {
+        "route": "102P",
+        "dest": "SHAU KEI WAN",
+        "pairs": 28
+      },
+      {
+        "route": "102R",
+        "dest": "MEI FOO",
+        "pairs": 4
+      },
+      {
+        "route": "103",
+        "dest": "POKFIELD RD",
+        "pairs": 29
+      },
+      {
+        "route": "104",
+        "dest": "KENNEDY TOWN",
+        "pairs": 29
+      },
+      {
+        "route": "106",
+        "dest": "SIU SAI WAN (ISLAND RESORT)",
+        "pairs": 27
+      },
+      {
+        "route": "106A",
+        "dest": "TAI KOO (KORNHILL PLAZA)",
+        "pairs": 27
+      },
+      {
+        "route": "106P",
+        "dest": "SIU SAI WAN (ISLAND RESORT)",
+        "pairs": 27
+      },
+      {
+        "route": "107",
+        "dest": "WAH KWAI",
+        "pairs": 28
+      },
+      {
+        "route": "107P",
+        "dest": "CYBERPORT",
+        "pairs": 28
+      },
+      {
+        "route": "108",
+        "dest": "BRAEMAR HILL",
+        "pairs": 83
+      },
+      {
+        "route": "109",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 29
+      },
+      {
+        "route": "110",
+        "dest": "SHAU KEI WAN",
+        "pairs": 30
+      },
+      {
+        "route": "111",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 28
+      },
+      {
+        "route": "111P",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 28
+      },
+      {
+        "route": "112",
+        "dest": "NORTH POINT (PAK FUK ROAD)",
+        "pairs": 29
+      },
+      {
+        "route": "113",
+        "dest": "KENNEDY TOWN (BELCHER BAY)",
+        "pairs": 29
+      },
+      {
+        "route": "115",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 28
+      },
+      {
+        "route": "115P",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 28
+      },
+      {
+        "route": "116",
+        "dest": "QUARRY BAY (YAU MAN STREET)",
+        "pairs": 29
+      },
+      {
+        "route": "117",
+        "dest": "HAPPY VALLEY (LOWER)",
+        "pairs": 29
+      },
+      {
+        "route": "118",
+        "dest": "SIU SAI WAN (ISLAND RESORT)",
+        "pairs": 28
+      },
+      {
+        "route": "118P",
+        "dest": "SIU SAI WAN (ISLAND RESORT)",
+        "pairs": 28
+      },
+      {
+        "route": "118R",
+        "dest": "SIU SAI WAN SPORTS GROUND",
+        "pairs": 0
+      },
+      {
+        "route": "170",
+        "dest": "WAH FU (CENTRAL)",
+        "pairs": 29
+      },
+      {
+        "route": "171",
+        "dest": "SOUTH HORIZONS",
+        "pairs": 29
+      },
+      {
+        "route": "171A",
+        "dest": "LEI TUNG ESTATE",
+        "pairs": 4
+      },
+      {
+        "route": "171P",
+        "dest": "SOUTH HORIZONS",
+        "pairs": 4
+      },
+      {
+        "route": "182",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 29
+      },
+      {
+        "route": "182X",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 0
+      },
+      {
+        "route": "203C",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 69
+      },
+      {
+        "route": "203E",
+        "dest": "KOWLOON STATION",
+        "pairs": 71
+      },
+      {
+        "route": "203S",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 42
+      },
+      {
+        "route": "208",
+        "dest": "TSIM SHA TSUI EAST",
+        "pairs": 59
+      },
+      {
+        "route": "211",
+        "dest": "WONG TAI SIN STATION ",
+        "pairs": 89
+      },
+      {
+        "route": "211A",
+        "dest": "LOK FU",
+        "pairs": 20
+      },
+      {
+        "route": "213A",
+        "dest": "PING SHEK / CHOI HUNG STATION",
+        "pairs": 28
+      },
+      {
+        "route": "213B",
+        "dest": "TING FU STREET, KWUN TONG",
+        "pairs": 87
+      },
+      {
+        "route": "213D",
+        "dest": "MONG KOK ",
+        "pairs": 88
+      },
+      {
+        "route": "213E",
+        "dest": "KOWLOON STATION",
+        "pairs": 176
+      },
+      {
+        "route": "213M",
+        "dest": "LAM TIN STATION ",
+        "pairs": 95
+      },
+      {
+        "route": "213S",
+        "dest": "LAM TIN STATION ",
+        "pairs": 96
+      },
+      {
+        "route": "213X",
+        "dest": "TSIM SHA TSUI ",
+        "pairs": 100
+      },
+      {
+        "route": "214",
+        "dest": "CHEUNG SHA WAN (KOM TSUN STREET)",
+        "pairs": 93
+      },
+      {
+        "route": "214P",
+        "dest": "LAI CHI KOK STATION",
+        "pairs": 75
+      },
+      {
+        "route": "215P",
+        "dest": "KOWLOON STATION",
+        "pairs": 49
+      },
+      {
+        "route": "215R",
+        "dest": "HONG KONG COLISEUM",
+        "pairs": 0
+      },
+      {
+        "route": "215X",
+        "dest": "KOWLOON STATION",
+        "pairs": 53
+      },
+      {
+        "route": "216M",
+        "dest": "YAU TONG STATION ",
+        "pairs": 34
+      },
+      {
+        "route": "219X",
+        "dest": "TSIM SHA TSUI ",
+        "pairs": 81
+      },
+      {
+        "route": "224R",
+        "dest": "HONG KONG COLISEUM",
+        "pairs": 0
+      },
+      {
+        "route": "224X",
+        "dest": "TSIM SHA TSUI EAST ",
+        "pairs": 73
+      },
+      {
+        "route": "230R",
+        "dest": "KOWLOON STATION",
+        "pairs": 71
+      },
+      {
+        "route": "230X",
+        "dest": "WHAMPOA GARDEN",
+        "pairs": 93
+      },
+      {
+        "route": "234A",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 52
+      },
+      {
+        "route": "234B",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 52
+      },
+      {
+        "route": "234C",
+        "dest": "KWUN TONG (TSUI PING NORTH ESTATE)",
+        "pairs": 22
+      },
+      {
+        "route": "234D",
+        "dest": "KWUN TONG (TSUI PING NORTH ESTATE)",
+        "pairs": 24
+      },
+      {
+        "route": "234P",
+        "dest": "STAR FERRY",
+        "pairs": 58
+      },
+      {
+        "route": "234X",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 97
+      },
+      {
+        "route": "235",
+        "dest": "TSUEN WAN ",
+        "pairs": 39
+      },
+      {
+        "route": "235M",
+        "dest": "KWAI FONG STATION",
+        "pairs": 47
+      },
+      {
+        "route": "238M",
+        "dest": "TSUEN WAN STATION",
+        "pairs": 66
+      },
+      {
+        "route": "238P",
+        "dest": "CHINA FERRY TERMINAL",
+        "pairs": 24
+      },
+      {
+        "route": "238X",
+        "dest": "CHINA FERRY TERMINAL",
+        "pairs": 67
+      },
+      {
+        "route": "240X",
+        "dest": "KWAI HING STATION",
+        "pairs": 60
+      },
+      {
+        "route": "241X",
+        "dest": "KOWLOON CITY FERRY",
+        "pairs": 22
+      },
+      {
+        "route": "242X",
+        "dest": "TSIM SHA TSUI",
+        "pairs": 97
+      },
+      {
+        "route": "243M",
+        "dest": "TSUEN WAN (DISCOVERY PARK)",
+        "pairs": 55
+      },
+      {
+        "route": "243P",
+        "dest": "ALLWAY GARDENS",
+        "pairs": 55
+      },
+      {
+        "route": "248M",
+        "dest": "TSING YI STATION",
+        "pairs": 29
+      },
+      {
+        "route": "249M",
+        "dest": "TSING YI STATION",
+        "pairs": 26
+      },
+      {
+        "route": "249X",
+        "dest": "TSING YI STATION",
+        "pairs": 85
+      },
+      {
+        "route": "251A",
+        "dest": "KAM SHEUNG ROAD STATION",
+        "pairs": 90
+      },
+      {
+        "route": "251B",
+        "dest": "PAT HEUNG ROAD",
+        "pairs": 83
+      },
+      {
+        "route": "251C",
+        "dest": "YUEN LONG ",
+        "pairs": 49
+      },
+      {
+        "route": "251M",
+        "dest": "TSUEN WAN STATION",
+        "pairs": 68
+      },
+      {
+        "route": "252",
+        "dest": "TUEN MUN ROAD BBI",
+        "pairs": 63
+      },
+      {
+        "route": "252B",
+        "dest": "TSIM SHA TSUI",
+        "pairs": 56
+      },
+      {
+        "route": "252S",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 63
+      },
+      {
+        "route": "252X",
+        "dest": "LAM TIN STATION",
+        "pairs": 26
+      },
+      {
+        "route": "258A",
+        "dest": "LAM TIN STATION",
+        "pairs": 108
+      },
+      {
+        "route": "258D",
+        "dest": "LAM TIN STATION",
+        "pairs": 140
+      },
+      {
+        "route": "258P",
+        "dest": "LAM TIN STATION",
+        "pairs": 104
+      },
+      {
+        "route": "258S",
+        "dest": "LAM TIN STATION",
+        "pairs": 104
+      },
+      {
+        "route": "258X",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 63
+      },
+      {
+        "route": "259B",
+        "dest": "TSIM SHA TSUI",
+        "pairs": 56
+      },
+      {
+        "route": "259C",
+        "dest": "TSIM SHA TSUI",
+        "pairs": 56
+      },
+      {
+        "route": "259D",
+        "dest": "LEI YUE MUN ESTATE",
+        "pairs": 142
+      },
+      {
+        "route": "259R",
+        "dest": "TUEN MUN PIER HEAD",
+        "pairs": 49
+      },
+      {
+        "route": "259S",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 62
+      },
+      {
+        "route": "259X",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 62
+      },
+      {
+        "route": "260B",
+        "dest": "TSIM SHA TSUI",
+        "pairs": 56
+      },
+      {
+        "route": "260C",
+        "dest": "KWAI FONG STATION",
+        "pairs": 55
+      },
+      {
+        "route": "260R",
+        "dest": "TUEN MUN (SIU HONG COURT)",
+        "pairs": 49
+      },
+      {
+        "route": "260X",
+        "dest": "HUNG HOM STATION",
+        "pairs": 69
+      },
+      {
+        "route": "261",
+        "dest": "FANLING (CHEUNG WAH)",
+        "pairs": 41
+      },
+      {
+        "route": "261B",
+        "dest": "KOWLOON STATION",
+        "pairs": 60
+      },
+      {
+        "route": "261P",
+        "dest": "SHEUNG SHUI (TIN PING)",
+        "pairs": 38
+      },
+      {
+        "route": "261S",
+        "dest": "SHEUNG SHUI (TIN PING)",
+        "pairs": 32
+      },
+      {
+        "route": "261X",
+        "dest": "FANLING (CHEUNG WAH)",
+        "pairs": 41
+      },
+      {
+        "route": "263",
+        "dest": "SHATIN STATION",
+        "pairs": 69
+      },
+      {
+        "route": "263A",
+        "dest": "HONG KONG SCIENCE PARK",
+        "pairs": 59
+      },
+      {
+        "route": "263B",
+        "dest": "FO TAN (SHAN MEI ST)",
+        "pairs": 61
+      },
+      {
+        "route": "263C",
+        "dest": "EDUCATION UNIVERSITY OF HONG KONG",
+        "pairs": 93
+      },
+      {
+        "route": "264X",
+        "dest": "TIN YIU",
+        "pairs": 84
+      },
+      {
+        "route": "265B",
+        "dest": "MONG KOK (PARK AVENUE)",
+        "pairs": 64
+      },
+      {
+        "route": "265M",
+        "dest": "KWAI CHUNG (LAI YIU ESTATE)",
+        "pairs": 81
+      },
+      {
+        "route": "265P",
+        "dest": "TSUEN WAN STATION",
+        "pairs": 73
+      },
+      {
+        "route": "265S",
+        "dest": "EDUCATION UNIVERSITY OF HONG KONG",
+        "pairs": 55
+      },
+      {
+        "route": "267X",
+        "dest": "LAM TIN STATION",
+        "pairs": 26
+      },
+      {
+        "route": "268",
+        "dest": "PAT HEUNG ROAD",
+        "pairs": 62
+      },
+      {
+        "route": "268A",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 132
+      },
+      {
+        "route": "268B",
+        "dest": "HUNG HOM (HUNG LUEN ROAD)",
+        "pairs": 106
+      },
+      {
+        "route": "268C",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 134
+      },
+      {
+        "route": "268M",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 73
+      },
+      {
+        "route": "268P",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 88
+      },
+      {
+        "route": "268X",
+        "dest": "HIGH SPEED RAIL WEST KOWLOON STATION",
+        "pairs": 72
+      },
+      {
+        "route": "269B",
+        "dest": "HUNG HOM (HUNG LUEN ROAD)",
+        "pairs": 69
+      },
+      {
+        "route": "269C",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 131
+      },
+      {
+        "route": "269D",
+        "dest": "LEK YUEN",
+        "pairs": 70
+      },
+      {
+        "route": "269M",
+        "dest": "CHO YIU",
+        "pairs": 82
+      },
+      {
+        "route": "269P",
+        "dest": "KWAI CHUNG (KWAI FONG ESTATE)",
+        "pairs": 74
+      },
+      {
+        "route": "269R",
+        "dest": "TIN HENG ESTATE",
+        "pairs": 44
+      },
+      {
+        "route": "269S",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 62
+      },
+      {
+        "route": "269X",
+        "dest": "HIGH SPEED RAIL WEST KOWLOON STATION",
+        "pairs": 61
+      },
+      {
+        "route": "270",
+        "dest": "TSUI LAI GARDEN",
+        "pairs": 29
+      },
+      {
+        "route": "270A",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 121
+      },
+      {
+        "route": "270B",
+        "dest": "OLYMPIC STATION",
+        "pairs": 61
+      },
+      {
+        "route": "270C",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 105
+      },
+      {
+        "route": "270D",
+        "dest": "SHAM SHUI PO",
+        "pairs": 62
+      },
+      {
+        "route": "270E",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 0
+      },
+      {
+        "route": "270P",
+        "dest": "KOWLOON STATION",
+        "pairs": 93
+      },
+      {
+        "route": "270R",
+        "dest": "HONG KONG COLISEUM",
+        "pairs": 0
+      },
+      {
+        "route": "270S",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 1
+      },
+      {
+        "route": "271",
+        "dest": "HIGH SPEED RAIL WEST KOWLOON STATION",
+        "pairs": 128
+      },
+      {
+        "route": "271A",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 114
+      },
+      {
+        "route": "271B",
+        "dest": "HIGH SPEED RAIL WEST KOWLOON STATION",
+        "pairs": 109
+      },
+      {
+        "route": "271P",
+        "dest": "TSIM SHA TSUI (CANTON ROAD)",
+        "pairs": 126
+      },
+      {
+        "route": "271R",
+        "dest": "HONG KONG COLISEUM",
+        "pairs": 0
+      },
+      {
+        "route": "271S",
+        "dest": "HUNG HOM STATION",
+        "pairs": 0
+      },
+      {
+        "route": "271X",
+        "dest": "HIGH SPEED RAIL WEST KOWLOON STATION",
+        "pairs": 0
+      },
+      {
+        "route": "272A",
+        "dest": "PAK SHEK KOK ",
+        "pairs": 20
+      },
+      {
+        "route": "272E",
+        "dest": "MONG KOK (PARK AVENUE)",
+        "pairs": 76
+      },
+      {
+        "route": "272K",
+        "dest": "HONG KONG SCIENCE PARK ",
+        "pairs": 20
+      },
+      {
+        "route": "272P",
+        "dest": "KWAI HING STATION",
+        "pairs": 91
+      },
+      {
+        "route": "272S",
+        "dest": "DIAMOND HILL STATION",
+        "pairs": 81
+      },
+      {
+        "route": "272X",
+        "dest": "MONG KOK EAST STATION",
+        "pairs": 73
+      },
+      {
+        "route": "273",
+        "dest": "FANLING STATION ",
+        "pairs": 84
+      },
+      {
+        "route": "273A",
+        "dest": "WAH MING ",
+        "pairs": 68
+      },
+      {
+        "route": "273B",
+        "dest": "SHEUNG SHUI STATION ",
+        "pairs": 53
+      },
+      {
+        "route": "273C",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 54
+      },
+      {
+        "route": "273D",
+        "dest": "WAH MING ",
+        "pairs": 68
+      },
+      {
+        "route": "273P",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 54
+      },
+      {
+        "route": "273S",
+        "dest": "FANLING STATION",
+        "pairs": 21
+      },
+      {
+        "route": "274",
+        "dest": "SHEUNG SHUI (TAI PING)",
+        "pairs": 1
+      },
+      {
+        "route": "274P",
+        "dest": "TAI PO INDUSTRIAL ESTATE",
+        "pairs": 75
+      },
+      {
+        "route": "274X",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 2
+      },
+      {
+        "route": "275R",
+        "dest": "TAI PO MARKET STATION",
+        "pairs": 4
+      },
+      {
+        "route": "275X",
+        "dest": "HUNG HOM (HUNG LUEN ROAD)",
+        "pairs": 154
+      },
+      {
+        "route": "276",
+        "dest": "TIN TSZ",
+        "pairs": 40
+      },
+      {
+        "route": "276A",
+        "dest": "TIN HENG ESTATE",
+        "pairs": 21
+      },
+      {
+        "route": "276B",
+        "dest": "TIN FU",
+        "pairs": 23
+      },
+      {
+        "route": "276C",
+        "dest": "TIN SHUI WAI STATION",
+        "pairs": 17
+      },
+      {
+        "route": "276P",
+        "dest": "TIN SHUI WAI STATION",
+        "pairs": 40
+      },
+      {
+        "route": "277A",
+        "dest": "LAM TIN STATION",
+        "pairs": 131
+      },
+      {
+        "route": "277B",
+        "dest": "LAM TIN STATION",
+        "pairs": 163
+      },
+      {
+        "route": "277E",
+        "dest": "LAM TIN STATION",
+        "pairs": 161
+      },
+      {
+        "route": "277P",
+        "dest": "LAM TIN STATION",
+        "pairs": 157
+      },
+      {
+        "route": "277X",
+        "dest": "LAM TIN STATION",
+        "pairs": 164
+      },
+      {
+        "route": "278A",
+        "dest": "TSUEN WAN (NINA TOWER)",
+        "pairs": 69
+      },
+      {
+        "route": "278K",
+        "dest": "FANLING STATION ",
+        "pairs": 40
+      },
+      {
+        "route": "278P",
+        "dest": "TSUEN WAN (NINA TOWER)",
+        "pairs": 53
+      },
+      {
+        "route": "278X",
+        "dest": "TSUEN WAN (NINA TOWER)",
+        "pairs": 70
+      },
+      {
+        "route": "279A",
+        "dest": "TSING YI STATION",
+        "pairs": 60
+      },
+      {
+        "route": "279B",
+        "dest": "KWAI HING STATION",
+        "pairs": 56
+      },
+      {
+        "route": "279S",
+        "dest": "TSING YI (CHEUNG CHING ESTATE)",
+        "pairs": 4
+      },
+      {
+        "route": "279X",
+        "dest": "TSING YI STATION",
+        "pairs": 70
+      },
+      {
+        "route": "280X",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 102
+      },
+      {
+        "route": "281",
+        "dest": "TAI WAI STATION",
+        "pairs": 67
+      },
+      {
+        "route": "281A",
+        "dest": "KOWLOON STATION",
+        "pairs": 96
+      },
+      {
+        "route": "281B",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 125
+      },
+      {
+        "route": "281E",
+        "dest": "HAIPHONG ROAD TSIM SHA TSUI",
+        "pairs": 0
+      },
+      {
+        "route": "281X",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 98
+      },
+      {
+        "route": "282",
+        "dest": "SHATIN CENTRAL",
+        "pairs": 44
+      },
+      {
+        "route": "283",
+        "dest": "SHATIN CENTRAL",
+        "pairs": 36
+      },
+      {
+        "route": "284",
+        "dest": "SHATIN CENTRAL",
+        "pairs": 51
+      },
+      {
+        "route": "285",
+        "dest": "SHA TIN CENTRAL ",
+        "pairs": 44
+      },
+      {
+        "route": "285A",
+        "dest": "FO TAN CHUN YEUNG ESTATE",
+        "pairs": 24
+      },
+      {
+        "route": "286A",
+        "dest": "CHEUNG SHA WAN ",
+        "pairs": 107
+      },
+      {
+        "route": "286C",
+        "dest": "CHEUNG SHA WAN (HOI TAT ESTATE)",
+        "pairs": 70
+      },
+      {
+        "route": "286D",
+        "dest": "SHAM SHUI PO",
+        "pairs": 76
+      },
+      {
+        "route": "286P",
+        "dest": "CHEUNG SHA WAN",
+        "pairs": 82
+      },
+      {
+        "route": "286X",
+        "dest": "SHAM SHUI PO ",
+        "pairs": 82
+      },
+      {
+        "route": "287",
+        "dest": "UNIVERSITY STATION",
+        "pairs": 41
+      },
+      {
+        "route": "287D",
+        "dest": "HUNG HOM STATION",
+        "pairs": 1
+      },
+      {
+        "route": "287P",
+        "dest": "YAU MA TEI",
+        "pairs": 81
+      },
+      {
+        "route": "287X",
+        "dest": "JORDAN ",
+        "pairs": 83
+      },
+      {
+        "route": "288",
+        "dest": "SHA TIN CENTRAL ",
+        "pairs": 54
+      },
+      {
+        "route": "288A",
+        "dest": "SHA TIN CENTRAL",
+        "pairs": 49
+      },
+      {
+        "route": "288B",
+        "dest": "FO TAN CHUN YEUNG ESTATE",
+        "pairs": 46
+      },
+      {
+        "route": "288C",
+        "dest": "HIN KENG",
+        "pairs": 24
+      },
+      {
+        "route": "288D",
+        "dest": "RAVANA GARDEN",
+        "pairs": 0
+      },
+      {
+        "route": "289K",
+        "dest": "UNIVERSITY STATION",
+        "pairs": 24
+      },
+      {
+        "route": "289R",
+        "dest": "SHATIN CENTRAL",
+        "pairs": 6
+      },
+      {
+        "route": "290",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 159
+      },
+      {
+        "route": "290A",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 161
+      },
+      {
+        "route": "290E",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 173
+      },
+      {
+        "route": "290X",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 155
+      },
+      {
+        "route": "291P",
+        "dest": "MONG KOK",
+        "pairs": 172
+      },
+      {
+        "route": "292P",
+        "dest": "KWUN TONG",
+        "pairs": 27
+      },
+      {
+        "route": "293S",
+        "dest": "MEI FOO",
+        "pairs": 27
+      },
+      {
+        "route": "296A",
+        "dest": "NGAU TAU KOK STATION ",
+        "pairs": 146
+      },
+      {
+        "route": "296C",
+        "dest": "CHEUNG SHA WAN (HOI YING ESTATE)",
+        "pairs": 57
+      },
+      {
+        "route": "296D",
+        "dest": "KOWLOON STATION",
+        "pairs": 98
+      },
+      {
+        "route": "296M",
+        "dest": "HANG HAU STATION",
+        "pairs": 84
+      },
+      {
+        "route": "296P",
+        "dest": "LAI CHI KOK STATION",
+        "pairs": 53
+      },
+      {
+        "route": "297",
+        "dest": "HUNG HOM (HUNG LUEN ROAD)",
+        "pairs": 64
+      },
+      {
+        "route": "297P",
+        "dest": "HUNG HOM (HUNG LUEN ROAD)",
+        "pairs": 65
+      },
+      {
+        "route": "298",
+        "dest": "PAK SHING KOK ",
+        "pairs": 78
+      },
+      {
+        "route": "298E",
+        "dest": "TSEUNG KWAN O INDUSTRIAL ESTATE ",
+        "pairs": 78
+      },
+      {
+        "route": "298F",
+        "dest": "TSEUNG KWAN O INDUSTRIAL ESTATE ",
+        "pairs": 78
+      },
+      {
+        "route": "298X",
+        "dest": "MEI FOO",
+        "pairs": 95
+      },
+      {
+        "route": "299X",
+        "dest": "SAI KUNG",
+        "pairs": 53
+      },
+      {
+        "route": "302",
+        "dest": "SHEUNG WAN",
+        "pairs": 41
+      },
+      {
+        "route": "302A",
+        "dest": "NORTH POINT (HEALTHY VILLAGE)",
+        "pairs": 41
+      },
+      {
+        "route": "307",
+        "dest": "CENTRAL (CENTRAL FERRY PIERS)",
+        "pairs": 42
+      },
+      {
+        "route": "307A",
+        "dest": "SHEUNG WAN",
+        "pairs": 41
+      },
+      {
+        "route": "307P",
+        "dest": "CAUSEWAY BAY (TIN HAU)",
+        "pairs": 42
+      },
+      {
+        "route": "331",
+        "dest": "TSUEN WAN STATION",
+        "pairs": 39
+      },
+      {
+        "route": "331S",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 39
+      },
+      {
+        "route": "373",
+        "dest": "CENTRAL (HONG KONG STATION)",
+        "pairs": 98
+      },
+      {
+        "route": "600",
+        "dest": "CENTRAL (RUMSEY STREET)",
+        "pairs": 91
+      },
+      {
+        "route": "601",
+        "dest": "ADMIRALTY STATION (EAST)",
+        "pairs": 41
+      },
+      {
+        "route": "601P",
+        "dest": "SHEUNG WAN",
+        "pairs": 41
+      },
+      {
+        "route": "603",
+        "dest": "CENTRAL (CENTRAL FERRY PIERS)",
+        "pairs": 68
+      },
+      {
+        "route": "603A",
+        "dest": "CENTRAL MARKET",
+        "pairs": 66
+      },
+      {
+        "route": "603P",
+        "dest": "CENTRAL (CENTRAL FERRY PIERS)",
+        "pairs": 1
+      },
+      {
+        "route": "603S",
+        "dest": "CENTRAL (GILMAN STREET)",
+        "pairs": 68
+      },
+      {
+        "route": "606",
+        "dest": "SIU SAI WAN (ISLAND RESORT)",
+        "pairs": 40
+      },
+      {
+        "route": "606A",
+        "dest": "SHAU KEI WAN (YIU TUNG ESTATE)",
+        "pairs": 43
+      },
+      {
+        "route": "606X",
+        "dest": "SIU SAI WAN (ISLAND RESORT)",
+        "pairs": 40
+      },
+      {
+        "route": "613",
+        "dest": "SHAU KEI WAN",
+        "pairs": 96
+      },
+      {
+        "route": "613A",
+        "dest": "HENG FA CHUEN",
+        "pairs": 89
+      },
+      {
+        "route": "619",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 41
+      },
+      {
+        "route": "619P",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 41
+      },
+      {
+        "route": "619X",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 13
+      },
+      {
+        "route": "621",
+        "dest": "CENTRAL (HONG KONG STATION)",
+        "pairs": 4
+      },
+      {
+        "route": "641",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 42
+      },
+      {
+        "route": "671",
+        "dest": "AP LEI CHAU LEE LOK ST",
+        "pairs": 42
+      },
+      {
+        "route": "671X",
+        "dest": "AP LEI CHAU LEE LOK ST",
+        "pairs": 0
+      },
+      {
+        "route": "673",
+        "dest": "CENTRAL (HONG KONG STATION)",
+        "pairs": 108
+      },
+      {
+        "route": "673A",
+        "dest": "CENTRAL (RUMSEY STREET)",
+        "pairs": 102
+      },
+      {
+        "route": "673P",
+        "dest": "CENTRAL (RUMSEY STREET)",
+        "pairs": 100
+      },
+      {
+        "route": "678",
+        "dest": "CAUSEWAY BAY (EASTERN HOSPITAL ROAD)",
+        "pairs": 44
+      },
+      {
+        "route": "680",
+        "dest": "ADMIRALTY STATION (EAST)",
+        "pairs": 41
+      },
+      {
+        "route": "680B",
+        "dest": "ADMIRALTY STATION (EAST)",
+        "pairs": 41
+      },
+      {
+        "route": "680P",
+        "dest": "ADMIRALTY STATION (EAST)",
+        "pairs": 41
+      },
+      {
+        "route": "680X",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 32
+      },
+      {
+        "route": "681",
+        "dest": "CENTRAL (HONG KONG STATION)",
+        "pairs": 42
+      },
+      {
+        "route": "681P",
+        "dest": "SHEUNG WAN",
+        "pairs": 42
+      },
+      {
+        "route": "690",
+        "dest": "CENTRAL (EXCHANGE SQUARE)",
+        "pairs": 42
+      },
+      {
+        "route": "690P",
+        "dest": "CENTRAL (EXCHANGE SQUARE)",
+        "pairs": 36
+      },
+      {
+        "route": "690S",
+        "dest": "CENTRAL (EXCHANGE SQUARE)",
+        "pairs": 4
+      },
+      {
+        "route": "848",
+        "dest": "KWAI FONG STATION",
+        "pairs": 4
+      },
+      {
+        "route": "868",
+        "dest": "TUEN MUN CENTRAL",
+        "pairs": 4
+      },
+      {
+        "route": "869",
+        "dest": "TIN SHUI WAI TOWN CENTRE",
+        "pairs": 4
+      },
+      {
+        "route": "872",
+        "dest": "TAI PO CENTRAL",
+        "pairs": 4
+      },
+      {
+        "route": "887",
+        "dest": "MONG KOK (PARK AVENUE)",
+        "pairs": 4
+      },
+      {
+        "route": "888",
+        "dest": "SHATIN STATION",
+        "pairs": 4
+      },
+      {
+        "route": "889",
+        "dest": "SHATIN RACE COURSE",
+        "pairs": 4
+      },
+      {
+        "route": "891",
+        "dest": "KOWLOON CITY FERRY",
+        "pairs": 4
+      },
+      {
+        "route": "893",
+        "dest": "HONG SING GARDEN",
+        "pairs": 4
+      },
+      {
+        "route": "900",
+        "dest": "WAN CHAI (HKCEC)",
+        "pairs": 78
+      },
+      {
+        "route": "900X",
+        "dest": "WAN CHAI (HKCEC)",
+        "pairs": 55
+      },
+      {
+        "route": "904",
+        "dest": "KENNEDY TOWN (BELCHER BAY)",
+        "pairs": 70
+      },
+      {
+        "route": "905",
+        "dest": "EXHIBITION CENTRE STATION",
+        "pairs": 69
+      },
+      {
+        "route": "905A",
+        "dest": "EXHIBITION CENTRE STATION",
+        "pairs": 0
+      },
+      {
+        "route": "905P",
+        "dest": "WAN CHAI (HARBOUR ROAD)",
+        "pairs": 47
+      },
+      {
+        "route": "907C",
+        "dest": "WAN CHAI (CONVENTION CENTRE)",
+        "pairs": 48
+      },
+      {
+        "route": "914",
+        "dest": "CAUSEWAY BAY (TIN HAU)",
+        "pairs": 68
+      },
+      {
+        "route": "914P",
+        "dest": "CAUSEWAY BAY (TIN HAU)",
+        "pairs": 68
+      },
+      {
+        "route": "914X",
+        "dest": "CAUSEWAY BAY (TIN HAU)",
+        "pairs": 68
+      },
+      {
+        "route": "934",
+        "dest": "WAN CHAI (FLEMING ROAD)",
+        "pairs": 93
+      },
+      {
+        "route": "934A",
+        "dest": "WAN CHAI (FLEMING ROAD)",
+        "pairs": 91
+      },
+      {
+        "route": "935",
+        "dest": "WAN CHAI (FLEMING ROAD)",
+        "pairs": 93
+      },
+      {
+        "route": "936",
+        "dest": "CAUSEWAY BAY (COTTON PATH)",
+        "pairs": 95
+      },
+      {
+        "route": "936A",
+        "dest": "CAUSEWAY BAY (COTTON PATH)",
+        "pairs": 92
+      },
+      {
+        "route": "948",
+        "dest": "CAUSEWAY BAY (TIN HAU)",
+        "pairs": 66
+      },
+      {
+        "route": "948A",
+        "dest": "CAUSEWAY BAY (TIN HAU)",
+        "pairs": 66
+      },
+      {
+        "route": "948B",
+        "dest": "CAUSEWAY BAY (TIN HAU)",
+        "pairs": 66
+      },
+      {
+        "route": "948E",
+        "dest": "TAIKOO(KORNHILL PLAZA)",
+        "pairs": 4
+      },
+      {
+        "route": "948P",
+        "dest": "CAUSEWAY BAY (TIN HAU)",
+        "pairs": 66
+      },
+      {
+        "route": "948X",
+        "dest": "CAUSEWAY BAY (TIN HAU)",
+        "pairs": 66
+      },
+      {
+        "route": "960",
+        "dest": "EXHIBITION CENTRE STATION",
+        "pairs": 130
+      },
+      {
+        "route": "960A",
+        "dest": "CENTRAL",
+        "pairs": 0
+      },
+      {
+        "route": "960B",
+        "dest": "QUARRY BAY (KING'S ROAD)",
+        "pairs": 61
+      },
+      {
+        "route": "960C",
+        "dest": "CAUSEWAY BAY (VICTORIA PARK)",
+        "pairs": 104
+      },
+      {
+        "route": "960P",
+        "dest": "CAUSEWAY BAY (VICTORIA PARK)",
+        "pairs": 129
+      },
+      {
+        "route": "960S",
+        "dest": "CAUSEWAY BAY (VICTORIA PARK)",
+        "pairs": 129
+      },
+      {
+        "route": "960X",
+        "dest": "QUARRY BAY (KING'S ROAD)",
+        "pairs": 124
+      },
+      {
+        "route": "961",
+        "dest": "Wan Chai (HKCECE)",
+        "pairs": 129
+      },
+      {
+        "route": "961P",
+        "dest": "CAUSEWAY BAY (VICTORIA PARK)",
+        "pairs": 125
+      },
+      {
+        "route": "961S",
+        "dest": "CAUSEWAY BAY (VICTORIA PARK)",
+        "pairs": 103
+      },
+      {
+        "route": "968",
+        "dest": "CAUSEWAY BAY (TIN HAU)",
+        "pairs": 130
+      },
+      {
+        "route": "968A",
+        "dest": "CAUSEWAY BAY (TIN HAU)",
+        "pairs": 102
+      },
+      {
+        "route": "968X",
+        "dest": "QUARRY BAY (KING'S ROAD)",
+        "pairs": 116
+      },
+      {
+        "route": "978",
+        "dest": "EXHIBITION CENTRE STATION",
+        "pairs": 124
+      },
+      {
+        "route": "978A",
+        "dest": "EXHIBITION CENTRE STATION",
+        "pairs": 122
+      },
+      {
+        "route": "978B",
+        "dest": "EXHIBITION CENTRE STATION",
+        "pairs": 122
+      },
+      {
+        "route": "980A",
+        "dest": "WAN CHAI (FLEMING ROAD)",
+        "pairs": 48
+      },
+      {
+        "route": "980X",
+        "dest": "WAN CHAI (FLEMING ROAD)",
+        "pairs": 48
+      },
+      {
+        "route": "981P",
+        "dest": "WAN CHAI (FLEMING ROAD)",
+        "pairs": 48
+      },
+      {
+        "route": "982X",
+        "dest": "WAN CHAI(FLEMING ROAD)",
+        "pairs": 70
+      },
+      {
+        "route": "985",
+        "dest": "WAN CHAI",
+        "pairs": 70
+      },
+      {
+        "route": "985A",
+        "dest": "WAN CHAI",
+        "pairs": 8
+      },
+      {
+        "route": "985B",
+        "dest": "WAN CHAI",
+        "pairs": 8
+      },
+      {
+        "route": "A30",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 24
+      },
+      {
+        "route": "A31",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 25
+      },
+      {
+        "route": "A32",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 25
+      },
+      {
+        "route": "A33",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 19
+      },
+      {
+        "route": "A33X",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 18
+      },
+      {
+        "route": "A34",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 19
+      },
+      {
+        "route": "A36",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 18
+      },
+      {
+        "route": "A37",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 18
+      },
+      {
+        "route": "A38",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 25
+      },
+      {
+        "route": "A41",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 25
+      },
+      {
+        "route": "A41P",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 25
+      },
+      {
+        "route": "A42",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 23
+      },
+      {
+        "route": "A43",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 28
+      },
+      {
+        "route": "A43P",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 28
+      },
+      {
+        "route": "A46",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 23
+      },
+      {
+        "route": "A47X",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 25
+      },
+      {
+        "route": "B1",
+        "dest": "LOK MA CHAU STATION • FUTIAN PORT",
+        "pairs": 64
+      },
+      {
+        "route": "B9",
+        "dest": "HEUNG YUEN WAI • LIANTANG PORT",
+        "pairs": 17
+      },
+      {
+        "route": "B9A",
+        "dest": "HEUNG YUEN WAI • LIANTANG PORT",
+        "pairs": 17
+      },
+      {
+        "route": "E31",
+        "dest": "TUNG CHUNG (YAT TUNG)",
+        "pairs": 25
+      },
+      {
+        "route": "E32",
+        "dest": "SKYCITY",
+        "pairs": 33
+      },
+      {
+        "route": "E32A",
+        "dest": "Tung Chung Pier",
+        "pairs": 25
+      },
+      {
+        "route": "E33",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 29
+      },
+      {
+        "route": "E33P",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 29
+      },
+      {
+        "route": "E36",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 31
+      },
+      {
+        "route": "E36A",
+        "dest": "Tung Chung (Yat Tung)",
+        "pairs": 19
+      },
+      {
+        "route": "E36C",
+        "dest": "AIRCRAFT MAINTENANCE AREA",
+        "pairs": 15
+      },
+      {
+        "route": "E36P",
+        "dest": "SKYCITY",
+        "pairs": 33
+      },
+      {
+        "route": "E36S",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 35
+      },
+      {
+        "route": "E37",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 31
+      },
+      {
+        "route": "E37C",
+        "dest": "AIRCRAFT MAINTENANCE AREA",
+        "pairs": 17
+      },
+      {
+        "route": "E41",
+        "dest": "SKYCITY",
+        "pairs": 36
+      },
+      {
+        "route": "E42",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 34
+      },
+      {
+        "route": "E42C",
+        "dest": "AIRCRAFT MAINTENANCE AREA",
+        "pairs": 25
+      },
+      {
+        "route": "E42P",
+        "dest": "TUNG CHUNG (YAT TUNG)",
+        "pairs": 21
+      },
+      {
+        "route": "E43",
+        "dest": "Tung Chung Pier",
+        "pairs": 17
+      },
+      {
+        "route": "HK1",
+        "dest": "[KMB Tour HK] TSIM SHA TSUI, MONG KOK and WONG TAI",
+        "pairs": 2
+      },
+      {
+        "route": "HK2",
+        "dest": "[KMB Tour HK] TSIM SHA TSUI and TSING MA BRIDGE",
+        "pairs": 0
+      },
+      {
+        "route": "N3D",
+        "dest": "KWUN TONG (YUE MAN SQUARE)",
+        "pairs": 7
+      },
+      {
+        "route": "N30",
+        "dest": "AIRPORT (CHEONG TAT ROAD)",
+        "pairs": 0
+      },
+      {
+        "route": "N31",
+        "dest": "AIRPORT (GROUND TRANSPORTATION CENTRE)",
+        "pairs": 0
+      },
+      {
+        "route": "N36",
+        "dest": "TSUEN WAN STATION",
+        "pairs": 21
+      },
+      {
+        "route": "N39",
+        "dest": "TSUEN WAN STATION",
+        "pairs": 21
+      },
+      {
+        "route": "N41X",
+        "dest": "HUNG HOM STATION",
+        "pairs": 0
+      },
+      {
+        "route": "N42",
+        "dest": "TUNG CHUNG STATION",
+        "pairs": 1
+      },
+      {
+        "route": "N42A",
+        "dest": "FANLING (LUEN WO HUI)",
+        "pairs": 0
+      },
+      {
+        "route": "N43",
+        "dest": "TSING YI (CHEUNG WANG ESTATE)",
+        "pairs": 0
+      },
+      {
+        "route": "N64",
+        "dest": "TUNG CHUNG (YAT TUNG)",
+        "pairs": 0
+      },
+      {
+        "route": "N73",
+        "dest": "SHATIN CENTRAL",
+        "pairs": 27
+      },
+      {
+        "route": "N78",
+        "dest": "SHEUNG SHUI",
+        "pairs": 22
+      },
+      {
+        "route": "N116",
+        "dest": "NORTH POINT",
+        "pairs": 0
+      },
+      {
+        "route": "N118",
+        "dest": "SIU SAI WAN (ISLAND RESORT)",
+        "pairs": 0
+      },
+      {
+        "route": "N121",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 1
+      },
+      {
+        "route": "N122",
+        "dest": "SHAU KEI WAN",
+        "pairs": 1
+      },
+      {
+        "route": "N170",
+        "dest": "WAH FU (CENTRAL)",
+        "pairs": 0
+      },
+      {
+        "route": "N171",
+        "dest": "AP LEI CHAU ESTATE",
+        "pairs": 0
+      },
+      {
+        "route": "N182",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 0
+      },
+      {
+        "route": "N213",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 0
+      },
+      {
+        "route": "N214",
+        "dest": "MEI FOO",
+        "pairs": 20
+      },
+      {
+        "route": "N216",
+        "dest": "HUNG HOM STATION",
+        "pairs": 28
+      },
+      {
+        "route": "N237",
+        "dest": "KWAI SHING ",
+        "pairs": 20
+      },
+      {
+        "route": "N241",
+        "dest": "HUNG HOM STATION",
+        "pairs": 27
+      },
+      {
+        "route": "N243",
+        "dest": "TSING YI STATION",
+        "pairs": 0
+      },
+      {
+        "route": "N252",
+        "dest": "MEI FOO",
+        "pairs": 1
+      },
+      {
+        "route": "N260",
+        "dest": "MEI FOO",
+        "pairs": 65
+      },
+      {
+        "route": "N269",
+        "dest": "MEI FOO",
+        "pairs": 63
+      },
+      {
+        "route": "N271",
+        "dest": "HUNG HOM STATION",
+        "pairs": 23
+      },
+      {
+        "route": "N276",
+        "dest": "TIN TSZ",
+        "pairs": 0
+      },
+      {
+        "route": "N281",
+        "dest": "HUNG HOM STATION",
+        "pairs": 20
+      },
+      {
+        "route": "N283",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 0
+      },
+      {
+        "route": "N287",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 20
+      },
+      {
+        "route": "N290",
+        "dest": "TSUEN WAN WEST STATION",
+        "pairs": 19
+      },
+      {
+        "route": "N293",
+        "dest": "MONG KOK (PARK AVENUE)",
+        "pairs": 27
+      },
+      {
+        "route": "N307",
+        "dest": "SHEUNG WAN",
+        "pairs": 0
+      },
+      {
+        "route": "N368",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 59
+      },
+      {
+        "route": "N373",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 24
+      },
+      {
+        "route": "N619",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 0
+      },
+      {
+        "route": "N680",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 0
+      },
+      {
+        "route": "N691",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 0
+      },
+      {
+        "route": "N960",
+        "dest": "EXHIBITION CENTRE STATION",
+        "pairs": 63
+      },
+      {
+        "route": "NA31",
+        "dest": "HZMB Hong Kong Port",
+        "pairs": 0
+      },
+      {
+        "route": "NA32",
+        "dest": "HZMB Hong Kong Port",
+        "pairs": 0
+      },
+      {
+        "route": "NA33",
+        "dest": "Cathay City",
+        "pairs": 0
+      },
+      {
+        "route": "NA36",
+        "dest": "Cathay City",
+        "pairs": 0
+      },
+      {
+        "route": "NA37",
+        "dest": "Cathay City",
+        "pairs": 0
+      },
+      {
+        "route": "NA40",
+        "dest": "HZMB Hong Kong Port",
+        "pairs": 0
+      },
+      {
+        "route": "NA41",
+        "dest": "HZMB Hong Kong Port",
+        "pairs": 0
+      },
+      {
+        "route": "NA43",
+        "dest": "HZMB Hong Kong Port",
+        "pairs": 0
+      },
+      {
+        "route": "NA47",
+        "dest": "HZMB Hong Kong Port",
+        "pairs": 0
+      },
+      {
+        "route": "P960",
+        "dest": "EXHIBITION CENTRE STATION",
+        "pairs": 67
+      },
+      {
+        "route": "P968",
+        "dest": "CAUSEWAY BAY (TIN HAU)",
+        "pairs": 63
+      },
+      {
+        "route": "R8",
+        "dest": "Lantau Link BBI (Circular)",
+        "pairs": 37
+      },
+      {
+        "route": "R33",
+        "dest": "DISNEYLAND",
+        "pairs": 17
+      },
+      {
+        "route": "R42",
+        "dest": "DISNEYLAND",
+        "pairs": 5
+      },
+      {
+        "route": "R108",
+        "dest": "CAUSEWAY BAY (VICTORIA PARK)",
+        "pairs": 4
+      },
+      {
+        "route": "R215",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 4
+      },
+      {
+        "route": "R230",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 4
+      },
+      {
+        "route": "R241",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 4
+      },
+      {
+        "route": "R298",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 4
+      },
+      {
+        "route": "R603",
+        "dest": "CAUSEWAY BAY (VICTORIA PARK)",
+        "pairs": 4
+      },
+      {
+        "route": "R934",
+        "dest": "CAUSEWAY BAY (VICTORIA PARK)",
+        "pairs": 4
+      },
+      {
+        "route": "R936",
+        "dest": "CAUSEWAY BAY (VICTORIA PARK)",
+        "pairs": 4
+      },
+      {
+        "route": "R948",
+        "dest": "CAUSEWAY BAY (VICTORIA PARK)",
+        "pairs": 4
+      },
+      {
+        "route": "S1",
+        "dest": "Airport (Circular)",
+        "pairs": 4
+      },
+      {
+        "route": "S64",
+        "dest": "Airport (Circular)",
+        "pairs": 29
+      },
+      {
+        "route": "S64C",
+        "dest": "Catering Road East(Circular)",
+        "pairs": 13
+      },
+      {
+        "route": "S64P",
+        "dest": "AIRPORT (CARGO AND CATERING AREA)",
+        "pairs": 13
+      },
+      {
+        "route": "S64X",
+        "dest": "Airport(Circular)",
+        "pairs": 29
+      },
+      {
+        "route": "SP1",
+        "dest": "HANG HAU (NORTH) (TSEUNG KWAN O HOSPITAL)",
+        "pairs": 72
+      },
+      {
+        "route": "SP3",
+        "dest": "CHING FU COURT",
+        "pairs": 22
+      },
+      {
+        "route": "SP5A",
+        "dest": "TUEN MUN PIER HEAD",
+        "pairs": 47
+      },
+      {
+        "route": "SP6",
+        "dest": "TIN HENG ESTATE",
+        "pairs": 43
+      },
+      {
+        "route": "SP7",
+        "dest": "SHEUNG SHUI",
+        "pairs": 34
+      },
+      {
+        "route": "SP10",
+        "dest": "CENTRAL (MACAO FERRY)",
+        "pairs": 0
+      },
+      {
+        "route": "T74",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 87
+      },
+      {
+        "route": "T80",
+        "dest": "KOWLOON BAY",
+        "pairs": 141
+      },
+      {
+        "route": "T270",
+        "dest": "TSIM SHA TSUI EAST (MODY ROAD)",
+        "pairs": 71
+      },
+      {
+        "route": "T277",
+        "dest": "LAM TIN STATION",
+        "pairs": 58
+      },
+      {
+        "route": "W2",
+        "dest": "HIGH SPEED RAIL WEST KOWLOON STATION",
+        "pairs": 45
+      },
+      {
+        "route": "W3",
+        "dest": "HIGH SPEED RAIL WEST KOWLOON STATION",
+        "pairs": 63
+      },
+      {
+        "route": "W4",
+        "dest": "HIGH SPEED RAIL (WEST KOWLOON STATION)",
+        "pairs": 162
+      },
+      {
+        "route": "X1",
+        "dest": "AsiaWorld-Expo",
+        "pairs": 4
+      },
+      {
+        "route": "X6C",
+        "dest": "MEI FOO",
+        "pairs": 47
+      },
+      {
+        "route": "X33",
+        "dest": "AsiaWorld-Expo",
+        "pairs": 0
+      },
+      {
+        "route": "X36",
+        "dest": "AsiaWorld-Expo",
+        "pairs": 1
+      },
+      {
+        "route": "X40",
+        "dest": "AsiaWorld-Expo",
+        "pairs": 0
+      },
+      {
+        "route": "X42C",
+        "dest": "YAU TONG",
+        "pairs": 96
+      },
+      {
+        "route": "X42P",
+        "dest": "LAM TIN STATION",
+        "pairs": 22
+      },
+      {
+        "route": "X43",
+        "dest": "AsiaWorld-Expo",
+        "pairs": 0
+      },
+      {
+        "route": "X47",
+        "dest": "AsiaWorld-Expo",
+        "pairs": 0
+      },
+      {
+        "route": "X89D",
+        "dest": "KWUN TONG FERRY",
+        "pairs": 73
+      },
+      {
+        "route": "X90",
+        "dest": "HUNG NGOK HOUSE",
+        "pairs": 4
+      }
+    ],
+    "kmb_route_count": 776,
+    "kmb_synced_at": "2026-08-01"
   }
 }

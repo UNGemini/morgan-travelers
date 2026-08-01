@@ -18,3 +18,5 @@ artifacts/contributions/
 
 # Citybus BBI dumps (schemes:sync)
 artifacts/citybus-*.json
+
+artifacts/kmb-bbi-*.json
