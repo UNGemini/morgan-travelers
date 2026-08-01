@@ -7525,27 +7525,13 @@ async function showEtaRouteDetailsPanel() {
     });
     for (let i = 0; i < named.length; i++) {
       const s = named[i];
-      const isFirst = i === 0;
       const isLast = i === named.length - 1;
-      const isBoard =
-        boardStop &&
-        ((s.stopId && s.stopId === boardStop.stopId) || s === boardStop);
-      let roleClass = " rt-stop-passby";
-      let roleLabel = "PASS BY";
-      if (isBoard || isFirst) {
-        roleClass = " rt-stop-board";
-        roleLabel = "BOARD";
-      } else if (isLast) {
-        roleClass = " rt-stop-alight";
-        roleLabel = "ALIGHT";
-      }
       rows.push({
         kind: "stop",
         line: isLast ? "none" : "solid",
         color,
         last: isLast,
-        extraClass: isBoard ? "rt-stop-has-eta" : "",
-        bodyHtml: `<span class="rt-stop-name${roleClass}">${escapeHtml(s.name)}</span><span class="rt-stop-role">${escapeHtml(roleLabel)}</span>`,
+        bodyHtml: `<span class="rt-stop-name">${escapeHtml(s.name)}</span>`,
       });
     }
     stopsHtml = `<div class="plan-timeline plan-route-line plan-route-line-full eta-route-line" aria-label="Stops on route">${rows
