@@ -1734,7 +1734,9 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 /*
- * Search list Opposite — full pill shape (capsule).
+ * Search list Opposite — true pill + nested match:
+ *   button radius = height / 2  (pill)
+ *   card outer    = button radius + pad
  * no backdrop-filter so the list mask fade still applies.
  */
 .eta-route-card .eta-card-dir-switch,
@@ -1742,10 +1744,13 @@ body.mobile-ui [data-acrylic]::before {
   align-self: stretch;
   width: 100%;
   margin: 0; /* spacing via card gap */
-  min-height: 46px;
-  padding: 10px 14px;
+  height: var(--eta-btn-h, 44px);
+  min-height: var(--eta-btn-h, 44px);
+  box-sizing: border-box;
+  padding: 0 16px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
+  /* Pill ends: r = h/2 (same as --eta-btn-r on the card) */
+  border-radius: var(--eta-btn-r, 999px);
   background: rgba(255, 255, 255, 0.08);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
   -webkit-backdrop-filter: none;
@@ -1866,11 +1871,14 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 /* Wheels-like ETA route card — rounded selection
- * Nested corners: outer = inner + pad  →  --eta-card-inner-r = radius − pad */
+ * Pill button: r_btn = h/2
+ * Nested:     r_card = r_btn + pad
+ */
 .eta-route-list-sidebar li.eta-route-card {
-  --eta-card-r: 20px;
   --eta-card-pad: 12px;
-  --eta-card-inner-r: max(0px, calc(var(--eta-card-r) - var(--eta-card-pad)));
+  --eta-btn-h: 44px;
+  --eta-btn-r: calc(var(--eta-btn-h) / 2); /* pill */
+  --eta-card-r: calc(var(--eta-btn-r) + var(--eta-card-pad)); /* outer = inner + pad */
   display: flex;
   flex-direction: column;
   gap: 8px;
