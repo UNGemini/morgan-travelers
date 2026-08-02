@@ -5,6 +5,7 @@
 
 import { LRT_STOPS } from "./lrtStops.js";
 import { MTR_STATIONS } from "./mtrStations.js";
+import { MTR_LINE_ORDER } from "./mtrLineOrder.js";
 import { isLightRailOption, detectMtrLineCode } from "./mtrColors.js";
 import {
   formatServiceClock,
@@ -47,7 +48,8 @@ export function stripOperatorStopId(raw) {
   const s = String(raw || "").trim();
   if (!s) return "";
   // KMB-HEX, CTB-001859, NLB-6, GMB-…, MTR-PLATFORM-TUC-1
-  const m = /^(?:KMB|CTB|NLB|GMB|LWB|NWFB|MTRBUS|LRTFEEDER)-(.+)$/i.exec(s);
+  const m =
+    /^(?:KMB|CTB|NLB|GMB|LWB|NWFB|MTRBUS|LRTFEEDER|LRT|MTR)-(.+)$/i.exec(s);
   if (m) return m[1];
   return s;
 }
@@ -875,46 +877,6 @@ async function fetchNlbEta(opt, board) {
   packed.nlbRouteId = usedRouteId;
   return packed;
 }
-
-/**
- * MTR Next Train API line station order (index increases with API "UP").
- * Used to pick UP vs DOWN toward the passenger’s alight station.
- * Sources: live getSchedule.php UP/DOWN polarity + official line maps.
- */
-const MTR_LINE_ORDER = {
-  // UP → Tung Chung, DOWN → Hong Kong
-  TCL: ["HOK", "KOW", "OLY", "NAC", "LAK", "TSY", "SUN", "TUC"],
-  // UP → AsiaWorld-Expo, DOWN → Hong Kong (AEL)
-  AEL: ["HOK", "KOW", "TSY", "AIR", "AWE"],
-  // UP → Chai Wan, DOWN → Kennedy Town
-  ISL: [
-    "KET", "HKU", "SYP", "SHW", "CEN", "ADM", "WAC", "CAB", "TIH", "FOH",
-    "NOP", "QUB", "TAK", "SWH", "SKW", "HFC", "CHW",
-  ],
-  // UP → Tsuen Wan, DOWN → Central
-  TWL: [
-    "CEN", "ADM", "TST", "JOR", "YMT", "MOK", "PRE", "SSP", "CSW", "LCK",
-    "MEF", "LAK", "KWF", "KWH", "TWH", "TSW",
-  ],
-  // UP → LO Wu / Lok Ma Chau side of EAL is complex; basic spine
-  EAL: [
-    "ADM", "EXC", "HUH", "MKK", "KOT", "TAW", "SHT", "FOT", "RAC", "UNI",
-    "TAP", "TWO", "FAN", "SHS", "LOW", "LMC",
-  ],
-  // UP → Wu Kai Sha / toward Ma On Shan branch simplified as TML eastbound
-  TML: [
-    "WKS", "MOS", "HEO", "TSH", "SHM", "CIO", "STW", "CKT", "TAW", "HIK",
-    "DIH", "KAT", "SUW", "TKW", "HOM", "HUH", "ETS", "AUS", "NAC", "MEF",
-    "TWW", "KSR", "YUL", "LOP", "TIS", "SIH", "TUM",
-  ],
-  TKL: ["NOP", "QUB", "YAT", "TIK", "TKO", "HAH", "POA", "LHP"],
-  SIL: ["ADM", "OCP", "WCH", "LET", "SOH"],
-  KTL: [
-    "WHA", "HOM", "YMT", "MOK", "PRE", "SKM", "KOT", "LOF", "WTS", "DIH",
-    "CHH", "KOB", "NTK", "KWT", "LAT", "YAT", "TIK",
-  ],
-  DRL: ["SUN", "DIS"],
-};
 
 /**
  * MTR station code from platform stop id / name.

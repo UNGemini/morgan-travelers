@@ -289,7 +289,19 @@ function isBusTransitOption(opt) {
 
 function isMtrBusRoute(code) {
   const c = String(code || "").trim().toUpperCase();
-  return /^(K\d+[A-Z]?|506)$/.test(c);
+  // K12…K76S, 506 (and lettered variants like K51A, K75P)
+  return /^(K\d+[A-Z]?|506)$/i.test(c);
+}
+
+/**
+ * @param {object} [opt]
+ */
+function isMtrBusAgency(opt) {
+  if (!opt) return false;
+  const kind = String(opt.kind || opt.etaKind || "").toLowerCase();
+  if (kind === "mtr_bus" || kind === "mtrbus" || kind === "lrtfeeder") return true;
+  const agency = `${opt.agency?.id || ""} ${opt.agency?.name || ""}`.toLowerCase();
+  return /lrt\s*feeder|mtr\s*bus|mtrb|mtr_bus|港鐵巴士|輕鐵接駁/.test(agency);
 }
 
 /**
@@ -2140,13 +2152,21 @@ export function estimateBusBoardToTerminusByStop(
   boardStop,
   fareType = activeFareType,
 ) {
-  if (!baseOpt || !boardStop || !pack?.busSection) return null;
+  if (!baseOpt || !boardStop) return null;
   if (isFerryOption(baseOpt) || isMtrTransitOption(baseOpt)) return null;
   const route = String(baseOpt.route_short_name || baseOpt.route_name || "")
     .trim()
     .toUpperCase()
     .replace(/\s+/g, "");
   if (!route) return null;
+
+  // Flat MTR Bus fares (opendata mtr_bus_fares.csv) — no section triangle
+  if (isMtrBusRoute(route) || isMtrBusAgency(baseOpt)) {
+    const m = mtrBusFare(route, fareType);
+    if (m != null) return m;
+  }
+
+  if (!pack?.busSection) return null;
   const keys = tdBusSectionKeys(
     { ...baseOpt, bound: baseOpt.bound || "" },
     route,
@@ -2229,6 +2249,19 @@ export function estimateBusBoardFare(
 
   if (!baseOpt || !pack) return null;
   if (isFerryOption(baseOpt) || isMtrTransitOption(baseOpt)) return null;
+
+  const routeShort = String(
+    baseOpt.route_short_name || baseOpt.route_name || "",
+  )
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+  // Flat MTR Bus table (mtr_bus_fares.csv)
+  if (isMtrBusRoute(routeShort) || isMtrBusAgency(baseOpt)) {
+    const m = mtrBusFare(routeShort, fareType);
+    if (m != null) return m;
+  }
+
   const mode = String(baseOpt.mode || "").toLowerCase();
   if (mode && mode !== "bus" && mode !== "trolleybus") {
     if (

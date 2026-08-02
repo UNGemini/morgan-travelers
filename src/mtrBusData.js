@@ -126,47 +126,86 @@ export async function ensureMtrBusData() {
         fetchCsvRows(ROUTES_URL),
         fetchCsvRows(STOPS_URL),
       ]);
-      const rHead = (routeRows[0] || []).map((h) => h.trim().toUpperCase());
-      const sHead = (stopRows[0] || []).map((h) => h.trim().toUpperCase());
-      const ri = (name) => rHead.indexOf(name);
-      const si = (name) => sHead.indexOf(name);
+      const rHead = (routeRows[0] || []).map((h) =>
+        String(h).trim().toUpperCase().replace(/\s+/g, "_"),
+      );
+      const sHead = (stopRows[0] || []).map((h) =>
+        String(h).trim().toUpperCase().replace(/\s+/g, "_"),
+      );
+      /** @param {string[]} head @param {string[]} names */
+      const col = (head, names) => {
+        for (const n of names) {
+          const i = head.indexOf(n);
+          if (i >= 0) return i;
+        }
+        for (const n of names) {
+          const i = head.findIndex((h) => h.includes(n));
+          if (i >= 0) return i;
+        }
+        return -1;
+      };
+      const ri = (...names) => col(rHead, names);
+      const si = (...names) => col(sHead, names);
+
+      const iRid = ri("ROUTE_ID");
+      const iNameZh = ri("ROUTE_NAME_CHI", "ROUTE_NAME_ZH");
+      const iNameEn = ri("ROUTE_NAME_ENG", "ROUTE_NAME_EN");
+      const iCirc = ri("IS_CIRCULAR");
+      const iUp = ri("LINE_UP");
+      const iDown = ri("LINE_DOWN");
+      const iRef = ri("REFERENCE_ID");
 
       /** @type {MtrBusRoute[]} */
       const routes = [];
       for (const row of routeRows.slice(1)) {
-        const id = String(row[ri("ROUTE_ID")] || "").trim().toUpperCase();
-        if (!id) continue;
+        const id = String(row[iRid >= 0 ? iRid : 0] || "")
+          .trim()
+          .toUpperCase();
+        if (!id || id === "ROUTE_ID") continue;
         routes.push({
           id,
-          nameZh: String(row[ri("ROUTE_NAME_CHI")] || "").trim(),
-          nameEn: String(row[ri("ROUTE_NAME_ENG")] || "").trim(),
-          circular: String(row[ri("IS_CIRCULAR")] || "0") === "1",
-          lineUp: String(row[ri("LINE_UP")] || "").trim(),
-          lineDown: String(row[ri("LINE_DOWN")] || "").trim(),
-          refId: String(row[ri("REFERENCE_ID")] || id).trim(),
+          nameZh: String(row[iNameZh] || "").trim(),
+          nameEn: String(row[iNameEn] || "").trim(),
+          circular: String(row[iCirc] || "0") === "1",
+          lineUp: String(row[iUp] || "").trim(),
+          lineDown: String(row[iDown] || "").trim(),
+          refId: String(row[iRef] || id).trim(),
         });
       }
+
+      const iSRoute = si("ROUTE_ID");
+      const iSDir = si("DIRECTION");
+      const iSSeq = si("STATION_SEQNO", "SEQ", "STATION_SEQ");
+      const iSId = si("STATION_ID", "STOP_ID", "BUS_STOP_ID");
+      const iSLat = si("STATION_LATITUDE", "LATITUDE", "LAT");
+      const iSLon = si("STATION_LONGITUDE", "LONGITUDE", "LON", "LNG");
+      const iSZh = si("STATION_NAME_CHI", "STATION_NAME_ZH", "NAME_CHI");
+      const iSEn = si("STATION_NAME_ENG", "STATION_NAME_EN", "NAME_ENG");
+      const iSRef = si("REFERENCE_ID");
 
       /** @type {MtrBusStop[]} */
       const stops = [];
       for (const row of stopRows.slice(1)) {
-        const routeId = String(row[si("ROUTE_ID")] || "").trim().toUpperCase();
-        const stopId = String(row[si("STATION_ID")] || "").trim();
-        if (!routeId || !stopId) continue;
-        const lat = Number(row[si("STATION_LATITUDE")]);
-        const lon = Number(row[si("STATION_LONGITUDE")]);
+        const routeId = String(row[iSRoute >= 0 ? iSRoute : 0] || "")
+          .trim()
+          .toUpperCase();
+        const stopId = String(row[iSId >= 0 ? iSId : 3] || "").trim();
+        if (!routeId || !stopId || routeId === "ROUTE_ID") continue;
+        const lat = Number(row[iSLat >= 0 ? iSLat : 4]);
+        const lon = Number(row[iSLon >= 0 ? iSLon : 5]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
         stops.push({
           routeId,
-          direction: String(row[si("DIRECTION")] || "O")
+          direction: String(row[iSDir >= 0 ? iSDir : 1] || "O")
             .trim()
             .toUpperCase(),
-          seq: Number(row[si("STATION_SEQNO")]) || 0,
+          seq: Number(row[iSSeq >= 0 ? iSSeq : 2]) || 0,
           stopId,
           lat,
           lon,
-          nameZh: String(row[si("STATION_NAME_CHI")] || "").trim(),
-          nameEn: String(row[si("STATION_NAME_ENG")] || "").trim(),
-          refId: String(row[si("REFERENCE_ID")] || routeId).trim(),
+          nameZh: String(row[iSZh >= 0 ? iSZh : 6] || "").trim(),
+          nameEn: String(row[iSEn >= 0 ? iSEn : 7] || "").trim(),
+          refId: String(row[iSRef >= 0 ? iSRef : 8] || routeId).trim(),
         });
       }
 

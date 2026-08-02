@@ -148,6 +148,17 @@ import {
   nearbyMtrBusStops,
 } from "./mtrBusData.js";
 import {
+  MTR_LINE_ORDER,
+  mtrLineDirections,
+  mtrLineCodesInOrder,
+  mtrStationLabel,
+} from "./mtrLineOrder.js";
+import {
+  ensureLrtRouteData,
+  lrtRouteDirections,
+  lrtStopSequence,
+} from "./lrtRouteData.js";
+import {
   mergeStopSequence,
   extractPublicStopCode,
   stopLabelWithPublicId,
@@ -5877,10 +5888,12 @@ async function ensureKmbStops() {
 function etaRouteDirectionsFromOd(r) {
   if (!r) return [{ dest: "—" }];
   if (r.kind === "mtr") {
-    return [{ dest: r.label, bound: "line" }];
+    return mtrLineDirections(r.id);
   }
   if (r.kind === "lrt") {
-    return [{ dest: r.label, bound: "lrt" }];
+    const dirs = lrtRouteDirections(r.id);
+    if (dirs.length) return dirs;
+    return [{ dest: r.label, bound: "O" }];
   }
 
   const co = String(r.co || "").toLowerCase();
@@ -5986,6 +5999,17 @@ async function filterDirsWithRealStops(route, dirs) {
         if (seq.length >= 2) out.push(d);
         continue;
       }
+      if (route.kind === "mtr") {
+        const codes = mtrLineCodesInOrder(rid, bound);
+        if (codes.length >= 2) out.push(d);
+        continue;
+      }
+      if (route.kind === "lrt") {
+        await ensureLrtRouteData();
+        const seq = lrtStopSequence(rid, bound);
+        if (seq.length >= 2) out.push(d);
+        continue;
+      }
       if (
         co === "kmb" ||
         co === "lwb" ||
@@ -6000,7 +6024,7 @@ async function filterDirsWithRealStops(route, dirs) {
         if (d.dest || d.destZh) out.push(d);
         continue;
       }
-      // MTR/LRT/unknown: keep as-is (usually single “line”)
+      // Unknown: keep as-is
       out.push(d);
     } catch {
       /* drop this bound on error */
@@ -7717,6 +7741,7 @@ async function refreshEtaRouteSuggest() {
       ensureKmbRouteBounds(),
       ensureKmbStops(),
       ensureMtrBusData().catch(() => {}),
+      ensureLrtRouteData().catch(() => {}),
     ]);
     if (gen !== etaSuggestGen || getUiMode() !== "eta") return;
     if (String(els.inputEtaRoute?.value || "").trim().length >= 1) return;
@@ -7932,12 +7957,19 @@ async function loadEtaRouteStops(route) {
   if (route.kind === "mtr_bus" || coPre === "lrtfeeder" || coPre === "mtrbus") {
     await ensureMtrBusData();
   }
+  if (route.kind === "lrt") {
+    await ensureLrtRouteData();
+  }
+  if (route.kind === "mtr") {
+    await ensureMtrStationLinesMap();
+  }
 
   // Prefer nearby “going away” bound over raw card index (OD order is O/I)
   const dirs = etaRouteDirections(route);
   const di = resolveCardDirIndex(route, dirs);
   const dir = dirs[di] || dirs[0];
-  const bound = String(dir?.bound || "O").toUpperCase();
+  let bound = String(dir?.bound || "O").toUpperCase();
+  if (bound === "LINE" || bound === "LRT") bound = "O";
   const co = String(route.co || "").toLowerCase();
 
   // Load official stop sequence from operator APIs first (names + ETA ids).
@@ -7945,11 +7977,17 @@ async function loadEtaRouteStops(route) {
 
   // ── MTR Bus (official open data, not KMB) ──
   if (route.kind === "mtr_bus" || co === "lrtfeeder" || co === "mtrbus") {
-    const seq = mtrBusStopSequence(route.id, bound);
+    let seq = mtrBusStopSequence(route.id, bound);
+    if (seq.length < 2) {
+      seq = mtrBusStopSequence(route.id, bound === "I" ? "O" : "I");
+    }
+    if (seq.length < 2) {
+      // Last resort: any stops for this route id (any direction)
+      seq = mtrBusStopSequence(route.id, "O");
+      if (seq.length < 2) seq = mtrBusStopSequence(route.id, "I");
+    }
     if (seq.length >= 2) return seq;
-    // try opposite bound
-    const alt = mtrBusStopSequence(route.id, bound === "I" ? "O" : "I");
-    if (alt.length >= 2) return alt;
+    console.warn("[eta] MTR Bus stops empty for", route.id, "bound", bound);
   }
 
   // ── KMB / LWB only (never fall through for CTB/NLB/MTR Bus) ──
@@ -8115,78 +8153,73 @@ async function loadEtaRouteStops(route) {
     }
   }
 
-  // MTR line stations (include station code for live Next Train API)
+  // MTR line stations — official line order (not nearest-neighbour)
   if (route.kind === "mtr") {
-    await ensureMtrStationLinesMap();
     const line = String(route.id).toUpperCase();
-    const onLine = [];
+    const codes = mtrLineCodesInOrder(line, bound);
+    /** @type {Map<string, (typeof MTR_STATIONS)[0]>} */
+    const byCode = new Map();
     for (const st of MTR_STATIONS) {
-      const lines =
-        mtrStationLinesMap?.get(String(st.name_en || "").toLowerCase()) || [];
-      if (!lines.map((x) => String(x).toUpperCase()).includes(line)) continue;
-      if (!Number.isFinite(st.lat) || !Number.isFinite(st.lon)) continue;
-      const code = st.code ? String(st.code).toUpperCase() : "";
-      onLine.push({
-        name: st.name_zh ? `${st.name_zh} ${st.name_en}` : st.name_en,
-        nameEn: st.name_en || "",
-        nameTc: st.name_zh || "",
-        stopId: code ? `MTR-${code}` : "",
+      if (st.code) byCode.set(String(st.code).toUpperCase(), st);
+    }
+    // Also index from geojson-backed line map names if code missing in directory
+    const ordered = [];
+    const used = new Set();
+    for (const code of codes) {
+      const st = byCode.get(code);
+      if (!st || !Number.isFinite(st.lat) || !Number.isFinite(st.lon)) continue;
+      if (used.has(code)) continue;
+      used.add(code);
+      const lab = mtrStationLabel(code);
+      ordered.push({
+        name: st.name_zh
+          ? `${st.name_zh} ${st.name_en}`
+          : st.name_en || lab.en,
+        nameEn: st.name_en || lab.en,
+        nameTc: st.name_zh || lab.zh,
+        stopId: `MTR-${code}`,
         stationCode: code,
         code,
         lon: st.lon,
         lat: st.lat,
-        seq: 0,
+        seq: ordered.length + 1,
       });
     }
-    if (onLine.length >= 2) {
-      const ordered = [];
-      const left = [...onLine];
-      ordered.push(left.shift());
-      while (left.length) {
-        const last = ordered[ordered.length - 1];
-        let bi = 0;
-        let bd = Infinity;
-        for (let i = 0; i < left.length; i++) {
-          const d = haversineMEta(
-            last.lat,
-            last.lon,
-            left[i].lat,
-            left[i].lon,
-          );
-          if (d < bd) {
-            bd = d;
-            bi = i;
-          }
-        }
-        ordered.push(left.splice(bi, 1)[0]);
-      }
-      return ordered.map((s, i) => ({ ...s, seq: i + 1 }));
-    }
-  }
-
-  // LRT: all Light Rail stops with official stop_id (live ETA station_id)
-  if (route.kind === "lrt") {
-    const stops = LRT_STOPS.filter(
-      (st) => Number.isFinite(st.lat) && Number.isFinite(st.lon),
-    )
-      .map((st, i) => ({
-        seq: i + 1,
+    // Append any on-line stations missing from fixed order (rare)
+    for (const st of MTR_STATIONS) {
+      const code = st.code ? String(st.code).toUpperCase() : "";
+      if (!code || used.has(code)) continue;
+      if (!Number.isFinite(st.lat) || !Number.isFinite(st.lon)) continue;
+      const lines =
+        mtrStationLinesMap?.get(String(st.name_en || "").toLowerCase()) || [];
+      if (!lines.map((x) => String(x).toUpperCase()).includes(line)) continue;
+      // skip branch extremes not in travel direction list for EAL LMC when using LOW terminus etc.
+      ordered.push({
         name: st.name_zh ? `${st.name_zh} ${st.name_en}` : st.name_en,
         nameEn: st.name_en || "",
         nameTc: st.name_zh || "",
-        stopId: st.stop_id ? String(st.stop_id) : "",
+        stopId: `MTR-${code}`,
+        stationCode: code,
+        code,
         lon: st.lon,
         lat: st.lat,
-      }))
-      .sort((a, b) =>
-        String(a.nameEn || a.name).localeCompare(
-          String(b.nameEn || b.name),
-          undefined,
-          { sensitivity: "base" },
-        ),
-      )
-      .map((s, i) => ({ ...s, seq: i + 1 }));
-    if (stops.length >= 2) return stops;
+        seq: ordered.length + 1,
+      });
+      used.add(code);
+    }
+    if (ordered.length >= 2) return ordered;
+    // Fallback: no MTR_LINE_ORDER entry — geo nearest-neighbour
+    if (!MTR_LINE_ORDER[line]) {
+      console.warn("[eta] no MTR_LINE_ORDER for", line);
+    }
+  }
+
+  // LRT: per-route sequence from open-data CSV (not all stops A–Z)
+  if (route.kind === "lrt") {
+    let seq = lrtStopSequence(route.id, bound);
+    if (seq.length < 2) seq = lrtStopSequence(route.id, bound === "I" ? "O" : "I");
+    if (seq.length >= 2) return seq;
+    console.warn("[eta] LRT stops empty for", route.id, "bound", bound);
   }
 
   // Fallback: contributed shape only (no official stop API) — still show path
@@ -8250,26 +8283,65 @@ async function paintEtaRouteOnMap(route, stops) {
   const color = companyLineColor(route);
 
   const dirs = etaRouteDirections(route);
-  const di = getCardDir(route);
+  const di = resolveCardDirIndex(route, dirs);
   const dir = dirs[Math.min(di, dirs.length - 1)] || dirs[0];
   const opt = etaRouteAsOption(route, stops, dir);
 
   /** @type {number[][]} */
   let lineCoords = [];
 
-  // Trip-plan path: matchBusShapeOverride + busShapeToPolyline + OSRM densify
-  try {
-    const poly = await buildTransitPolyline(opt);
-    if (poly?.length >= 2) {
-      lineCoords = poly
-        .map((p) => [Number(p.lon), Number(p.lat)])
-        .filter((c) => Number.isFinite(c[0]) && Number.isFinite(c[1]));
+  const isRail =
+    route.kind === "mtr" || route.kind === "lrt" || route.kind === "mtr_bus";
+
+  // Bus: trip-plan path (contributed shapes + OSRM densify)
+  // Rail / MTR Bus: prefer ordered stop chords first (official sequences)
+  if (!isRail) {
+    try {
+      const poly = await buildTransitPolyline(opt);
+      if (poly?.length >= 2) {
+        lineCoords = poly
+          .map((p) => [Number(p.lon), Number(p.lat)])
+          .filter((c) => Number.isFinite(c[0]) && Number.isFinite(c[1]));
+      }
+    } catch (e) {
+      console.warn("[eta] buildTransitPolyline", e);
     }
-  } catch (e) {
-    console.warn("[eta] buildTransitPolyline", e);
   }
 
-  // Fallback: contributed shape (sliced like trip plan) or stop chords
+  // MTR / LRT: snap to basemap railway geometry when possible
+  if (
+    lineCoords.length < 2 &&
+    (route.kind === "mtr" || route.kind === "lrt")
+  ) {
+    try {
+      const { densifyAlongBasemapRail } = await import("./railSnapper.js");
+      const pts = (stops || [])
+        .filter(
+          (s) =>
+            Number.isFinite(s.lon) &&
+            Number.isFinite(s.lat) &&
+            !s._polylineOnly,
+        )
+        .map((s) => ({ lon: s.lon, lat: s.lat, id: s.stopId || s.code }));
+      if (pts.length >= 2 && typeof densifyAlongBasemapRail === "function") {
+        const poly = await densifyAlongBasemapRail(pts, {
+          mode: route.kind === "lrt" ? "tram" : "subway",
+          route_short_name: route.id,
+          route_name: route.label || route.id,
+          route_id: `${route.kind}-${route.id}`,
+        });
+        if (poly?.length >= 2) {
+          lineCoords = poly
+            .map((p) => [Number(p.lon), Number(p.lat)])
+            .filter((c) => Number.isFinite(c[0]) && Number.isFinite(c[1]));
+        }
+      }
+    } catch (e) {
+      console.warn("[eta] rail snap", e);
+    }
+  }
+
+  // Contributed bus shape (MTR Bus / franchised)
   if (lineCoords.length < 2) {
     const shape =
       stops.find((s) => s._shape)?._shape || matchBusShapeOverride(opt);
@@ -8282,9 +8354,14 @@ async function paintEtaRouteOnMap(route, stops) {
             : [Number(c.lon), Number(c.lat)],
         )
         .filter((c) => Number.isFinite(c[0]) && Number.isFinite(c[1]));
-    } else {
-      lineCoords = opt.stops.map((s) => [s.lon, s.lat]);
     }
+  }
+
+  // Official stop sequence as polyline (always works when stops loaded)
+  if (lineCoords.length < 2) {
+    lineCoords = (stops || [])
+      .filter((s) => Number.isFinite(s.lon) && Number.isFinite(s.lat) && !s._polylineOnly)
+      .map((s) => [s.lon, s.lat]);
   }
 
   const stopFeats = stops
@@ -8945,8 +9022,17 @@ async function showEtaRouteDetailsPanel() {
   const co = String(route.co || "").toLowerCase();
   if (co === "ctb") await ensureCtbRouteBound(route.id);
   if (co === "nlb") await ensureNlbRouteBounds();
-  if (route.kind === "bus" || route.kind === "mtr_bus") {
+  if (route.kind === "bus") {
     await ensureKmbRouteBounds();
+  }
+  if (route.kind === "mtr_bus" || co === "lrtfeeder" || co === "mtrbus") {
+    await ensureMtrBusData();
+  }
+  if (route.kind === "lrt") {
+    await ensureLrtRouteData();
+  }
+  if (route.kind === "mtr") {
+    await ensureMtrStationLinesMap();
   }
   if (gen !== etaShapeGen) return;
 
@@ -8970,6 +9056,7 @@ async function showEtaRouteDetailsPanel() {
   // Load stops + draw route path on map
   try {
     setMapRouteLoading(true, `Loading ${coLabel} ${route.id}…`);
+    // When switching Opposite, reload stops for the active bound
     const stops = await loadEtaRouteStops(route);
     if (gen !== etaShapeGen) return;
     etaSelectedStops = stops;
@@ -9247,6 +9334,7 @@ function initEtaRouteSearchUi() {
   void ensureMtrBusData().then(() => {
     buildEtaRouteCatalog();
   });
+  void ensureLrtRouteData();
 }
 
 function syncEtaActive() {
