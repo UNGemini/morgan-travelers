@@ -665,13 +665,12 @@ async function buildPinnedRouteCardContext(route) {
         .join("")
     : `<li class="rt-eta-card-row is-empty">N/A</li>`;
 
-  const dirDots =
-    dirs.length >= 2
-      ? `<div class="eta-card-dots pinned-dir-dots" role="tablist" aria-label="Direction">
+  const dirDots = etaHasRealOpposite(dirs)
+    ? `<div class="eta-card-dots pinned-dir-dots" role="tablist" aria-label="Direction">
           <button type="button" class="eta-dir-dot ${di === 0 ? "is-active" : ""}" data-pinned-dir="0" data-pinned-key="${escapeHtml(etaRouteKey(route))}" aria-label="Direction 1"></button>
           <button type="button" class="eta-dir-dot ${di === 1 ? "is-active" : ""}" data-pinned-dir="1" data-pinned-key="${escapeHtml(etaRouteKey(route))}" aria-label="Direction 2"></button>
         </div>`
-      : "";
+    : "";
 
   // Unique key includes stop so same route @ different stops can both pin
   const key = `${etaRouteKey(route)}|${route.stopId || route.stopName || ""}`;
@@ -5897,6 +5896,59 @@ function etaRouteDirectionsFromOd(r) {
 }
 
 /**
+ * Normalize destination for comparing whether two bounds are real opposites.
+ * @param {string} [s]
+ */
+function etaDestKey(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[—–-]+/g, "")
+    .trim();
+}
+
+/**
+ * True only when there are two real directions (different bounds + different dests).
+ * Do not invent a reverse from orig/dest alone.
+ * @param {Array<{ dest?: string, destZh?: string, bound?: string }>} dirs
+ */
+function etaHasRealOpposite(dirs) {
+  if (!dirs || dirs.length < 2) return false;
+  const a = dirs[0];
+  const b = dirs[1];
+  const da = etaDestKey(a?.destZh || a?.dest);
+  const db = etaDestKey(b?.destZh || b?.dest);
+  if (!da || !db || da === "—" || db === "—" || da === db) return false;
+  const ba = String(a?.bound || "").toUpperCase();
+  const bb = String(b?.bound || "").toUpperCase();
+  // Must be distinct bounds when both labeled
+  if (ba && bb && ba === bb) return false;
+  return true;
+}
+
+/**
+ * Drop duplicate / fake directions so Opposite is not shown for one-way routes.
+ * @param {Array<{ dest?: string, destZh?: string, bound?: string, orig?: string, stopId?: string }>} dirs
+ */
+function etaUniqueDirections(dirs) {
+  if (!dirs?.length) return [];
+  /** @type {typeof dirs} */
+  const out = [];
+  const seenBound = new Set();
+  const seenDest = new Set();
+  for (const d of dirs) {
+    const b = String(d.bound || "").toUpperCase();
+    const dest = etaDestKey(d.destZh || d.dest);
+    if (b && seenBound.has(b)) continue;
+    if (dest && dest !== "—" && seenDest.has(dest)) continue;
+    if (b) seenBound.add(b);
+    if (dest && dest !== "—") seenDest.add(dest);
+    out.push(d);
+  }
+  return out;
+}
+
+/**
  * @param {EtaRouteEntry} r
  * @param {{ full?: boolean }} [opts] full=true → always use operator OD (route detail)
  */
@@ -5905,54 +5957,44 @@ function etaRouteDirections(r, opts = {}) {
   const key = etaRouteKey(r);
   const full = !!opts.full;
 
-  // Nearby browse: prefer multi-dir nearby slots for list cards
-  if (!full) {
-    const nearbySlots = etaNearbyDirsByKey.get(key);
-    if (nearbySlots?.length >= 2) {
-      return nearbySlots.map((s) => ({
-        dest: s.dest || "—",
-        destZh: s.destZh || "",
-        bound: s.bound,
-        orig: s.stopLabel || "",
-        stopId: s.stopId,
-      }));
-    }
-  }
-
-  const od = etaRouteDirectionsFromOd(r);
-  if (od.length >= 2) return od;
-
-  // Single nearby slot only when OD unavailable
+  // Nearby browse: only use multi-dir slots when they are real opposites
   if (!full) {
     const nearbySlots = etaNearbyDirsByKey.get(key);
     if (nearbySlots?.length) {
-      return nearbySlots.map((s) => ({
-        dest: s.dest || "—",
-        destZh: s.destZh || "",
-        bound: s.bound,
-        orig: s.stopLabel || "",
-        stopId: s.stopId,
-      }));
+      const mapped = etaUniqueDirections(
+        nearbySlots.map((s) => ({
+          dest: s.dest || "—",
+          destZh: s.destZh || "",
+          bound: s.bound,
+          orig: s.stopLabel || "",
+          stopId: s.stopId,
+        })),
+      );
+      if (mapped.length >= 2 && etaHasRealOpposite(mapped)) return mapped;
+      if (mapped.length === 1) return mapped;
     }
   }
 
-  if (od.length === 1) {
-    const one = od[0];
-    // Invert O↔I when we know origin so Opposite works on detail page
-    if (one.orig && one.dest && one.orig !== one.dest) {
-      const flipBound =
-        String(one.bound || "O").toUpperCase() === "I" ? "O" : "I";
-      return [
-        one,
-        {
-          dest: one.orig,
-          destZh: one.origZh || "",
-          bound: flipBound,
-          orig: one.dest,
-        },
-      ];
+  const od = etaUniqueDirections(etaRouteDirectionsFromOd(r));
+  // Never invent a reverse O↔I from a single OD row — one-way / circular
+  // routes were incorrectly showing Opposite.
+  if (od.length >= 2 && etaHasRealOpposite(od)) return od;
+  if (od.length >= 1) return od.slice(0, 1);
+
+  // Single nearby slot
+  if (!full) {
+    const nearbySlots = etaNearbyDirsByKey.get(key);
+    if (nearbySlots?.length) {
+      return etaUniqueDirections(
+        nearbySlots.map((s) => ({
+          dest: s.dest || "—",
+          destZh: s.destZh || "",
+          bound: s.bound,
+          orig: s.stopLabel || "",
+          stopId: s.stopId,
+        })),
+      ).slice(0, 1);
     }
-    return od;
   }
 
   const live = etaLiveByKey.get(key);
@@ -6968,12 +7010,13 @@ function etaRouteCardInnerHtml(r, dir, eta = {}) {
 
 /**
  * Per-card direction switch — same control as route detail (Opposite).
+ * Only when the route has two real bounds (not a synthetic reverse).
  * @param {EtaRouteEntry} r
- * @param {number} dirCount
+ * @param {Array<{ dest?: string, destZh?: string, bound?: string }>} dirs
  * @param {number} activeDir
  */
-function etaCardDotsHtml(r, dirCount, activeDir) {
-  if (dirCount < 2) return "";
+function etaCardDotsHtml(r, dirs, activeDir) {
+  if (!etaHasRealOpposite(dirs)) return "";
   return `<button type="button" class="wheels-dir-switch eta-card-dir-switch" data-route-key="${escapeHtml(etaRouteKey(r))}" aria-label="Switch direction">
     <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
     <span>Opposite</span>
@@ -7100,7 +7143,7 @@ function renderEtaRouteSuggest(hits, hint = "", opts = {}) {
             clock: live?.clock,
           })}
         </div>
-        ${etaCardDotsHtml(r, dirs.length, di)}
+        ${etaCardDotsHtml(r, dirs, di)}
       </li>`;
     })
     .join("");
@@ -8102,9 +8145,8 @@ async function renderEtaRouteDetailBody(route, ctx) {
     ? etaStopReachMinutes(named, boardIndex, slots[0]?.waitMins, route.kind)
     : [];
 
-  const dirSwitchHtml =
-    dirs.length >= 2
-      ? `<button type="button" class="wheels-dir-switch" id="btn-eta-detail-dir" aria-label="Switch direction">
+  const dirSwitchHtml = etaHasRealOpposite(dirs)
+    ? `<button type="button" class="wheels-dir-switch" id="btn-eta-detail-dir" aria-label="Switch direction">
           <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
           <span>Opposite</span>
           <span class="wheels-dir-dots" aria-hidden="true">
@@ -8112,7 +8154,7 @@ async function renderEtaRouteDetailBody(route, ctx) {
             <i class="${di === 1 ? "is-on" : ""}"></i>
           </span>
         </button>`
-      : "";
+    : "";
 
   let stopsHtml = "";
   if (!named.length && etaSelectedStops.length) {
