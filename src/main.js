@@ -953,19 +953,63 @@ async function ensureKmbRouteStopSeq(routeId, direction) {
 }
 
 /**
- * How far the terminus of this bound is from the user (prefer larger = going away).
- * Also boost by remaining stops after the board stop.
+ * Score how strongly a bound is “going away” from the user.
+ * Prefer larger score (farther terminus + more remaining journey past board).
+ *
+ * @param {{ lat: number, lon: number }} geo user
+ * @param {{ lat: number, lon: number } | null | undefined} board
+ * @param {{ lat: number, lon: number } | null | undefined} terminus
+ * @param {{ lat: number, lon: number } | null | undefined} [origin] first stop of bound
+ */
+function scoreGoingAwayFromUser(geo, board, terminus, origin = null) {
+  if (!geo || !terminus || !Number.isFinite(terminus.lat) || !Number.isFinite(terminus.lon)) {
+    return 0;
+  }
+  // Primary: terminus farther from user → vehicle heads away from me
+  let score = haversineMEta(geo.lat, geo.lon, terminus.lat, terminus.lon);
+
+  if (board && Number.isFinite(board.lat) && Number.isFinite(board.lon)) {
+    // Remaining journey length after boarding (m)
+    const remainingM = haversineMEta(
+      board.lat,
+      board.lon,
+      terminus.lat,
+      terminus.lon,
+    );
+    score += remainingM * 0.85;
+
+    // Near end of line (user & board both close to terminus) → strong penalty
+    const userToBoard = haversineMEta(geo.lat, geo.lon, board.lat, board.lon);
+    if (remainingM < 600 && userToBoard < 400) {
+      score -= 2500;
+    }
+  }
+
+  // Prefer riding toward the far end vs back to the near origin
+  if (origin && Number.isFinite(origin.lat) && Number.isFinite(origin.lon)) {
+    const toOrig = haversineMEta(geo.lat, geo.lon, origin.lat, origin.lon);
+    const toTerm = haversineMEta(geo.lat, geo.lon, terminus.lat, terminus.lon);
+    // Positive when terminus is farther than origin (classic going-away)
+    score += (toTerm - toOrig) * 0.5;
+  }
+
+  return score;
+}
+
+/**
+ * How strongly KMB/LWB bound goes away from the user.
  * @param {string} routeId
  * @param {string} bound O|I
  * @param {{ lat: number, lon: number }} geo
  * @param {string} [stopId]
  */
 async function scoreKmbDirectionAway(routeId, bound, geo, stopId = "") {
-  const direction = String(bound).toUpperCase() === "I" ? "inbound" : "outbound";
+  const direction =
+    String(bound).toUpperCase() === "I" ? "inbound" : "outbound";
   const seq = await ensureKmbRouteStopSeq(routeId, direction);
   if (!seq.length) return 0;
+  const first = seq[0];
   const last = seq[seq.length - 1];
-  const toTerminus = haversineMEta(geo.lat, geo.lon, last.lat, last.lon);
   let idx = stopId ? seq.findIndex((s) => s.stop === stopId) : -1;
   if (idx < 0) {
     let bestI = 0;
@@ -979,9 +1023,143 @@ async function scoreKmbDirectionAway(routeId, bound, geo, stopId = "") {
     }
     idx = bestI;
   }
-  const remaining = Math.max(0, seq.length - 1 - idx);
-  // Terminus distance (m) + remaining stops * 400 m proxy
-  return toTerminus + remaining * 400;
+  const board = seq[idx] || first;
+  return scoreGoingAwayFromUser(geo, board, last, first);
+}
+
+/** @type {Map<string, Array<{ stop: string, seq: number, lat: number, lon: number }>>} */
+const ctbRouteStopSeqCache = new Map();
+
+/**
+ * CTB stop sequence with coords for one direction (for away scoring).
+ * @param {string} routeId
+ * @param {"inbound"|"outbound"} direction
+ */
+async function ensureCtbRouteStopSeq(routeId, direction) {
+  const rid = String(routeId || "").toUpperCase();
+  const dir = direction === "inbound" ? "inbound" : "outbound";
+  const cacheKey = `${rid}|${dir}`;
+  if (ctbRouteStopSeqCache.has(cacheKey)) {
+    return ctbRouteStopSeqCache.get(cacheKey) || [];
+  }
+  try {
+    const rs = await fetch(
+      `/eta/ctb/route-stop/CTB/${encodeURIComponent(rid)}/${dir}`,
+      { headers: { Accept: "application/json" } },
+    );
+    if (!rs.ok) {
+      ctbRouteStopSeqCache.set(cacheKey, []);
+      return [];
+    }
+    const j = await rs.json();
+    const rows = (j.data || [])
+      .slice()
+      .sort((a, b) => Number(a.seq) - Number(b.seq));
+    // Sample ends + mid to limit stop detail fetches
+    const pick = [];
+    if (rows.length) pick.push(rows[0]);
+    if (rows.length > 2) pick.push(rows[Math.floor(rows.length / 2)]);
+    if (rows.length > 1) pick.push(rows[rows.length - 1]);
+    /** @type {Array<{ stop: string, seq: number, lat: number, lon: number }>} */
+    const seq = [];
+    await Promise.all(
+      pick.map(async (row) => {
+        const sid = String(row.stop || "");
+        if (!sid) return;
+        try {
+          const sr = await fetch(`/eta/ctb/stop/${encodeURIComponent(sid)}`, {
+            headers: { Accept: "application/json" },
+          });
+          if (!sr.ok) return;
+          const sj = await sr.json();
+          const d = sj.data || {};
+          const lat = Number(d.lat);
+          const lon = Number(d.long ?? d.lon);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+          seq.push({
+            stop: sid,
+            seq: Number(row.seq) || 0,
+            lat,
+            lon,
+          });
+        } catch {
+          /* skip */
+        }
+      }),
+    );
+    seq.sort((a, b) => a.seq - b.seq);
+    // If we only got samples, still use first/last for scoring
+    ctbRouteStopSeqCache.set(cacheKey, seq);
+    return seq;
+  } catch {
+    ctbRouteStopSeqCache.set(cacheKey, []);
+    return [];
+  }
+}
+
+/**
+ * @param {string} routeId
+ * @param {string} bound O|I
+ * @param {{ lat: number, lon: number }} geo
+ * @param {string} [stopId]
+ * @param {number} [boardLat]
+ * @param {number} [boardLon]
+ */
+async function scoreCtbDirectionAway(
+  routeId,
+  bound,
+  geo,
+  stopId = "",
+  boardLat = NaN,
+  boardLon = NaN,
+) {
+  const direction =
+    String(bound).toUpperCase() === "I" ? "inbound" : "outbound";
+  const seq = await ensureCtbRouteStopSeq(routeId, direction);
+  const first = seq[0] || null;
+  const last = seq[seq.length - 1] || null;
+  let board = null;
+  if (Number.isFinite(boardLat) && Number.isFinite(boardLon)) {
+    board = { lat: boardLat, lon: boardLon };
+  } else if (stopId && seq.length) {
+    board = seq.find((s) => s.stop === stopId) || null;
+  }
+  if (!board && seq.length) {
+    // nearest sample to user
+    let best = seq[0];
+    let bestD = Infinity;
+    for (const s of seq) {
+      const d = haversineMEta(geo.lat, geo.lon, s.lat, s.lon);
+      if (d < bestD) {
+        bestD = d;
+        best = s;
+      }
+    }
+    board = best;
+  }
+  if (!last) return 0;
+  return scoreGoingAwayFromUser(geo, board, last, first);
+}
+
+/**
+ * Sort nearby direction slots so index 0 = going away from user.
+ * @param {EtaNearbyDirSlot[]} slots
+ */
+function sortSlotsGoingAway(slots) {
+  return [...slots].sort((a, b) => {
+    const aa = a.awayScore ?? 0;
+    const bb = b.awayScore ?? 0;
+    // Always prefer higher away score (even small differences)
+    if (Math.abs(aa - bb) > 1) return bb - aa;
+    // Then closer board stop
+    if (a.distM !== b.distM) return a.distM - b.distM;
+    const ma = a.minutes;
+    const mb = b.minutes;
+    if (ma != null && mb != null && ma !== mb) return ma - mb;
+    if (ma != null && mb == null) return -1;
+    if (ma == null && mb != null) return 1;
+    return String(a.bound).localeCompare(String(b.bound));
+  });
 }
 
 /** Sidebar stack: "search" | "trip" */
@@ -5949,6 +6127,8 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
   const byKey = new Map();
 
   for (const { s, d } of topStops) {
+    const lat = Number(s[0]);
+    const lon = Number(s[1]);
     const name = String(s[2] || "");
     const stopId = String(s[3] || "");
     const routes = Array.isArray(s[4]) ? s[4] : [];
@@ -5976,7 +6156,7 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
         pack.nearStops.length < 6 &&
         !pack.nearStops.some((x) => x.stopId === stopId)
       ) {
-        pack.nearStops.push({ stopId, name, d });
+        pack.nearStops.push({ stopId, name, d, lat, lon });
       }
       pack.nearStops.sort((a, b) => a.d - b.d);
     }
@@ -6052,22 +6232,10 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
             stopLabel: near.name,
             stopId: usedStop || near.stopId,
             distM: near.d,
-            // CTB: approximate away score by stop distance inverted for opposite
-            // Prefer destinaton farther in catalog if we have OD
+            stopLat: Number(near.lat),
+            stopLon: Number(near.lon),
             awayScore: 0,
           };
-          // Prefer farther terminus using CTB OD cache if present
-          const od = ctbRouteBoundsMap.get(String(entry.id).toUpperCase());
-          if (od?.length) {
-            const match = od.find(
-              (x) => String(x.bound).toUpperCase() === bound,
-            );
-            // Soft: prefer bound whose dest string is longer (usually full terminus name)
-            // Real geo away for CTB without full stop seq: prefer larger distM of opposite stop
-            slot.awayScore = near.d + (match?.dest?.length || 0);
-          } else {
-            slot.awayScore = 1000 - near.d; // slightly prefer directions we can board closer
-          }
           const prev = pack.byBound.get(bound);
           if (
             !prev ||
@@ -6082,13 +6250,12 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
       }
 
       if (pack.byBound.size) {
-        // Prefer direction whose destination is the "away" one:
-        // use CTB OD: if user is closer to orig than dest for a bound, they're going away
         await ensureCtbRouteBound(entry.id);
         const od = ctbRouteBoundsMap.get(String(entry.id).toUpperCase()) || [];
+        const geo = etaUserGeo
+          ? { lat: etaUserGeo.lat, lon: etaUserGeo.lon }
+          : null;
         for (const slot of pack.byBound.values()) {
-          // Prefer bound with higher remaining journey: use inverse of near.d as weak signal
-          // and put O/I with dest from OD
           if (!slot.dest && od.length) {
             const m = od.find(
               (x) => String(x.bound).toUpperCase() === slot.bound,
@@ -6098,16 +6265,20 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
               slot.destZh = m.destZh || "";
             }
           }
-          // Prefer larger awayScore: farther board stop for this bound often = mid-route going out
-          // Boost bound that is not the "short hop" — use dest presence
-          slot.awayScore = (slot.awayScore || 0) + (slot.dest ? 500 : 0);
+          if (geo) {
+            slot.awayScore = await scoreCtbDirectionAway(
+              entry.id,
+              slot.bound,
+              geo,
+              slot.stopId,
+              slot.stopLat,
+              slot.stopLon,
+            );
+          } else {
+            slot.awayScore = 0;
+          }
         }
-        const slots = [...pack.byBound.values()].sort((a, b) => {
-          const aa = a.awayScore ?? 0;
-          const bb = b.awayScore ?? 0;
-          if (aa !== bb) return bb - aa;
-          return a.distM - b.distM;
-        });
+        const slots = sortSlotsGoingAway([...pack.byBound.values()]);
         const finalSlots = slots.slice(0, 2);
         etaNearbyDirsByKey.set(k, finalSlots);
         setCardDir(entry, 0);
@@ -6310,24 +6481,10 @@ async function fetchNearbyKmbEtaHits(geo, limit = 16) {
         }),
       );
 
-      // Sort: going away first, then closer stop, then sooner ETA
-      slots.sort((a, b) => {
-        const aa = a.awayScore ?? 0;
-        const bb = b.awayScore ?? 0;
-        if (Math.abs(aa - bb) > 80) return bb - aa;
-        if (a.distM !== b.distM) return a.distM - b.distM;
-        const ma = a.minutes;
-        const mb = b.minutes;
-        if (ma != null && mb != null && ma !== mb) return ma - mb;
-        if (ma != null && mb == null) return -1;
-        if (ma == null && mb != null) return 1;
-        return String(a.bound).localeCompare(String(b.bound));
-      });
-
-      // Cap at 2 directions (O/I)
-      const finalSlots = slots.slice(0, 2);
+      // Index 0 = going away from user
+      const finalSlots = sortSlotsGoingAway(slots).slice(0, 2);
       etaNearbyDirsByKey.set(rk, finalSlots);
-      setCardDir(pack.entry, 0); // index 0 = preferred away
+      setCardDir(pack.entry, 0);
       applyNearbyDirLive(pack.entry);
       hits.push(pack.entry);
     }),
