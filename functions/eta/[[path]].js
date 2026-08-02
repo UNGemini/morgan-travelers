@@ -7,6 +7,9 @@
  * /eta/mtr/*      → https://rt.data.gov.hk/v1/transport/mtr/*
  * /eta/gmb/*      → https://data.etagmb.gov.hk/*
  * /eta/mtr-open/* → https://opendata.mtr.com.hk/*
+ *
+ * POST is required for MTR Bus getSchedule:
+ *   POST /eta/mtr/bus/getSchedule  { language, routeName }
  */
 
 const TARGETS = {
@@ -18,8 +21,21 @@ const TARGETS = {
   "mtr-open": "https://opendata.mtr.com.hk",
 };
 
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Accept",
+  "Cross-Origin-Resource-Policy": "cross-origin",
+};
+
 export async function onRequest(context) {
-  const url = new URL(context.request.url);
+  const req = context.request;
+  const url = new URL(req.url);
+
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS });
+  }
+
   // /eta/kmb/stop-eta/XXX  → path parts after /eta/
   const rest = url.pathname.replace(/^\/eta\/?/, "");
   const slash = rest.indexOf("/");
@@ -31,8 +47,7 @@ export async function onRequest(context) {
       status: 404,
       headers: {
         "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Cross-Origin-Resource-Policy": "cross-origin",
+        ...CORS,
       },
     });
   }
@@ -40,21 +55,31 @@ export async function onRequest(context) {
   const target = new URL(`${base}${sub || ""}`);
   target.search = url.search;
 
-  const res = await fetch(target.toString(), {
+  /** @type {RequestInit} */
+  const init = {
+    method: req.method,
     headers: {
-      Accept: "application/json",
+      Accept: req.headers.get("Accept") || "application/json",
       "User-Agent": "MORGAN-Travelers/0.4 (https://morgandev.cc)",
     },
-  });
+  };
 
+  // Forward POST/PUT body (MTR Bus getSchedule)
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    const ct = req.headers.get("Content-Type");
+    if (ct) init.headers["Content-Type"] = ct;
+    init.body = await req.arrayBuffer();
+  }
+
+  const res = await fetch(target.toString(), init);
   const body = await res.arrayBuffer();
   return new Response(body, {
     status: res.status,
     headers: {
       "Content-Type": res.headers.get("Content-Type") || "application/json",
-      "Cache-Control": "public, max-age=15",
-      "Access-Control-Allow-Origin": "*",
-      "Cross-Origin-Resource-Policy": "cross-origin",
+      "Cache-Control":
+        req.method === "GET" ? "public, max-age=15" : "no-store",
+      ...CORS,
     },
   });
 }

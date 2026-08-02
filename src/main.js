@@ -140,6 +140,14 @@ import {
   stopOffsetMinutesFromBoard,
 } from "./eta.js";
 import {
+  ensureMtrBusData,
+  getMtrBusRoutes,
+  mtrBusRouteIds,
+  mtrBusRouteDirections,
+  mtrBusStopSequence,
+  nearbyMtrBusStops,
+} from "./mtrBusData.js";
+import {
   mergeStopSequence,
   extractPublicStopCode,
   stopLabelWithPublicId,
@@ -966,6 +974,8 @@ function applyNearbyDirLive(r) {
     destZh: slot.destZh,
     bound: slot.bound,
     stopId: slot.stopId,
+    // Live minutes from operator feeds — not headway schedule
+    scheduled: slot.minutes == null,
   });
   // Keep nearbyHint in sync with the stop used for this direction
   if (slot.stopLabel) {
@@ -5693,6 +5703,19 @@ function buildEtaRouteCatalog() {
     add({ id, label: `Light Rail ${id}`, kind: "lrt" });
   }
 
+  // Official MTR Bus open-data routes (preferred over fare pack alone)
+  for (const id of mtrBusRouteIds()) {
+    const meta = getMtrBusRoutes().find((r) => r.id === id);
+    add({
+      id,
+      label: meta?.nameEn
+        ? `MTR Bus ${id} · ${meta.nameEn}`
+        : `MTR Bus ${id}`,
+      kind: "mtr_bus",
+      co: "lrtfeeder",
+      aliases: meta?.nameZh ? [meta.nameZh] : [],
+    });
+  }
   const pack = getFarePack();
   const mtrBus =
     pack?.mtrBus?.byType?.octopus_adult ||
@@ -5704,6 +5727,7 @@ function buildEtaRouteCatalog() {
         id: String(id).toUpperCase(),
         label: `MTR Bus ${id}`,
         kind: "mtr_bus",
+        co: "lrtfeeder",
       });
     }
   }
@@ -5861,14 +5885,19 @@ function etaRouteDirectionsFromOd(r) {
 
   const co = String(r.co || "").toLowerCase();
   const rid = String(r.id || "").toUpperCase();
+
+  // Official MTR Bus stop sequences (not KMB)
+  if (r.kind === "mtr_bus" || co === "lrtfeeder" || co === "mtrbus") {
+    const dirs = mtrBusRouteDirections(rid);
+    if (dirs.length) return dirs;
+  }
+
   const isKmbFamily =
-    r.kind === "mtr_bus" ||
     co === "kmb" ||
     co === "lwb" ||
-    co === "lrtfeeder" ||
     (r.kind === "bus" && !co);
 
-  // KMB / LWB / MTR Bus only — must not apply to CTB/NLB/GMB
+  // KMB / LWB only — must not apply to CTB/NLB/GMB/MTR Bus
   if (isKmbFamily && co !== "gmb" && co !== "ctb" && co !== "nlb") {
     const bounds = kmbRouteBoundsMap?.get(rid);
     if (bounds?.length) {
@@ -5951,11 +5980,15 @@ async function filterDirsWithRealStops(route, dirs) {
         if (n >= 2) out.push(d);
         continue;
       }
+      if (route.kind === "mtr_bus" || co === "lrtfeeder" || co === "mtrbus") {
+        await ensureMtrBusData();
+        const seq = mtrBusStopSequence(rid, bound);
+        if (seq.length >= 2) out.push(d);
+        continue;
+      }
       if (
         co === "kmb" ||
         co === "lwb" ||
-        co === "lrtfeeder" ||
-        route.kind === "mtr_bus" ||
         (route.kind === "bus" && !co)
       ) {
         const seq = await ensureKmbRouteStopSeq(rid, direction);
@@ -6718,6 +6751,325 @@ async function fetchNearbyKmbEtaHits(geo, limit = 16) {
 }
 
 /**
+ * Attach live Next Train ETA for nearby MTR line cards.
+ * @param {EtaRouteEntry[]} hits
+ * @param {{ lat: number, lon: number }} geo
+ * @param {Map<string, { dist: number, station: string }>} lineNear
+ */
+async function attachNearbyMtrLiveEtas(hits, geo, lineNear) {
+  const mtrHits = hits.filter((r) => r.kind === "mtr").slice(0, 10);
+  if (!mtrHits.length || !geo) return;
+  await ensureMtrStationLinesMap();
+
+  await Promise.all(
+    mtrHits.map(async (r) => {
+      const line = String(r.id || "").toUpperCase();
+      // Prefer station already chosen for this line in browse
+      let best = null;
+      let bestD = Infinity;
+      const hinted = lineNear?.get(line);
+      for (const st of MTR_STATIONS) {
+        if (!Number.isFinite(st.lat) || !st.code) continue;
+        const lines =
+          mtrStationLinesMap?.get(String(st.name_en || "").toLowerCase()) ||
+          [];
+        if (!lines.map((x) => String(x).toUpperCase()).includes(line)) continue;
+        const d = haversineMEta(geo.lat, geo.lon, st.lat, st.lon);
+        // Prefer the same station name used in nearby hint when close enough
+        let score = d;
+        if (
+          hinted?.station &&
+          String(st.name_en || "").toLowerCase() ===
+            String(hinted.station).toLowerCase()
+        ) {
+          score = d * 0.5;
+        }
+        if (score < bestD) {
+          bestD = score;
+          best = st;
+        }
+      }
+      if (!best?.code) return;
+      const opt = {
+        kind: "mtr",
+        etaKind: "mtr",
+        route_short_name: line,
+        route_name: r.label || line,
+        route_id: `MTR-${line}`,
+        mode: "subway",
+        agency: { id: "MTRR", name: "MTR Rail" },
+        from: {
+          stop_id: `MTR-${best.code}`,
+          id: `MTR-${best.code}`,
+          stop_name: best.name_en,
+          name: best.name_en,
+          station_code: best.code,
+          stationCode: best.code,
+          code: best.code,
+          lat: best.lat,
+          lon: best.lon,
+          location: { lat: best.lat, lon: best.lon },
+        },
+      };
+      try {
+        const result = await fetchBoardEta(opt);
+        if (result?.waitMins == null && !result?.etas?.length) return;
+        if (result.error && !result.etas?.length) return;
+        const first = result.etas?.[0];
+        const mins = result.waitMins ?? first?.waitMins ?? null;
+        if (mins == null) return;
+        const stopLabel = best.name_zh
+          ? `${best.name_zh} ${best.name_en}`
+          : best.name_en;
+        etaLiveByKey.set(etaRouteKey(r), {
+          minutes: mins,
+          stopLabel,
+          dest: first?.dest || "",
+          bound: "line",
+          stopId: best.code,
+          scheduled: !!first?.scheduled || !!result.scheduled,
+          clock: first?.clock || "",
+        });
+        r.nearbyHint = `${stopLabel} · ${Math.round(
+          haversineMEta(geo.lat, geo.lon, best.lat, best.lon),
+        )} m`;
+      } catch (e) {
+        console.warn("[eta] nearby MTR live", line, e);
+      }
+    }),
+  );
+}
+
+/**
+ * Attach live LRT ETA for nearby Light Rail route cards.
+ * @param {EtaRouteEntry[]} hits
+ * @param {{ lat: number, lon: number }} geo
+ */
+async function attachNearbyLrtLiveEtas(hits, geo) {
+  const lrtHits = hits.filter((r) => r.kind === "lrt").slice(0, 12);
+  if (!lrtHits.length || !geo) return;
+
+  // Nearest LRT stop overall (shared board for routes serving it)
+  let nearest = null;
+  let nearestD = Infinity;
+  for (const st of LRT_STOPS) {
+    if (!Number.isFinite(st.lat) || !st.stop_id) continue;
+    const d = haversineMEta(geo.lat, geo.lon, st.lat, st.lon);
+    if (d < nearestD && d <= 4500) {
+      nearestD = d;
+      nearest = st;
+    }
+  }
+  if (!nearest) return;
+
+  // One station schedule contains all routes — fetch once, split by route_no
+  try {
+    const baseOpt = {
+      kind: "lrt",
+      etaKind: "lrt",
+      route_short_name: "LRT",
+      route_name: "Light Rail",
+      route_id: "LRT",
+      mode: "tram",
+      agency: { id: "LR", name: "Light Rail" },
+      from: {
+        stop_id: String(nearest.stop_id),
+        id: String(nearest.stop_id),
+        stop_name: nearest.name_en,
+        name: nearest.name_en,
+        lat: nearest.lat,
+        lon: nearest.lon,
+        location: { lat: nearest.lat, lon: nearest.lon },
+      },
+    };
+    // Fetch without route filter by using a dummy then re-fetch per route is heavy;
+    // fetchBoardEta filters by route_short_name — so fetch per route (station API is cheap/cached).
+    await Promise.all(
+      lrtHits.map(async (r) => {
+        const opt = {
+          ...baseOpt,
+          route_short_name: r.id,
+          route_name: r.label || r.id,
+          route_id: `LRT-${r.id}`,
+        };
+        try {
+          const result = await fetchBoardEta(opt);
+          if (result?.waitMins == null && !result?.etas?.length) return;
+          if (result.error && !result.etas?.length) return;
+          const first = result.etas?.[0];
+          const mins = result.waitMins ?? first?.waitMins ?? null;
+          if (mins == null) return;
+          const stopLabel = nearest.name_zh
+            ? `${nearest.name_zh} ${nearest.name_en}`
+            : nearest.name_en;
+          etaLiveByKey.set(etaRouteKey(r), {
+            minutes: mins,
+            stopLabel,
+            dest: first?.dest || "",
+            bound: "lrt",
+            stopId: String(nearest.stop_id),
+            scheduled: false,
+            clock: first?.clock || "",
+          });
+          r.nearbyHint = `${stopLabel} · ${Math.round(nearestD)} m`;
+        } catch {
+          /* ignore route */
+        }
+      }),
+    );
+  } catch (e) {
+    console.warn("[eta] nearby LRT live", e);
+  }
+}
+
+/**
+ * Nearby MTR Bus from open-data stops + live getSchedule.
+ * @param {{ lat: number, lon: number }} geo
+ * @param {number} [limit]
+ */
+async function fetchNearbyMtrBusEtaHits(geo, limit = 12) {
+  await ensureMtrBusData();
+  const near = nearbyMtrBusStops(geo, 500).slice(0, 40);
+  if (!near.length) return { hits: [], hint: "" };
+
+  /**
+   * @type {Map<string, { entry: EtaRouteEntry, byBound: Map<string, EtaNearbyDirSlot> }>}
+   */
+  const byRoute = new Map();
+
+  for (const { stop: s, distM } of near) {
+    const route = String(s.routeId || "").toUpperCase();
+    if (!route) continue;
+    const entry = {
+      id: route,
+      label: `MTR Bus ${route}`,
+      kind: "mtr_bus",
+      co: "lrtfeeder",
+      nearbyHint: `${s.nameZh || s.nameEn} · ${Math.round(distM)} m`,
+    };
+    if (!etaKindMatchesFilter(entry)) continue;
+    const rk = etaRouteKey(entry);
+    let pack = byRoute.get(rk);
+    if (!pack) {
+      pack = { entry, byBound: new Map() };
+      byRoute.set(rk, pack);
+    }
+    const bound = String(s.direction || "O").toUpperCase();
+    /** @type {EtaNearbyDirSlot} */
+    const slot = {
+      bound,
+      dest: "",
+      destZh: "",
+      minutes: null,
+      stopLabel: s.nameZh || s.nameEn || s.stopId,
+      stopId: s.stopId,
+      distM,
+      stopLat: s.lat,
+      stopLon: s.lon,
+    };
+    const prev = pack.byBound.get(bound);
+    if (!prev || distM < prev.distM - 5) {
+      pack.byBound.set(bound, slot);
+    }
+  }
+
+  // Live ETA per route (one POST covers all stops on the route)
+  const packs = [...byRoute.entries()].slice(0, limit);
+  await Promise.all(
+    packs.map(async ([rk, pack]) => {
+      const route = pack.entry.id;
+      try {
+        const res = await fetch(`/eta/mtr/bus/getSchedule`, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ language: "en", routeName: route }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const busStops = Array.isArray(data?.busStop) ? data.busStop : [];
+        for (const slot of pack.byBound.values()) {
+          const hit = busStops.find(
+            (bs) =>
+              String(bs.busStopId || "").toUpperCase() ===
+              String(slot.stopId || "").toUpperCase(),
+          );
+          const buses = Array.isArray(hit?.bus) ? hit.bus : [];
+          let bestMins = null;
+          for (const b of buses) {
+            let sec = Number(b.arrivalTimeInSecond);
+            if (!Number.isFinite(sec) || sec < 0 || sec >= 100_000) {
+              sec = Number(b.departureTimeInSecond);
+            }
+            if (!Number.isFinite(sec) || sec < 0 || sec >= 100_000) continue;
+            const mins = Math.max(0, Math.round(sec / 60));
+            if (bestMins == null || mins < bestMins) bestMins = mins;
+          }
+          if (bestMins != null) slot.minutes = bestMins;
+          // Fill dest from OD if empty
+          if (!slot.dest) {
+            const dirs = mtrBusRouteDirections(route);
+            const d = dirs.find(
+              (x) => String(x.bound).toUpperCase() === slot.bound,
+            );
+            if (d) {
+              slot.dest = d.dest || "";
+              slot.destZh = d.destZh || "";
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("[eta] mtr bus nearby", route, e);
+      }
+      // Away score: prefer direction whose terminus is farther
+      for (const slot of pack.byBound.values()) {
+        if (
+          Number.isFinite(slot.stopLat) &&
+          Number.isFinite(slot.stopLon) &&
+          geo
+        ) {
+          // crude: farther stop seq end = going away
+          const seq = mtrBusStopSequence(route, slot.bound);
+          const last = seq[seq.length - 1];
+          if (last && Number.isFinite(last.lat)) {
+            slot.awayScore = haversineMEta(
+              geo.lat,
+              geo.lon,
+              last.lat,
+              last.lon,
+            );
+          } else {
+            slot.awayScore = 0;
+          }
+        }
+      }
+      const slots = [...pack.byBound.values()];
+      if (slots.length) commitNearbyDirSlots(rk, pack.entry, slots);
+    }),
+  );
+
+  const hits = packs
+    .map(([, p]) => p.entry)
+    .filter((e) => etaLiveByKey.has(etaRouteKey(e)) || true)
+    .sort((a, b) => {
+      const ma = etaLiveByKey.get(etaRouteKey(a))?.minutes;
+      const mb = etaLiveByKey.get(etaRouteKey(b))?.minutes;
+      if (ma != null && mb != null && ma !== mb) return ma - mb;
+      if (ma != null && mb == null) return -1;
+      if (ma == null && mb != null) return 1;
+      return a.id.localeCompare(b.id, undefined, { numeric: true });
+    })
+    .slice(0, limit);
+
+  return {
+    hits,
+    hint: hits.length ? "Nearby MTR Bus · live" : "",
+  };
+}
+
+/**
  * Soft geo for ETA browse (cached, low urgency).
  * @returns {Promise<{ lat: number, lon: number } | null>}
  */
@@ -6780,8 +7132,14 @@ async function browseEtaRoutes(limit = 28) {
   });
 
   if (!geo) {
-    // Warm multi-op index in background for when location arrives
+    // Warm multi-op index + MTR Bus catalog in background
     void ensureEtaNearbyIndex();
+    void ensureMtrBusData().then(() => {
+      // Rebuild catalog once MTR Bus CSVs arrive
+      if (!etaRouteCatalog.some((r) => r.kind === "mtr_bus")) {
+        buildEtaRouteCatalog();
+      }
+    });
     const hits = catalogSorted.slice(0, limit);
     return {
       hits,
@@ -6791,6 +7149,10 @@ async function browseEtaRoutes(limit = 28) {
           : "All operators · allow location for nearby routes",
     };
   }
+
+  // Warm MTR Bus open data (catalog may already include fare-pack routes)
+  await ensureMtrBusData().catch(() => {});
+  if (mtrBusRouteIds().length) buildEtaRouteCatalog();
 
   // ── Nearby MTR lines ──
   /** @type {Map<string, { dist: number, station: string }>} */
@@ -6827,10 +7189,16 @@ async function browseEtaRoutes(limit = 28) {
     }
     if (etaTrafficMode === "mtr") {
       for (const r of filtered.filter((x) => x.kind === "mtr")) push(r);
+      const mtrHits = out.slice(0, limit);
+      await attachNearbyMtrLiveEtas(mtrHits, geo, lineNear);
       return {
-        hits: out.slice(0, limit),
+        hits: mtrHits,
         hint: lineNear.size
-          ? "Nearby MTR lines"
+          ? `Nearby MTR lines${
+              mtrHits.some((r) => etaLiveByKey.has(etaRouteKey(r)))
+                ? " · live ETA"
+                : ""
+            }`
           : "MTR lines (none within 2.5 km)",
       };
     }
@@ -6843,25 +7211,37 @@ async function browseEtaRoutes(limit = 28) {
       }
     }
     if (etaTrafficMode === "lrt") {
+      const lrtHits = out.slice(0, limit);
+      if (nearLrt) await attachNearbyLrtLiveEtas(lrtHits, geo);
       return {
-        hits: out.slice(0, limit),
-        hint: nearLrt ? "Light Rail routes (nearby)" : "All LRT routes",
+        hits: lrtHits,
+        hint: nearLrt
+          ? `Light Rail routes (nearby)${
+              lrtHits.some((r) => etaLiveByKey.has(etaRouteKey(r)))
+                ? " · live ETA"
+                : ""
+            }`
+          : "All LRT routes",
       };
     }
   }
 
-  // Bus / GMB: true multi-op nearby (not KMB-only)
+  // Bus / GMB / MTR Bus: multi-op nearby
   if (
     etaTrafficMode === "bus" ||
     etaTrafficMode === "gmb" ||
     etaTrafficMode === "all"
   ) {
     const wantKmb = etaTrafficMode !== "gmb";
-    const [nearKmb, nearOther] = await Promise.all([
+    const wantMtrBus = etaTrafficMode !== "gmb";
+    const [nearKmb, nearOther, nearMtrBus] = await Promise.all([
       wantKmb
         ? fetchNearbyKmbEtaHits(geo, Math.min(14, limit))
         : Promise.resolve({ hits: [], hint: "" }),
       fetchNearbyMultiOpHits(geo, Math.min(24, limit)),
+      wantMtrBus
+        ? fetchNearbyMtrBusEtaHits(geo, Math.min(10, limit))
+        : Promise.resolve({ hits: [], hint: "" }),
     ]);
 
     // Merge and rank: live minutes first, then keep operator diversity near top
@@ -6877,6 +7257,7 @@ async function browseEtaRoutes(limit = 28) {
       merged.push(r);
     };
     for (const r of nearKmb.hits) addMerged(r);
+    for (const r of nearMtrBus.hits) addMerged(r);
     for (const r of nearOther.hits) addMerged(r);
 
     const etaMins = (r) => etaLiveByKey.get(etaRouteKey(r))?.minutes;
@@ -6938,6 +7319,14 @@ async function browseEtaRoutes(limit = 28) {
     }
   }
 
+  // Live rail ETAs for mixed "all" browse (MTR/LRT already pushed above)
+  if (etaTrafficMode === "all") {
+    await Promise.all([
+      attachNearbyMtrLiveEtas(out, geo, lineNear),
+      nearLrt ? attachNearbyLrtLiveEtas(out, geo) : Promise.resolve(),
+    ]);
+  }
+
   const stName = [...lineNear.values()].sort((a, b) => a.dist - b.dist)[0]
     ?.station;
   const cos = new Set(out.map((r) => r.co || r.kind).filter(Boolean));
@@ -6946,7 +7335,10 @@ async function browseEtaRoutes(limit = 28) {
     .filter((c) => c !== "BUS")
     .slice(0, 6)
     .join(" · ");
-  const hasLive = out.some((r) => etaLiveByKey.has(etaRouteKey(r)));
+  const hasLive = out.some((r) => {
+    const live = etaLiveByKey.get(etaRouteKey(r));
+    return live && live.minutes != null && !live.scheduled;
+  });
   return {
     hits: out.slice(0, limit),
     hint: out.length
@@ -7321,7 +7713,11 @@ async function refreshEtaRouteSuggest() {
   etaNearbyDirsByKey.clear();
   renderEtaRouteSuggest([], "Loading nearby routes…", { status: "loading" });
   try {
-    await Promise.all([ensureKmbRouteBounds(), ensureKmbStops()]);
+    await Promise.all([
+      ensureKmbRouteBounds(),
+      ensureKmbStops(),
+      ensureMtrBusData().catch(() => {}),
+    ]);
     if (gen !== etaSuggestGen || getUiMode() !== "eta") return;
     if (String(els.inputEtaRoute?.value || "").trim().length >= 1) return;
     const { hits, hint } = await browseEtaRoutes();
@@ -7431,28 +7827,55 @@ function shapeAgencyMatchesCo(co, shapeAg) {
 function etaRouteAsOption(route, stops, dir = {}, boardStop = null) {
   const pts = (stops || [])
     .filter((s) => Number.isFinite(s.lon) && Number.isFinite(s.lat) && !s._polylineOnly)
-    .map((s, i) => ({
-      stop_id: s.stopId || String(i),
-      id: s.stopId || String(i),
-      stop_name: s.name || "",
-      name: s.name || "",
-      lon: s.lon,
-      lat: s.lat,
-      location: { lon: s.lon, lat: s.lat },
-    }));
-  const co = String(route.co || route.kind || "bus").toUpperCase();
-  const mode =
-    route.kind === "mtr"
-      ? "subway"
-      : route.kind === "lrt"
-        ? "tram"
-        : "bus";
+    .map((s, i) => {
+      const code = s.stationCode || s.code || "";
+      return {
+        stop_id: s.stopId || code || String(i),
+        id: s.stopId || code || String(i),
+        stop_name: s.name || "",
+        name: s.name || "",
+        station_code: code || undefined,
+        stationCode: code || undefined,
+        code: code || undefined,
+        lon: s.lon,
+        lat: s.lat,
+        location: { lon: s.lon, lat: s.lat },
+      };
+    });
+
+  let mode = "bus";
+  let agency = { id: "KMB", name: "KMB" };
+  let routeIdPrefix = "KMB";
+  if (route.kind === "mtr") {
+    mode = "subway";
+    agency = { id: "MTRR", name: "MTR Rail" };
+    routeIdPrefix = "MTR";
+  } else if (route.kind === "lrt") {
+    mode = "tram";
+    agency = { id: "LR", name: "Light Rail" };
+    routeIdPrefix = "LRT";
+  } else if (route.kind === "mtr_bus") {
+    mode = "bus";
+    agency = { id: "LRTFEEDER", name: "MTR Bus" };
+    routeIdPrefix = "LRTFEEDER";
+  } else {
+    const co = String(route.co || "kmb").toUpperCase();
+    agency = { id: co, name: co };
+    routeIdPrefix = co;
+  }
 
   let from = pts[0] || null;
   if (boardStop) {
     const bid = boardStop.stopId != null ? String(boardStop.stopId) : "";
+    const bCode = boardStop.stationCode || boardStop.code || "";
     const match =
       (bid && pts.find((p) => String(p.stop_id) === bid || String(p.id) === bid)) ||
+      (bCode &&
+        pts.find(
+          (p) =>
+            String(p.station_code || p.code || "").toUpperCase() ===
+            String(bCode).toUpperCase(),
+        )) ||
       (boardStop.name &&
         pts.find(
           (p) =>
@@ -7466,10 +7889,13 @@ function etaRouteAsOption(route, stops, dir = {}, boardStop = null) {
       Number.isFinite(boardStop.lat)
     ) {
       from = {
-        stop_id: bid || "board",
-        id: bid || "board",
+        stop_id: bid || bCode || "board",
+        id: bid || bCode || "board",
         stop_name: boardStop.name || "",
         name: boardStop.name || "",
+        station_code: bCode || undefined,
+        stationCode: bCode || undefined,
+        code: bCode || undefined,
         lon: boardStop.lon,
         lat: boardStop.lat,
         location: { lon: boardStop.lon, lat: boardStop.lat },
@@ -7478,11 +7904,13 @@ function etaRouteAsOption(route, stops, dir = {}, boardStop = null) {
   }
 
   return {
+    kind: route.kind,
+    etaKind: route.kind,
     route_short_name: route.id,
     route_name: route.label || route.id,
-    route_id: `${co}-${route.id}`,
+    route_id: `${routeIdPrefix}-${route.id}`,
     mode,
-    agency: { id: co, name: co },
+    agency,
     headsign: dir.dest || "",
     from: from || {
       stop_name: dir.orig || "",
@@ -7501,6 +7929,9 @@ async function loadEtaRouteStops(route) {
   const coPre = String(route.co || "").toLowerCase();
   if (coPre === "ctb") await ensureCtbRouteBound(route.id);
   if (coPre === "nlb") await ensureNlbRouteBounds();
+  if (route.kind === "mtr_bus" || coPre === "lrtfeeder" || coPre === "mtrbus") {
+    await ensureMtrBusData();
+  }
 
   // Prefer nearby “going away” bound over raw card index (OD order is O/I)
   const dirs = etaRouteDirections(route);
@@ -7512,8 +7943,17 @@ async function loadEtaRouteStops(route) {
   // Load official stop sequence from operator APIs first (names + ETA ids).
   // Contributed path is applied later in paint via buildTransitPolyline (trip plan).
 
-  // ── KMB / LWB only (never fall through for CTB/NLB) ──
-  if (co === "kmb" || co === "lwb" || route.kind === "mtr_bus") {
+  // ── MTR Bus (official open data, not KMB) ──
+  if (route.kind === "mtr_bus" || co === "lrtfeeder" || co === "mtrbus") {
+    const seq = mtrBusStopSequence(route.id, bound);
+    if (seq.length >= 2) return seq;
+    // try opposite bound
+    const alt = mtrBusStopSequence(route.id, bound === "I" ? "O" : "I");
+    if (alt.length >= 2) return alt;
+  }
+
+  // ── KMB / LWB only (never fall through for CTB/NLB/MTR Bus) ──
+  if (co === "kmb" || co === "lwb" || (route.kind === "bus" && !co)) {
     const direction = bound === "I" ? "inbound" : "outbound";
     try {
       const rs = await fetch(
@@ -7675,7 +8115,7 @@ async function loadEtaRouteStops(route) {
     }
   }
 
-  // MTR line stations
+  // MTR line stations (include station code for live Next Train API)
   if (route.kind === "mtr") {
     await ensureMtrStationLinesMap();
     const line = String(route.id).toUpperCase();
@@ -7685,8 +8125,14 @@ async function loadEtaRouteStops(route) {
         mtrStationLinesMap?.get(String(st.name_en || "").toLowerCase()) || [];
       if (!lines.map((x) => String(x).toUpperCase()).includes(line)) continue;
       if (!Number.isFinite(st.lat) || !Number.isFinite(st.lon)) continue;
+      const code = st.code ? String(st.code).toUpperCase() : "";
       onLine.push({
         name: st.name_zh ? `${st.name_zh} ${st.name_en}` : st.name_en,
+        nameEn: st.name_en || "",
+        nameTc: st.name_zh || "",
+        stopId: code ? `MTR-${code}` : "",
+        stationCode: code,
+        code,
         lon: st.lon,
         lat: st.lat,
         seq: 0,
@@ -7716,6 +8162,31 @@ async function loadEtaRouteStops(route) {
       }
       return ordered.map((s, i) => ({ ...s, seq: i + 1 }));
     }
+  }
+
+  // LRT: all Light Rail stops with official stop_id (live ETA station_id)
+  if (route.kind === "lrt") {
+    const stops = LRT_STOPS.filter(
+      (st) => Number.isFinite(st.lat) && Number.isFinite(st.lon),
+    )
+      .map((st, i) => ({
+        seq: i + 1,
+        name: st.name_zh ? `${st.name_zh} ${st.name_en}` : st.name_en,
+        nameEn: st.name_en || "",
+        nameTc: st.name_zh || "",
+        stopId: st.stop_id ? String(st.stop_id) : "",
+        lon: st.lon,
+        lat: st.lat,
+      }))
+      .sort((a, b) =>
+        String(a.nameEn || a.name).localeCompare(
+          String(b.nameEn || b.name),
+          undefined,
+          { sensitivity: "base" },
+        ),
+      )
+      .map((s, i) => ({ ...s, seq: i + 1 }));
+    if (stops.length >= 2) return stops;
   }
 
   // Fallback: contributed shape only (no official stop API) — still show path
@@ -8773,6 +9244,9 @@ function initEtaRouteSearchUi() {
   void ensureMtrStationLinesMap();
   void ensureKmbRouteBounds();
   void ensureKmbStops();
+  void ensureMtrBusData().then(() => {
+    buildEtaRouteCatalog();
+  });
 }
 
 function syncEtaActive() {

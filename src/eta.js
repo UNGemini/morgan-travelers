@@ -4,6 +4,7 @@
  */
 
 import { LRT_STOPS } from "./lrtStops.js";
+import { MTR_STATIONS } from "./mtrStations.js";
 import { isLightRailOption, detectMtrLineCode } from "./mtrColors.js";
 import {
   formatServiceClock,
@@ -53,13 +54,30 @@ export function stripOperatorStopId(raw) {
 
 /**
  * @param {object} [opt]
- * @returns {"kmb"|"ctb"|"nlb"|"mtr"|"lrt"|"unknown"}
+ * @returns {"kmb"|"ctb"|"nlb"|"mtr"|"lrt"|"mtr_bus"|"unknown"}
  */
 export function etaOperator(opt) {
   if (!opt) return "unknown";
+  // Explicit kind from ETA browse cards
+  const kind = String(opt.kind || opt.etaKind || "").toLowerCase();
+  if (kind === "mtr_bus" || kind === "mtrbus" || kind === "lrtfeeder")
+    return "mtr_bus";
+  if (kind === "lrt") return "lrt";
+  if (kind === "mtr") return "mtr";
   if (isLightRailOption(opt)) return "lrt";
   const agency = `${opt.agency?.id || ""} ${opt.agency?.name || ""}`.toLowerCase();
   const routeId = String(opt.route_id || "");
+  const short = routeShort(opt);
+  // MTR Bus / LRT Feeder (K51, 506, …) — not heavy-rail MTR
+  if (
+    /lrt\s*feeder|mtr\s*bus|mtrb|mtr_bus|港鐵巴士|輕鐵接駁/.test(agency) ||
+    /^LRTFEEDER/i.test(routeId) ||
+    /^MTRBUS/i.test(routeId) ||
+    /^MTR_BUS/i.test(routeId) ||
+    /^(K\d+[A-Z]?|506)$/i.test(short)
+  ) {
+    return "mtr_bus";
+  }
   const mode = String(opt.mode || "").toLowerCase();
   if (
     mode === "subway" ||
@@ -68,14 +86,13 @@ export function etaOperator(opt) {
     /^MTR-/i.test(routeId) ||
     /\bmtr\s*rail\b|\bairport\s*express\b/.test(agency)
   ) {
-    if (/lrt\s*feeder|mtr\s*bus|港鐵巴士/.test(agency)) return "kmb";
     return "mtr";
   }
   if (/\bnlb\b|new\s*lanto/.test(agency) || /^NLB-/i.test(routeId)) return "nlb";
   if (/\bctb\b|citybus|nwfb|new\s*world/.test(agency) || /^CTB-/i.test(routeId))
     return "ctb";
   if (
-    /\bkmb\b|lwb|long\s*win|kowloon\s*motor|lrt\s*feeder|mtr\s*bus/.test(agency) ||
+    /\bkmb\b|lwb|long\s*win|kowloon\s*motor/.test(agency) ||
     /^KMB-/i.test(routeId) ||
     /^LWB-/i.test(routeId)
   ) {
@@ -911,30 +928,30 @@ function mtrStationCode(stop, opt) {
   if (m) return m[1].toUpperCase();
   m = /^([A-Z]{3})$/i.exec(id);
   if (m) return m[1].toUpperCase();
+  // Explicit code fields from nearby browse
+  const codeHint = String(
+    stop?.station_code || stop?.stationCode || stop?.code || "",
+  )
+    .trim()
+    .toUpperCase();
+  if (/^[A-Z]{3}$/.test(codeHint)) return codeHint;
+
   const name = String(stop?.stop_name || stop?.name || stop?.address || "")
     .replace(/\(.*?\)/g, "")
     .trim()
     .toLowerCase();
-  // Common English names → codes (board/alight labels)
-  const NAME_TO_CODE = {
-    "tung chung": "TUC",
-    "hong kong": "HOK",
-    kowloon: "KOW",
-    olympic: "OLY",
-    "nam cheong": "NAC",
-    "lai king": "LAK",
-    "tsing yi": "TSY",
-    "sunny bay": "SUN",
-    airport: "AIR",
-    "asiaworld-expo": "AWE",
-    "asia world expo": "AWE",
-    admiralty: "ADM",
-    central: "CEN",
-    "tsim sha tsui": "TST",
-  };
-  if (NAME_TO_CODE[name]) return NAME_TO_CODE[name];
-  for (const [n, code] of Object.entries(NAME_TO_CODE)) {
-    if (name.includes(n)) return code;
+  if (name) {
+    // Full MTR_STATIONS directory (codes for live Next Train API)
+    for (const st of MTR_STATIONS || []) {
+      const en = String(st.name_en || "").toLowerCase();
+      const zh = String(st.name_zh || "");
+      if (en && (name === en || name.includes(en) || en.includes(name))) {
+        if (st.code) return String(st.code).toUpperCase();
+      }
+      if (zh && (name.includes(zh) || String(stop?.stop_name || "").includes(zh))) {
+        if (st.code) return String(st.code).toUpperCase();
+      }
+    }
   }
   void opt;
   return null;
@@ -1175,13 +1192,22 @@ async function fetchLrtEta(opt, board) {
       const plat = formatPlatformLabel(p.platform_id ?? p.platform);
       for (const r of p.route_list || []) {
         const rno = String(r.route_no || r.routeNo || "").toUpperCase();
-        if (route && rno && rno !== route) continue;
+        // When browsing a specific LRT route, keep only that route_no
+        if (route && rno && rno !== route && route !== "LRT") continue;
         const timeEn = String(r.time_en || r.time_ch || "").trim();
         let waitMins = null;
-        if (/arriving|departing|即將|正在/i.test(timeEn)) waitMins = 0;
-        else {
+        if (/arriving|departing|即將|正在|^-$/i.test(timeEn) || timeEn === "-") {
+          // "-" often means due / at platform in LRT feed
+          if (timeEn === "-" || /arriving|departing|即將|正在/i.test(timeEn)) {
+            waitMins = 0;
+          }
+        } else {
           const m = /(\d+)\s*min/i.exec(timeEn);
           if (m) waitMins = Number(m[1]);
+        }
+        // Also accept numeric fields if present
+        if (waitMins == null && r.time_min != null) {
+          waitMins = Math.max(0, Number(r.time_min));
         }
         if (waitMins == null) continue;
         slots.push({
@@ -1190,10 +1216,15 @@ async function fetchLrtEta(opt, board) {
           dest: r.dest_en || r.dest_ch || "",
           remark: rno ? `Route ${rno}` : "",
           platform: plat || platformFromStop(board),
+          scheduled: false,
         });
       }
     }
-    return packSlots({ operator: "lrt", route, stopId: stationId }, slots);
+    slots.sort((a, b) => (a.waitMins ?? 99) - (b.waitMins ?? 99));
+    return packSlots(
+      { operator: "lrt", route, stopId: stationId, fetchedAt: now },
+      slots,
+    );
   } catch (e) {
     return {
       operator: "lrt",
@@ -1203,6 +1234,121 @@ async function fetchLrtEta(opt, board) {
       waitMins: null,
       etaIso: null,
       error: e instanceof Error ? e.message : "LRT fetch failed",
+    };
+  }
+}
+
+/**
+ * MTR Bus (LRT Feeder) live schedule.
+ * POST https://rt.data.gov.hk/v1/transport/mtr/bus/getSchedule
+ * @param {object} opt
+ * @param {object} board
+ */
+async function fetchMtrBusEta(opt, board) {
+  const route = routeShort(opt);
+  const stopId = stripOperatorStopId(stopIdOf(board));
+  if (!route) {
+    return {
+      operator: "mtr_bus",
+      route: "",
+      stopId,
+      etas: [],
+      waitMins: null,
+      etaIso: null,
+      error: "missing MTR bus route",
+    };
+  }
+  try {
+    const res = await fetch(`${ETA_BASE}/mtr/bus/getSchedule`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ language: "en", routeName: route }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const stops = Array.isArray(data?.busStop) ? data.busStop : [];
+    const now = Date.now();
+    /** @type {object[]} */
+    let busRows = [];
+    if (stopId) {
+      const hit = stops.find(
+        (s) =>
+          String(s.busStopId || "").toUpperCase() === stopId.toUpperCase() ||
+          String(s.busStopId || "")
+            .toUpperCase()
+            .includes(stopId.toUpperCase()),
+      );
+      if (hit?.bus) busRows = hit.bus;
+    }
+    // Fallback: first stop with buses
+    if (!busRows.length) {
+      for (const s of stops) {
+        if (Array.isArray(s.bus) && s.bus.length) {
+          busRows = s.bus;
+          break;
+        }
+      }
+    }
+    const slots = [];
+    for (const b of busRows) {
+      // Prefer real-time arrival; 108000+ is a sentinel “no arrival estimate”
+      let sec = Number(b.arrivalTimeInSecond);
+      let fromArrival = Number.isFinite(sec) && sec >= 0 && sec < 100_000;
+      if (!fromArrival) {
+        sec = Number(b.departureTimeInSecond);
+        fromArrival = false;
+      }
+      if (!Number.isFinite(sec) || sec < 0 || sec >= 100_000) {
+        const txt = String(
+          b.arrivalTimeText || b.departureTimeText || "",
+        ).trim();
+        const m = /(\d+)\s*min/i.exec(txt);
+        if (m) sec = Number(m[1]) * 60;
+        else if (/arriving|即將/i.test(txt)) sec = 0;
+        else continue;
+      }
+      const waitMins = Math.max(0, Math.round(sec / 60));
+      // API often flags near-term buses as isScheduled=1; only badge far-out
+      // departures that clearly lack a real arrival estimate.
+      const hasGps =
+        Number(b.busLocation?.latitude) !== 0 ||
+        Number(b.busLocation?.longitude) !== 0;
+      const isSched =
+        !fromArrival &&
+        !hasGps &&
+        waitMins > 40 &&
+        (String(b.isScheduled || "") === "1" ||
+          String(b.isScheduled || "").toLowerCase() === "true");
+      slots.push({
+        waitMins,
+        etaIso: new Date(now + waitMins * 60_000).toISOString(),
+        dest: data?.routeStatusRemarkTitle || data?.routeName || route,
+        remark: b.busId ? `Bus ${b.busId}` : "",
+        scheduled: isSched,
+      });
+    }
+    slots.sort((a, b) => (a.waitMins ?? 99) - (b.waitMins ?? 99));
+    return packSlots(
+      {
+        operator: "mtr_bus",
+        route,
+        stopId: stopId || stops[0]?.busStopId || "",
+        fetchedAt: now,
+      },
+      slots,
+    );
+  } catch (e) {
+    return {
+      operator: "mtr_bus",
+      route,
+      stopId,
+      etas: [],
+      waitMins: null,
+      etaIso: null,
+      error: e instanceof Error ? e.message : "MTR bus fetch failed",
     };
   }
 }
@@ -1234,6 +1380,7 @@ export async function fetchBoardEta(opt, alight) {
     if (op === "nlb") return await fetchNlbEta(opt, board);
     if (op === "mtr") return await fetchMtrEta(opt, board, alight || opt.to);
     if (op === "lrt") return await fetchLrtEta(opt, board);
+    if (op === "mtr_bus") return await fetchMtrBusEta(opt, board);
   } catch (e) {
     return {
       operator: op,
