@@ -5923,7 +5923,61 @@ function etaHasRealOpposite(dirs) {
   const bb = String(b?.bound || "").toUpperCase();
   // Must be distinct bounds when both labeled
   if (ba && bb && ba === bb) return false;
+  // Reject A→B vs B→A where labels are only swapped circulars with same pair
+  // (still valid two-way); one-way is handled by stop-list verification.
   return true;
+}
+
+/**
+ * Keep only directions that have a real operator stop sequence (≥2 stops).
+ * Filters out phantom reverse bounds (common for one-way / circular).
+ * @param {EtaRouteEntry} route
+ * @param {Array<{ dest?: string, destZh?: string, bound?: string, orig?: string }>} dirs
+ */
+async function filterDirsWithRealStops(route, dirs) {
+  if (!route || !dirs?.length) return dirs || [];
+  if (dirs.length === 1) return dirs;
+  const co = String(route.co || "").toLowerCase();
+  const rid = String(route.id || "").toUpperCase();
+  /** @type {typeof dirs} */
+  const out = [];
+
+  for (const d of dirs) {
+    const bound = String(d.bound || "O").toUpperCase();
+    const direction = bound === "I" ? "inbound" : "outbound";
+    try {
+      if (co === "ctb") {
+        const n = await countCtbRouteStopRows(rid, direction);
+        if (n >= 2) out.push(d);
+        continue;
+      }
+      if (
+        co === "kmb" ||
+        co === "lwb" ||
+        co === "lrtfeeder" ||
+        route.kind === "mtr_bus" ||
+        (route.kind === "bus" && !co)
+      ) {
+        const seq = await ensureKmbRouteStopSeq(rid, direction);
+        if (seq.length >= 2) out.push(d);
+        continue;
+      }
+      if (co === "nlb") {
+        // NLB variants are separate routeIds — keep if labeled
+        if (d.dest || d.destZh) out.push(d);
+        continue;
+      }
+      // MTR/LRT/unknown: keep as-is (usually single “line”)
+      out.push(d);
+    } catch {
+      /* drop this bound on error */
+    }
+  }
+
+  const uniq = etaUniqueDirections(out);
+  // If verification wiped everything, fall back to first OD dir only
+  if (!uniq.length && dirs.length) return [dirs[0]];
+  return uniq;
 }
 
 /**
@@ -6015,7 +6069,29 @@ function etaRouteDirections(r, opts = {}) {
 }
 
 /**
- * Fetch CTB OD for one route number (O + reverse I).
+ * Count CTB route-stop rows for a direction (no per-stop detail fetch).
+ * @param {string} routeId
+ * @param {"inbound"|"outbound"} direction
+ */
+async function countCtbRouteStopRows(routeId, direction) {
+  const rid = String(routeId || "").toUpperCase();
+  const dir = direction === "inbound" ? "inbound" : "outbound";
+  try {
+    const rs = await fetch(
+      `/eta/ctb/route-stop/CTB/${encodeURIComponent(rid)}/${dir}`,
+      { headers: { Accept: "application/json" } },
+    );
+    if (!rs.ok) return 0;
+    const j = await rs.json();
+    return Array.isArray(j.data) ? j.data.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Fetch CTB OD — only include bounds that have a real stop list
+ * (do not invent reverse for one-way / circular routes).
  * @param {string} routeId
  */
 async function ensureCtbRouteBound(routeId) {
@@ -6033,20 +6109,44 @@ async function ensureCtbRouteBound(routeId) {
       if (!res.ok) throw new Error(String(res.status));
       const j = await res.json();
       const d = j.data || {};
-      const dirs = [
-        {
-          dest: String(d.dest_en || d.dest_tc || "—").trim(),
-          destZh: String(d.dest_tc || "").trim(),
+      const outEn = String(d.dest_en || d.dest_tc || "—").trim();
+      const outZh = String(d.dest_tc || "").trim();
+      const inEn = String(d.orig_en || d.orig_tc || "—").trim();
+      const inZh = String(d.orig_tc || "").trim();
+
+      const [nOut, nIn] = await Promise.all([
+        countCtbRouteStopRows(id, "outbound"),
+        countCtbRouteStopRows(id, "inbound"),
+      ]);
+
+      /** @type {Array<{ dest: string, destZh?: string, bound: string, orig?: string }>} */
+      const dirs = [];
+      if (nOut >= 2) {
+        dirs.push({
+          dest: outEn,
+          destZh: outZh,
           bound: "O",
-          orig: String(d.orig_en || d.orig_tc || "").trim(),
-        },
-        {
-          dest: String(d.orig_en || d.orig_tc || "—").trim(),
-          destZh: String(d.orig_tc || "").trim(),
+          orig: inEn,
+        });
+      }
+      // Only add reverse when Citybus publishes an inbound stop list
+      if (nIn >= 2) {
+        dirs.push({
+          dest: inEn,
+          destZh: inZh,
           bound: "I",
-          orig: String(d.dest_en || d.dest_tc || "").trim(),
-        },
-      ];
+          orig: outEn,
+        });
+      }
+      // Fallback: at least show the published OD once if both lists empty
+      if (!dirs.length) {
+        dirs.push({
+          dest: outEn,
+          destZh: outZh,
+          bound: "O",
+          orig: inEn,
+        });
+      }
       ctbRouteBoundsMap.set(id, dirs);
       return dirs;
     } catch (e) {
@@ -8416,8 +8516,10 @@ async function showEtaRouteDetailsPanel() {
 
   if (gen !== etaShapeGen) return;
 
-  // Full OD for stop list / shape; pick the same “going away” bound as the card
-  const dirs = etaRouteDirections(route, { full: true });
+  // Full OD for stop list / shape; drop phantom reverse bounds (one-way)
+  let dirs = etaRouteDirections(route, { full: true });
+  dirs = await filterDirsWithRealStops(route, dirs);
+  if (gen !== etaShapeGen) return;
   const di = resolveCardDirIndex(route, dirs);
   // Keep card dir in sync with resolved bound (OD index space)
   setCardDir(route, di);
