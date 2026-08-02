@@ -878,6 +878,77 @@ function setCardDir(r, i) {
 }
 
 /**
+ * Resolve direction index for a dirs array so “going away” / live bound stay
+ * consistent between nearby list (may reorder slots) and full OD order.
+ * Prefer matching live/nearby preferred bound over raw card index.
+ *
+ * @param {EtaRouteEntry} r
+ * @param {Array<{ bound?: string }>} dirs
+ * @returns {number}
+ */
+function resolveCardDirIndex(r, dirs) {
+  if (!dirs?.length) return 0;
+  const key = etaRouteKey(r);
+  const live = etaLiveByKey.get(key);
+  const wantBound = String(live?.bound || "").toUpperCase();
+  if (wantBound) {
+    const byLive = dirs.findIndex(
+      (d) => String(d.bound || "").toUpperCase() === wantBound,
+    );
+    if (byLive >= 0) return byLive;
+  }
+  // Nearby slots: prefer first slot after going-away sort (index 0 there)
+  // when dirs came from nearby; match its bound into this dirs list
+  const nearby = etaNearbyDirsByKey.get(key);
+  if (nearby?.length) {
+    const pref = nearby[0];
+    const b = String(pref?.bound || "").toUpperCase();
+    if (b) {
+      const byNear = dirs.findIndex(
+        (d) => String(d.bound || "").toUpperCase() === b,
+      );
+      if (byNear >= 0) return byNear;
+    }
+  }
+  return Math.min(getCardDir(r), dirs.length - 1);
+}
+
+/**
+ * Store nearby direction slots in stable O→I order (matches full OD),
+ * and set card dir to the preferred “going away” bound.
+ * @param {string} routeKey
+ * @param {EtaRouteEntry} entry
+ * @param {EtaNearbyDirSlot[]} scoredSlots  any order
+ */
+function commitNearbyDirSlots(routeKey, entry, scoredSlots) {
+  if (!scoredSlots?.length) return;
+  const preferred = sortSlotsGoingAway(scoredSlots)[0];
+  /** @type {EtaNearbyDirSlot[]} */
+  const ordered = [];
+  const byB = new Map(
+    scoredSlots.map((s) => [String(s.bound || "").toUpperCase(), s]),
+  );
+  // Stable O then I (same as CTB/KMB OD lists)
+  if (byB.has("O")) ordered.push(/** @type {EtaNearbyDirSlot} */ (byB.get("O")));
+  if (byB.has("I")) ordered.push(/** @type {EtaNearbyDirSlot} */ (byB.get("I")));
+  for (const s of scoredSlots) {
+    if (!ordered.includes(s)) ordered.push(s);
+  }
+  etaNearbyDirsByKey.set(routeKey, ordered);
+  const prefBound = String(preferred?.bound || "").toUpperCase();
+  const prefIdx = ordered.findIndex(
+    (s) => String(s.bound || "").toUpperCase() === prefBound,
+  );
+  setCardDir(entry, prefIdx >= 0 ? prefIdx : 0);
+  // Ensure live payload matches preferred away bound (not just index 0 of ordered)
+  const di = getCardDir(entry);
+  // Temporarily apply preferred: set index then live
+  applyNearbyDirLive(entry);
+  // If ordered[0] isn't preferred, applyNearbyDirLive used getCardDir which we set correctly
+  void di;
+}
+
+/**
  * Apply live ETA from the selected nearby direction slot (stop may change with bound).
  * @param {EtaRouteEntry} r
  */
@@ -6278,11 +6349,8 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
             slot.awayScore = 0;
           }
         }
-        const slots = sortSlotsGoingAway([...pack.byBound.values()]);
-        const finalSlots = slots.slice(0, 2);
-        etaNearbyDirsByKey.set(k, finalSlots);
-        setCardDir(entry, 0);
-        applyNearbyDirLive(entry);
+        const slots = [...pack.byBound.values()];
+        commitNearbyDirSlots(k, entry, slots);
       } else if (pack.nearStops[0]) {
         const n = pack.nearStops[0];
         entry.nearbyHint = `${n.name} · ${Math.round(n.d)} m`;
@@ -6313,13 +6381,10 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
         stopLabel: n.name,
         stopId: n.stopId,
         distM: n.d,
+        // Without geo termini, keep catalog order (O first)
         awayScore: i === 0 ? 1 : 0,
       }));
-      // Prefer first NLB variant that goes farther: second often reverse — score by index reverse
-      // Without path, keep catalog order but user can switch
-      etaNearbyDirsByKey.set(k, slots);
-      setCardDir(pack.entry, 0);
-      applyNearbyDirLive(pack.entry);
+      commitNearbyDirSlots(k, pack.entry, slots);
     }
   }
 
@@ -6481,11 +6546,8 @@ async function fetchNearbyKmbEtaHits(geo, limit = 16) {
         }),
       );
 
-      // Index 0 = going away from user
-      const finalSlots = sortSlotsGoingAway(slots).slice(0, 2);
-      etaNearbyDirsByKey.set(rk, finalSlots);
-      setCardDir(pack.entry, 0);
-      applyNearbyDirLive(pack.entry);
+      // Store O/I order + set card dir to going-away bound (not reordered list)
+      commitNearbyDirSlots(rk, pack.entry, slots);
       hits.push(pack.entry);
     }),
   );
@@ -7016,7 +7078,7 @@ function renderEtaRouteSuggest(hits, hint = "", opts = {}) {
   list.innerHTML = hits
     .map((r, i) => {
       const dirs = etaRouteDirections(r);
-      const di = Math.min(getCardDir(r), Math.max(0, dirs.length - 1));
+      const di = resolveCardDirIndex(r, dirs);
       const dir = dirs[di] || dirs[0] || { dest: r.label };
       const live = etaLiveByKey.get(etaRouteKey(r));
       // Live dest when we have ETA for this exact operator+route key
@@ -7297,9 +7359,10 @@ async function loadEtaRouteStops(route) {
   if (coPre === "ctb") await ensureCtbRouteBound(route.id);
   if (coPre === "nlb") await ensureNlbRouteBounds();
 
+  // Prefer nearby “going away” bound over raw card index (OD order is O/I)
   const dirs = etaRouteDirections(route);
-  const di = getCardDir(route);
-  const dir = dirs[Math.min(di, dirs.length - 1)] || dirs[0];
+  const di = resolveCardDirIndex(route, dirs);
+  const dir = dirs[di] || dirs[0];
   const bound = String(dir?.bound || "O").toUpperCase();
   const co = String(route.co || "").toLowerCase();
 
@@ -8311,9 +8374,11 @@ async function showEtaRouteDetailsPanel() {
 
   if (gen !== etaShapeGen) return;
 
-  // Full OD directions so Opposite shows even when nearby only saw one bound
+  // Full OD for stop list / shape; pick the same “going away” bound as the card
   const dirs = etaRouteDirections(route, { full: true });
-  const di = Math.min(getCardDir(route), Math.max(0, dirs.length - 1));
+  const di = resolveCardDirIndex(route, dirs);
+  // Keep card dir in sync with resolved bound (OD index space)
+  setCardDir(route, di);
   const dir = dirs[di] || dirs[0] || { dest: route.label };
   const dest = dir.destZh || dir.dest || route.label;
   const named = etaSelectedStops.filter((s) => s.name && !s._polylineOnly);
