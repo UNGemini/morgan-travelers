@@ -896,9 +896,9 @@ function setCardDir(r, i) {
 }
 
 /**
- * Resolve direction index for a dirs array so “going away” / live bound stay
- * consistent between nearby list (may reorder slots) and full OD order.
- * Prefer matching live/nearby preferred bound over raw card index.
+ * Resolve direction index for a dirs array.
+ * Prefer explicit card dir (set by nearby “going away” commit and Opposite)
+ * so Opposite on the detail page is not snapped back by live/nearby bound.
  *
  * @param {EtaRouteEntry} r
  * @param {Array<{ bound?: string }>} dirs
@@ -906,20 +906,22 @@ function setCardDir(r, i) {
  */
 function resolveCardDirIndex(r, dirs) {
   if (!dirs?.length) return 0;
+  const card = getCardDir(r);
+  if (card >= 0 && card < dirs.length) return card;
+
+  // Fallbacks only when card index is out of range (e.g. one-way filtered)
   const key = etaRouteKey(r);
   const live = etaLiveByKey.get(key);
   const wantBound = String(live?.bound || "").toUpperCase();
-  if (wantBound) {
+  if (wantBound && wantBound !== "LINE" && wantBound !== "LRT") {
     const byLive = dirs.findIndex(
       (d) => String(d.bound || "").toUpperCase() === wantBound,
     );
     if (byLive >= 0) return byLive;
   }
-  // Nearby slots: prefer first slot after going-away sort (index 0 there)
-  // when dirs came from nearby; match its bound into this dirs list
   const nearby = etaNearbyDirsByKey.get(key);
   if (nearby?.length) {
-    const pref = nearby[0];
+    const pref = nearby[Math.min(card, nearby.length - 1)] || nearby[0];
     const b = String(pref?.bound || "").toUpperCase();
     if (b) {
       const byNear = dirs.findIndex(
@@ -928,7 +930,52 @@ function resolveCardDirIndex(r, dirs) {
       if (byNear >= 0) return byNear;
     }
   }
-  return Math.min(getCardDir(r), dirs.length - 1);
+  return Math.min(Math.max(0, card), dirs.length - 1);
+}
+
+/**
+ * Keep live/nearby metadata aligned with the card direction index.
+ * Call after Opposite so reloads don’t snap back to the old bound.
+ * @param {EtaRouteEntry} r
+ * @param {number} di
+ * @param {Array<{ bound?: string, dest?: string, destZh?: string, orig?: string }>} [dirs]
+ */
+function syncDirChoiceToLive(r, di, dirs) {
+  if (!r) return;
+  const key = etaRouteKey(r);
+  const list =
+    dirs?.length >= 1 ? dirs : etaRouteDirections(r, { full: true });
+  const idx = Math.min(Math.max(0, di), Math.max(0, list.length - 1));
+  const d = list[idx];
+  if (!d) return;
+  setCardDir(r, idx);
+
+  // Nearby slots are stored O→I (same as full OD) — apply matching bound’s ETA
+  const nearby = etaNearbyDirsByKey.get(key);
+  if (nearby?.length) {
+    const want = String(d.bound || "").toUpperCase();
+    const nearDi = nearby.findIndex(
+      (s) => String(s.bound || "").toUpperCase() === want,
+    );
+    if (nearDi >= 0) {
+      setCardDir(r, nearDi);
+      applyNearbyDirLive(r);
+      setCardDir(r, idx);
+      return;
+    }
+  }
+
+  const prev = etaLiveByKey.get(key) || {};
+  etaLiveByKey.set(key, {
+    ...prev,
+    minutes: prev.minutes ?? null,
+    bound: d.bound,
+    dest: d.dest || prev.dest,
+    destZh: d.destZh || prev.destZh,
+    stopId: undefined,
+    stopLabel: d.orig || "",
+    scheduled: prev.scheduled,
+  });
 }
 
 /**
@@ -7681,12 +7728,12 @@ function renderEtaRouteSuggest(hits, hint = "", opts = {}) {
       const idx = Number(li?.getAttribute("data-idx"));
       const r = etaRouteHits[idx];
       if (!r) return;
-      const dirs = etaRouteDirections(r);
-      if (dirs.length < 2) return;
+      const dirs = etaRouteDirections(r, { full: true });
+      if (dirs.length < 2 || !etaHasRealOpposite(dirs)) return;
       const cur = Math.min(getCardDir(r), dirs.length - 1);
       const next = cur === 0 ? 1 : 0;
       setCardDir(r, next);
-      applyNearbyDirLive(r);
+      syncDirChoiceToLive(r, next, dirs);
       etaRouteActive = idx;
       renderEtaRouteSuggest(etaRouteHits, hint, { skipPrefetch: true });
       etaRouteActive = idx;
@@ -7964,8 +8011,8 @@ async function loadEtaRouteStops(route) {
     await ensureMtrStationLinesMap();
   }
 
-  // Prefer nearby “going away” bound over raw card index (OD order is O/I)
-  const dirs = etaRouteDirections(route);
+  // Full OD bounds so Opposite (card dir 0|1) maps to real O/I sequences
+  const dirs = etaRouteDirections(route, { full: true });
   const di = resolveCardDirIndex(route, dirs);
   const dir = dirs[di] || dirs[0];
   let bound = String(dir?.bound || "O").toUpperCase();
@@ -8917,9 +8964,13 @@ async function renderEtaRouteDetailBody(route, ctx) {
 
   els.etaRouteDetailBody
     .querySelector("#btn-eta-detail-dir")
-    ?.addEventListener("click", () => {
+    ?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!dirs || dirs.length < 2) return;
       const next = di === 0 ? 1 : 0;
       setCardDir(route, next);
+      syncDirChoiceToLive(route, next, dirs);
       etaDetailStopIndex = 0;
       void showEtaRouteDetailsPanel();
     });
@@ -9078,24 +9129,45 @@ async function showEtaRouteDetailsPanel() {
   let dirs = etaRouteDirections(route, { full: true });
   dirs = await filterDirsWithRealStops(route, dirs);
   if (gen !== etaShapeGen) return;
-  const di = resolveCardDirIndex(route, dirs);
-  // Keep card dir in sync with resolved bound (OD index space)
+  // Respect Opposite / list card dir — do not overwrite from live bound
+  let di = resolveCardDirIndex(route, dirs);
+  if (di >= dirs.length) di = Math.max(0, dirs.length - 1);
   setCardDir(route, di);
   const dir = dirs[di] || dirs[0] || { dest: route.label };
   const dest = dir.destZh || dir.dest || route.label;
   const named = etaSelectedStops.filter((s) => s.name && !s._polylineOnly);
 
-  // Default selected stop: nearby/live stop when known
+  // Board stop: only reuse live pin when it belongs to this bound
   const liveMeta = etaLiveByKey.get(etaRouteKey(route));
-  let selectedIndex = 0;
-  if (liveMeta?.stopId) {
+  const liveBound = String(liveMeta?.bound || "").toUpperCase();
+  const dirBound = String(dir?.bound || "").toUpperCase();
+  const liveBoundOk =
+    !liveBound ||
+    !dirBound ||
+    liveBound === dirBound ||
+    liveBound === "LINE" ||
+    liveBound === "LRT" ||
+    dirBound === "LINE" ||
+    dirBound === "LRT";
+  let selectedIndex = Math.min(
+    Math.max(0, etaDetailStopIndex || 0),
+    Math.max(0, named.length - 1),
+  );
+  if (liveBoundOk && liveMeta?.stopId) {
     const i = named.findIndex(
       (s) => s.stopId && String(s.stopId) === String(liveMeta.stopId),
     );
     if (i >= 0) selectedIndex = i;
-  } else if (liveMeta?.stopLabel) {
-    const i = named.findIndex((s) => s.name === liveMeta.stopLabel);
+  } else if (liveBoundOk && liveMeta?.stopLabel) {
+    const i = named.findIndex(
+      (s) =>
+        s.name === liveMeta.stopLabel ||
+        s.nameEn === liveMeta.stopLabel ||
+        (s.name && liveMeta.stopLabel && s.name.includes(liveMeta.stopLabel)),
+    );
     if (i >= 0) selectedIndex = i;
+  } else if (!liveBoundOk) {
+    selectedIndex = 0;
   }
   etaDetailStopIndex = selectedIndex;
 
