@@ -274,7 +274,6 @@ const els = {
   toolbarPinnedLabel: document.getElementById("toolbar-pinned-label"),
   etaBottomChrome: document.getElementById("eta-sidebar-bottom-chrome"),
   etaRouteDetailChrome: document.getElementById("eta-route-detail-chrome"),
-  appBottomNav: document.getElementById("app-bottom-nav"),
   etaSidebarSearch: document.getElementById("eta-sidebar-search"),
   btnEtaSearchToggle: document.getElementById("btn-eta-search-toggle"),
   modeButtons: () =>
