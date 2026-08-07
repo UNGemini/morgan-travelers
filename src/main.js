@@ -9805,10 +9805,6 @@ function wireSheetSnap() {
 }
 wireSheetSnap();
 
-els.btnProfile?.addEventListener("click", (e) => {
-  e.stopPropagation();
-});
-
 /** Contributor path editor (About → Contribute route path) */
 const pathContributor = createPathContributor({
   map,
