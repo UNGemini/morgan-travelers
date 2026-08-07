@@ -850,12 +850,41 @@ body.mobile-ui [data-acrylic]::before {
   pointer-events: auto;
 }
 
-/* Hide method pills outside Nearby list */
-.app-shell:not([data-ui-mode="eta"]) .eta-sidebar-bottom-chrome,
-.app-shell[data-ui-mode="eta"]:has(#sidebar-page-eta-route:not([hidden])) .eta-sidebar-bottom-chrome,
-.app-shell[data-ui-mode="eta"]:has(#sidebar-page-pinned:not([hidden])) .eta-sidebar-bottom-chrome,
-.app-shell[data-ui-mode="eta"]:has(#sidebar-page-settings:not([hidden])) .eta-sidebar-bottom-chrome,
-.app-shell[data-ui-mode="eta"]:has(#sidebar-page-about:not([hidden])) .eta-sidebar-bottom-chrome {
+/* Method pills only on Nearby list (not route detail / other pages) */
+.app-shell:not([data-ui-mode="eta"]) #eta-sidebar-bottom-chrome,
+.app-shell[data-ui-mode="eta"]:has(#sidebar-page-eta-route:not([hidden])) #eta-sidebar-bottom-chrome,
+.app-shell[data-ui-mode="eta"]:has(#sidebar-page-pinned:not([hidden])) #eta-sidebar-bottom-chrome,
+.app-shell[data-ui-mode="eta"]:has(#sidebar-page-settings:not([hidden])) #eta-sidebar-bottom-chrome,
+.app-shell[data-ui-mode="eta"]:has(#sidebar-page-about:not([hidden])) #eta-sidebar-bottom-chrome,
+.app-shell[data-ui-mode="eta"]:has(#sidebar-page-trip:not([hidden])) #eta-sidebar-bottom-chrome {
+  display: none !important;
+}
+
+/*
+ * Route detail: Back + Pin live in panel-bottom-stack and replace app nav.
+ */
+#eta-route-detail-chrome {
+  display: none;
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  justify-content: stretch;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+  margin: 0;
+  border: none;
+  background: transparent;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
+}
+#eta-route-detail-chrome:not([hidden]) {
+  display: flex !important;
+}
+/* When detail chrome is shown, hide main app nav */
+.panel-bottom-stack:has(#eta-route-detail-chrome:not([hidden])) #app-bottom-nav {
   display: none !important;
 }
 
@@ -1505,12 +1534,6 @@ body.mobile-ui [data-acrylic]::before {
   padding: 0 12px 0;
   display: flex;
   flex-direction: column;
-}
-
-/* Route detail liquid-glass bottom bar (Back + Pin) */
-.eta-route-detail-chrome {
-  flex-shrink: 0;
-  gap: 10px;
 }
 
 .eta-detail-chrome-btn {

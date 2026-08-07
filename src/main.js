@@ -273,6 +273,8 @@ const els = {
   btnEtaPinned: document.getElementById("btn-eta-pinned"),
   toolbarPinnedLabel: document.getElementById("toolbar-pinned-label"),
   etaBottomChrome: document.getElementById("eta-sidebar-bottom-chrome"),
+  etaRouteDetailChrome: document.getElementById("eta-route-detail-chrome"),
+  appBottomNav: document.getElementById("app-bottom-nav"),
   etaSidebarSearch: document.getElementById("eta-sidebar-search"),
   btnEtaSearchToggle: document.getElementById("btn-eta-search-toggle"),
   modeButtons: () =>
@@ -5090,6 +5092,16 @@ function setSidebarPage(page) {
   ) {
     const body = els.panel.querySelector(".detail-sidebar-body");
     if (body) body.scrollTop = 0;
+  }
+  // Route detail: Back + Pin replace main app nav in the bottom stack
+  const detailChrome = els.etaRouteDetailChrome;
+  const onRouteDetail = sidebarPage === "eta-route";
+  if (detailChrome) {
+    detailChrome.hidden = !onRouteDetail;
+  }
+  if (els.appBottomNav) {
+    // CSS also hides via :has(); keep in sync for older engines
+    els.appBottomNav.style.display = onRouteDetail ? "none" : "";
   }
   if (typeof syncAppNavActive === "function") syncAppNavActive();
 }
