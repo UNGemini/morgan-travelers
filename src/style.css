@@ -399,47 +399,49 @@ body.mobile-ui [data-acrylic]::before {
   color: var(--text-secondary);
 }
 
-/* Profile (top-right on map) */
-.map-profile {
-  position: absolute;
-  z-index: 4;
-  top: calc(12px + env(safe-area-inset-top, 0px));
-  right: 12px;
+/* Profile — top-right of panel title row */
+.panel-profile {
+  position: relative;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 8px;
-  pointer-events: none;
+  margin-left: auto;
+  z-index: 6;
 }
-.map-profile > * {
-  pointer-events: auto;
-}
-.map-profile-btn {
-  width: 42px;
-  height: 42px;
+.panel-profile-btn {
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(22, 26, 34, 0.72);
-  backdrop-filter: blur(22px) saturate(1.4);
-  -webkit-backdrop-filter: blur(22px) saturate(1.4);
+  background: rgba(40, 42, 48, 0.55);
+  backdrop-filter: blur(22px) saturate(1.5);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
   color: #fff;
   display: grid;
   place-items: center;
   cursor: pointer;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 4px 14px rgba(0, 0, 0, 0.25);
+  padding: 0;
 }
-.map-profile-btn .material-symbols-outlined {
-  font-size: 22px;
+.panel-profile-btn .material-symbols-outlined {
+  font-size: 20px;
 }
-.map-profile-btn[aria-expanded="true"] {
-  background: rgba(192, 174, 252, 0.22);
-  border-color: rgba(192, 174, 252, 0.45);
+.panel-profile-btn[aria-expanded="true"] {
+  background: rgba(192, 174, 252, 0.28);
+  border-color: rgba(192, 174, 252, 0.5);
+  color: var(--accent);
 }
 .profile-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
   min-width: 180px;
   padding: 6px;
   border-radius: 14px;
-  background: rgba(18, 22, 28, 0.92);
+  background: rgba(18, 22, 28, 0.94);
   border: 1px solid rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(24px) saturate(1.3);
   -webkit-backdrop-filter: blur(24px) saturate(1.3);
@@ -447,6 +449,7 @@ body.mobile-ui [data-acrylic]::before {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  z-index: 20;
 }
 .profile-menu-item {
   display: flex;
@@ -472,7 +475,7 @@ body.mobile-ui [data-acrylic]::before {
   opacity: 0.9;
 }
 
-/* ── Bottom dock — bottom-left (expands to full height when detail open) ─ */
+/* ── Bottom dock / left panel — width fluid (not JS-locked) ─ */
 .main-toolbar {
   position: absolute;
   z-index: 5;
@@ -481,10 +484,10 @@ body.mobile-ui [data-acrylic]::before {
   bottom: calc(var(--dock-pad) + var(--safe-bottom));
   top: auto;
   transform: translateY(0);
-  /* Width locked via --dock-chrome-w (JS) — same for ETA + Trip Plan */
-  width: var(--dock-chrome-w, max-content);
-  min-width: var(--dock-chrome-w, 0px);
-  max-width: calc(100vw - 2 * var(--dock-pad));
+  /* Fluid width: content-driven with soft min/max — no fixed lock */
+  width: auto;
+  min-width: min(280px, calc(100vw - 2 * var(--dock-pad)));
+  max-width: min(var(--panel-w), calc(100vw - 2 * var(--dock-pad)));
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -506,7 +509,6 @@ body.mobile-ui [data-acrylic]::before {
     top 0.35s cubic-bezier(0.22, 1, 0.36, 1),
     bottom 0.35s cubic-bezier(0.22, 1, 0.36, 1),
     max-height 0.35s cubic-bezier(0.22, 1, 0.36, 1);
-  /* width is JS-locked — no transition (resize must not animate width) */
 }
 
 /* Open detail: pin top+bottom so height tracks viewport on resize */
@@ -515,9 +517,9 @@ body.mobile-ui [data-acrylic]::before {
   bottom: calc(var(--dock-pad) + var(--safe-bottom));
   max-height: calc(100dvh - 2 * var(--dock-pad) - var(--safe-top) - var(--safe-bottom));
   height: auto;
-  width: var(--dock-chrome-w, max-content);
-  min-width: var(--dock-chrome-w, 0px);
-  max-width: calc(100vw - 2 * var(--dock-pad));
+  width: auto;
+  min-width: min(280px, calc(100vw - 2 * var(--dock-pad)));
+  max-width: min(var(--panel-w), calc(100vw - 2 * var(--dock-pad)));
 }
 
 /* Sidebar pages must not widen the dock beyond chrome lock */
@@ -5011,8 +5013,9 @@ body.contrib-submitting .bg-orb {
 .sheet-title-row {
   display: flex;
   align-items: center;
-  min-height: 28px;
-  padding: 2px 2px 6px;
+  gap: 10px;
+  min-height: 36px;
+  padding: 2px 4px 6px;
 }
 .sheet-title {
   margin: 0;
@@ -5020,6 +5023,8 @@ body.contrib-submitting .bg-orb {
   font-weight: 700;
   letter-spacing: -0.02em;
   color: #fff;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 /* ── App bottom nav — liquid glass tab switcher ─────────────── */
@@ -5198,32 +5203,69 @@ body.contrib-submitting .bg-orb {
   display: none !important;
 }
 
-/* Liquid glass MapLibre controls */
-.maplibregl-ctrl-group {
-  border: 1px solid rgba(255, 255, 255, 0.14) !important;
-  border-radius: 14px !important;
-  overflow: hidden;
-  background: rgba(22, 26, 34, 0.72) !important;
-  backdrop-filter: blur(20px) saturate(1.35);
-  -webkit-backdrop-filter: blur(20px) saturate(1.35);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35) !important;
+/* Map tools BR — liquid glass icon-only circles (like unexpanded Search) */
+.maplibregl-ctrl-bottom-right {
+  display: flex !important;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px !important;
 }
-.maplibregl-ctrl-group button {
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-group {
   background: transparent !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  overflow: visible !important;
+  display: flex !important;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 0 !important;
 }
-.maplibregl-ctrl-group button + button {
-  border-top-color: rgba(255, 255, 255, 0.1) !important;
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-group button {
+  width: 48px !important;
+  height: 48px !important;
+  min-width: 48px !important;
+  min-height: 48px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  background: rgba(40, 42, 48, 0.55) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 8px 28px rgba(0, 0, 0, 0.35),
+    0 2px 8px rgba(0, 0, 0, 0.2) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(1.7) !important;
+  backdrop-filter: blur(32px) saturate(1.7) !important;
+  display: grid !important;
+  place-items: center !important;
+}
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-group button + button {
+  border-top: 1px solid rgba(255, 255, 255, 0.14) !important;
+}
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-group button:hover {
+  background: rgba(55, 58, 66, 0.75) !important;
+}
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-group button:focus {
+  outline: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 0 0 2px rgba(192, 174, 252, 0.45),
+    0 8px 28px rgba(0, 0, 0, 0.35) !important;
 }
 .maplibregl-ctrl-icon {
   filter: invert(1) brightness(1.15);
 }
-body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:has(.maplibregl-ctrl-zoom-in),
-body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-zoom-in,
-body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-zoom-out,
-body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-compass {
-  /* JS also removes NavigationControl; CSS fallback */
+/* Attribution stays plain text under tools */
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib {
+  border-radius: 10px !important;
+  background: rgba(22, 26, 34, 0.55) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
 }
+
 body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.maplibregl-ctrl-geolocate)) {
   display: none !important;
 }
@@ -5235,9 +5277,10 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     top: calc(var(--dock-pad) + var(--safe-top));
     bottom: calc(var(--dock-pad) + var(--safe-bottom));
     right: auto;
-    width: var(--dock-chrome-w, var(--panel-w));
-    min-width: min(320px, calc(100vw - 2 * var(--dock-pad)));
-    max-width: min(440px, calc(100vw - 2 * var(--dock-pad)));
+    /* Fluid panel width — not a fixed lock */
+    width: clamp(300px, 34vw, 440px);
+    min-width: min(300px, calc(100vw - 2 * var(--dock-pad)));
+    max-width: min(480px, calc(100vw - 2 * var(--dock-pad)));
     max-height: none;
     height: auto;
     border-radius: 22px;
@@ -5250,6 +5293,9 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     bottom: calc(var(--dock-pad) + var(--safe-bottom));
     height: auto;
     max-height: none;
+    width: clamp(300px, 34vw, 440px);
+    min-width: min(300px, calc(100vw - 2 * var(--dock-pad)));
+    max-width: min(480px, calc(100vw - 2 * var(--dock-pad)));
   }
 
   .detail-sidebar {
@@ -5345,11 +5391,6 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
 
   .maplibregl-ctrl-bottom-right {
     right: 10px !important;
-  }
-
-  .map-profile {
-    right: 10px;
-    top: calc(10px + env(safe-area-inset-top, 0px));
   }
 
   .app-nav-tab-label {

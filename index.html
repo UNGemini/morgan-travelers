@@ -41,38 +41,6 @@
             <span class="map-route-loading-label">Drawing route…</span>
           </div>
         </div>
-        <!-- Profile menu (top-right) — Settings / About -->
-        <div class="map-profile" id="map-profile">
-          <button
-            type="button"
-            id="btn-profile"
-            class="map-profile-btn"
-            data-acrylic
-            title="Profile"
-            aria-label="Profile menu"
-            aria-haspopup="menu"
-            aria-expanded="false"
-            aria-controls="profile-menu"
-          >
-            <span class="material-symbols-outlined" aria-hidden="true">person</span>
-          </button>
-          <div
-            id="profile-menu"
-            class="profile-menu"
-            role="menu"
-            hidden
-            aria-label="Profile"
-          >
-            <button type="button" class="profile-menu-item" role="menuitem" id="btn-settings" data-acrylic>
-              <span class="material-symbols-outlined" aria-hidden="true">settings</span>
-              Settings
-            </button>
-            <button type="button" class="profile-menu-item" role="menuitem" id="btn-info" data-acrylic>
-              <span class="material-symbols-outlined" aria-hidden="true">info</span>
-              About Travelers
-            </button>
-          </div>
-        </div>
         <!-- Router status kept for JS but visually hidden (no “Ready · N stops” chip) -->
         <div id="map-status" class="map-status is-visually-hidden" role="status" aria-live="polite">
           <p id="router-status" class="status-line">Loading WASM router…</p>
@@ -668,7 +636,7 @@
           aria-label="Travelers panel"
           aria-hidden="false"
         >
-          <!-- Find My–style grabber + title (mobile snap; always shown) -->
+          <!-- Find My–style grabber + title; profile top-right of panel -->
           <div class="sheet-chrome" id="sheet-chrome">
             <button
               type="button"
@@ -683,6 +651,37 @@
               <h2 class="sheet-title">
                 <span id="detail-title">Nearby</span>
               </h2>
+              <div class="panel-profile" id="map-profile">
+                <button
+                  type="button"
+                  id="btn-profile"
+                  class="panel-profile-btn"
+                  data-acrylic
+                  title="Profile"
+                  aria-label="Profile menu"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                  aria-controls="profile-menu"
+                >
+                  <span class="material-symbols-outlined" aria-hidden="true">person</span>
+                </button>
+                <div
+                  id="profile-menu"
+                  class="profile-menu"
+                  role="menu"
+                  hidden
+                  aria-label="Profile"
+                >
+                  <button type="button" class="profile-menu-item" role="menuitem" id="btn-settings" data-acrylic>
+                    <span class="material-symbols-outlined" aria-hidden="true">settings</span>
+                    Settings
+                  </button>
+                  <button type="button" class="profile-menu-item" role="menuitem" id="btn-info" data-acrylic>
+                    <span class="material-symbols-outlined" aria-hidden="true">info</span>
+                    About Travelers
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 

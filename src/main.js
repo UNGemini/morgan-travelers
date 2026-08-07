@@ -5711,127 +5711,49 @@ function dockViewportMaxWidth() {
 }
 
 /**
- * Apply a fixed dock width (ETA and Trip Plan use the same value).
- * Ideal lock is preserved; only the painted width is clamped to the viewport.
- * @param {number} idealPx  preferred width to remember (pre-clamp)
+ * Clear any legacy fixed dock width — panel width is CSS fluid only.
  */
-function applyDockWidth(idealPx) {
+function clearDockWidthLock() {
   const dock = els.mainToolbar;
+  dockLockedWidthPx = 0;
   if (!dock) return;
-  const maxW = dockViewportMaxWidth();
-  const ideal = Math.max(Math.round(idealPx), 200);
-  // Remember the intended chrome width even if viewport is currently narrower
-  dockLockedWidthPx = ideal;
-  const w = Math.min(ideal, maxW);
-  dock.style.setProperty("--dock-chrome-w", `${w}px`);
-  dock.style.width = `${w}px`;
-  dock.style.minWidth = `${w}px`;
-  dock.style.maxWidth = `${maxW}px`;
-}
-
-/**
- * Measure toolbar chrome only (not detail body content).
- * Mid-slot is forced to a fixed footprint so ETA / Trip Plan faces match.
- * @returns {number}
- */
-function measureDockChromeNatural() {
-  const dock = els.mainToolbar;
-  const inner = dock?.querySelector?.(".toolbar-inner");
-  if (!dock || !inner) return 0;
-
-  const mid = dock.querySelector(".toolbar-mid-slot");
-  const prev = {
-    transition: dock.style.transition,
-    width: dock.style.width,
-    minWidth: dock.style.minWidth,
-    maxWidth: dock.style.maxWidth,
-    chromeW: dock.style.getPropertyValue("--dock-chrome-w"),
-    midFlex: mid?.style.flex,
-    midW: mid?.style.width,
-    midMin: mid?.style.minWidth,
-    midMax: mid?.style.maxWidth,
-  };
-
-  dock.style.transition = "none";
   dock.style.removeProperty("--dock-chrome-w");
-  dock.style.width = "max-content";
-  dock.style.minWidth = "0";
-  dock.style.maxWidth = "none";
-  if (mid) {
-    mid.style.flex = "0 0 auto";
-    mid.style.width = "7.5rem";
-    mid.style.minWidth = "7.5rem";
-    mid.style.maxWidth = "7.5rem";
-  }
-  void dock.offsetWidth;
-  const natural = Math.ceil(
-    Math.max(inner.scrollWidth, inner.getBoundingClientRect().width, 1),
-  );
+  dock.style.removeProperty("width");
+  dock.style.removeProperty("min-width");
+  dock.style.removeProperty("max-width");
+}
 
-  dock.style.transition = prev.transition;
-  dock.style.width = prev.width;
-  dock.style.minWidth = prev.minWidth;
-  dock.style.maxWidth = prev.maxWidth;
-  if (prev.chromeW) dock.style.setProperty("--dock-chrome-w", prev.chromeW);
-  else dock.style.removeProperty("--dock-chrome-w");
-  if (mid) {
-    mid.style.flex = prev.midFlex || "";
-    mid.style.width = prev.midW || "";
-    mid.style.minWidth = prev.midMin || "";
-    mid.style.maxWidth = prev.midMax || "";
-  }
-  return natural;
+/** @deprecated no fixed lock; CSS handles panel width */
+function applyDockWidth(_idealPx) {
+  clearDockWidthLock();
+}
+
+/** @deprecated */
+function measureDockChromeNatural() {
+  return 0;
 }
 
 /**
- * Lock dock width to chrome content × scale.
- * Default: keep existing lock (no grow/shrink) so ETA ↔ Trip Plan stay identical.
- * @param {{ remount?: boolean }} [opts]
- *   remount — remeasure chrome once (first layout only)
+ * Panel width is not locked. Optionally sync nav height token.
+ * @param {{ remount?: boolean }} [_opts]
  */
-function syncDockChromeWidth({ remount = false } = {}) {
-  const dock = els.mainToolbar;
-  if (!dock || dock.offsetParent === null) return;
-
-  // Already locked: re-apply clamp only — never remeasure from content
-  if (dockLockedWidthPx > 40 && !remount) {
-    applyDockWidth(dockLockedWidthPx);
-    return;
-  }
-
-  const natural = measureDockChromeNatural();
-  if (natural <= 40) {
-    if (dockLockedWidthPx > 40) applyDockWidth(dockLockedWidthPx);
-    return;
-  }
-
-  // First lock (or forced remount): measure chrome × scale
-  // If we already have a lock and remount is for rare recovery, keep the larger of the two
-  let next = Math.ceil(natural * DOCK_WIDTH_SCALE);
-  if (dockLockedWidthPx > 40) {
-    next = Math.max(dockLockedWidthPx, next);
-  }
-  applyDockWidth(next);
-
-  const inner = dock.querySelector(".toolbar-inner");
-  if (inner) {
-    const chromeH = Math.ceil(inner.getBoundingClientRect().height);
-    if (chromeH >= 40 && chromeH <= 80) {
-      document.documentElement.style.setProperty("--toolbar-h", `${chromeH}px`);
+function syncDockChromeWidth(_opts = {}) {
+  clearDockWidthLock();
+  const nav = els.appBottomNav || document.getElementById("app-bottom-nav");
+  if (nav) {
+    const h = Math.ceil(nav.getBoundingClientRect().height);
+    if (h >= 48 && h <= 96) {
+      document.documentElement.style.setProperty("--toolbar-h", `${h}px`);
     }
   }
 }
 
-// Viewport / visualViewport resize: only clamp locked width — never remeasure content
+// Viewport resize: no width lock — just resize map
 let dockResizeTimer = null;
 function onViewportChromeResize() {
   clearTimeout(dockResizeTimer);
   dockResizeTimer = setTimeout(() => {
-    if (dockLockedWidthPx > 40) {
-      applyDockWidth(dockLockedWidthPx);
-    } else {
-      syncDockChromeWidth({ remount: true });
-    }
+    clearDockWidthLock();
     resizeMapSoon();
   }, 80);
 }
@@ -5850,8 +5772,7 @@ try {
  */
 function setDetailOpen(open) {
   if (!els.app) return;
-  // Do NOT remeasure width here — keep locked dock width only.
-  if (dockLockedWidthPx > 40) applyDockWidth(dockLockedWidthPx);
+  clearDockWidthLock();
   const isDesktop =
     typeof matchMedia !== "undefined" &&
     matchMedia("(min-width: 641px)").matches;
@@ -9743,10 +9664,10 @@ initEtaRouteSearchUi();
 
 // Keep toolbar open (close control removed from chrome)
 setToolbarOpen(true);
-// Initial dock width from chrome (locked for ETA + Trip Plan)
+// Panel width is fluid (CSS) — clear any legacy lock
 requestAnimationFrame(() => {
-  dockLockedWidthPx = 0;
-  syncDockChromeWidth({ remount: true });
+  clearDockWidthLock();
+  syncDockChromeWidth();
 });
 
 // Detail expand/collapse (same dock, height grows/shrinks)
@@ -9816,7 +9737,8 @@ els.btnProfile?.addEventListener("click", (e) => {
   toggleProfileMenu();
 });
 document.addEventListener("click", (e) => {
-  if (!els.mapProfile?.contains(/** @type {Node} */ (e.target))) {
+  const root = els.mapProfile || document.getElementById("map-profile");
+  if (!root?.contains(/** @type {Node} */ (e.target))) {
     closeProfileMenu();
   }
 });
@@ -9874,9 +9796,18 @@ function wireSheetSnap() {
     e.preventDefault();
     toggleSheetSnap();
   });
-  els.sheetTitleRow?.addEventListener("click", () => toggleSheetSnap());
+  els.sheetTitleRow?.addEventListener("click", (e) => {
+    // Don't collapse/expand when using profile menu
+    if (e.target.closest?.("#map-profile, .panel-profile, #btn-profile, #profile-menu"))
+      return;
+    toggleSheetSnap();
+  });
 }
 wireSheetSnap();
+
+els.btnProfile?.addEventListener("click", (e) => {
+  e.stopPropagation();
+});
 
 /** Contributor path editor (About → Contribute route path) */
 const pathContributor = createPathContributor({
