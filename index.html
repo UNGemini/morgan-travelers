@@ -556,55 +556,6 @@
                 </button>
               </div>
 
-              <!-- Method filter pills (none selected = All) -->
-              <div class="eta-sidebar-bottom-chrome" id="eta-sidebar-bottom-chrome">
-                <div
-                  class="eta-method-pills"
-                  role="group"
-                  aria-label="Traffic methods. None selected shows all."
-                >
-                  <button
-                    type="button"
-                    class="eta-method-pill"
-                    data-eta-mode="bus"
-                    aria-pressed="false"
-                    title="Bus"
-                  >
-                    <span class="material-symbols-outlined" aria-hidden="true">directions_bus</span>
-                    <span class="eta-method-pill-label">Bus</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="eta-method-pill"
-                    data-eta-mode="mtr"
-                    aria-pressed="false"
-                    title="MTR"
-                  >
-                    <span class="material-symbols-outlined" aria-hidden="true">subway</span>
-                    <span class="eta-method-pill-label">MTR</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="eta-method-pill"
-                    data-eta-mode="gmb"
-                    aria-pressed="false"
-                    title="GMB"
-                  >
-                    <span class="material-symbols-outlined" aria-hidden="true">airport_shuttle</span>
-                    <span class="eta-method-pill-label">GMB</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="eta-method-pill"
-                    data-eta-mode="lrt"
-                    aria-pressed="false"
-                    title="LRT"
-                  >
-                    <span class="material-symbols-outlined" aria-hidden="true">tram</span>
-                    <span class="eta-method-pill-label">LRT</span>
-                  </button>
-                </div>
-              </div>
             </section>
 
             <!-- Trip Plan mode: origin / destination / prefs -->
@@ -1109,6 +1060,58 @@
           </div>
         </aside>
 
+        <!-- Unified bottom stack: method pills + nav share one liquid gradient -->
+        <div class="panel-bottom-stack" id="panel-bottom-stack">
+          <!-- Method filter pills (none selected = All) — only Nearby list -->
+          <div class="eta-sidebar-bottom-chrome" id="eta-sidebar-bottom-chrome">
+            <div
+              class="eta-method-pills"
+              role="group"
+              aria-label="Traffic methods. None selected shows all."
+            >
+              <button
+                type="button"
+                class="eta-method-pill"
+                data-eta-mode="bus"
+                aria-pressed="false"
+                title="Bus"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">directions_bus</span>
+                <span class="eta-method-pill-label">Bus</span>
+              </button>
+              <button
+                type="button"
+                class="eta-method-pill"
+                data-eta-mode="mtr"
+                aria-pressed="false"
+                title="MTR"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">subway</span>
+                <span class="eta-method-pill-label">MTR</span>
+              </button>
+              <button
+                type="button"
+                class="eta-method-pill"
+                data-eta-mode="gmb"
+                aria-pressed="false"
+                title="GMB"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">airport_shuttle</span>
+                <span class="eta-method-pill-label">GMB</span>
+              </button>
+              <button
+                type="button"
+                class="eta-method-pill"
+                data-eta-mode="lrt"
+                aria-pressed="false"
+                title="LRT"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">tram</span>
+                <span class="eta-method-pill-label">LRT</span>
+              </button>
+            </div>
+          </div>
+
         <!-- Liquid glass app nav: left tabs + right expandable search -->
         <nav class="app-bottom-nav" id="app-bottom-nav" aria-label="Main">
           <div class="app-nav-tabs" role="tablist" aria-label="App sections">
@@ -1187,6 +1190,7 @@
             </div>
           </div>
         </nav>
+        </div><!-- /.panel-bottom-stack -->
       </div>
 
       <!-- Legacy IDs kept for JS wiring (hidden) -->
