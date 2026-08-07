@@ -1016,15 +1016,16 @@ function commitNearbyDirSlots(routeKey, entry, scoredSlots) {
 /**
  * Apply live ETA from the selected nearby direction slot (stop may change with bound).
  * @param {EtaRouteEntry} r
+ * @returns {boolean} true if a slot was applied (minutes may still be null)
  */
 function applyNearbyDirLive(r) {
-  if (!r) return;
+  if (!r) return false;
   const key = etaRouteKey(r);
   const slots = etaNearbyDirsByKey.get(key);
-  if (!slots?.length) return;
+  if (!slots?.length) return false;
   const di = Math.min(getCardDir(r), slots.length - 1);
   const slot = slots[di];
-  if (!slot) return;
+  if (!slot) return false;
   etaLiveByKey.set(key, {
     minutes: slot.minutes,
     stopLabel: slot.stopLabel,
@@ -1040,6 +1041,235 @@ function applyNearbyDirLive(r) {
     r.nearbyHint = `${slot.stopLabel}${
       Number.isFinite(slot.distM) ? ` · ${Math.round(slot.distM)} m` : ""
     }`;
+  }
+  return true;
+}
+
+/** @type {Map<string, number>} */
+const etaCardLiveFetchGen = new Map();
+
+/**
+ * Refresh list-card live ETA for the active card direction.
+ * Uses cached nearby per-bound slots when present; otherwise fetches live.
+ * @param {EtaRouteEntry} r
+ * @param {{ silent?: boolean }} [opts]
+ * @returns {Promise<boolean>} true if live minutes were written
+ */
+async function refreshCardLiveEta(r, opts = {}) {
+  if (!r) return false;
+  const key = etaRouteKey(r);
+  const gen = (etaCardLiveFetchGen.get(key) || 0) + 1;
+  etaCardLiveFetchGen.set(key, gen);
+
+  // 1) Nearby multi-bound cache (KMB/CTB/MTR Bus nearby)
+  if (applyNearbyDirLive(r)) {
+    const live = etaLiveByKey.get(key);
+    if (live && live.minutes != null) return true;
+    // Slot exists but no minutes — fall through to fetch
+  }
+
+  const dirs = etaRouteDirections(r, { full: true });
+  const di = resolveCardDirIndex(r, dirs);
+  const dir = dirs[di] || dirs[0] || { dest: r.label, bound: "O" };
+  const bound = String(dir.bound || "O").toUpperCase();
+
+  // Board stop: nearby slot for this bound, else geo-nearest rail stop, else first stop
+  /** @type {{ stopId?: string, name?: string, lon?: number, lat?: number, stationCode?: string, code?: string } | null} */
+  let board = null;
+  const nearby = etaNearbyDirsByKey.get(key);
+  if (nearby?.length) {
+    const slot =
+      nearby.find((s) => String(s.bound || "").toUpperCase() === bound) ||
+      nearby[Math.min(di, nearby.length - 1)];
+    if (slot) {
+      board = {
+        stopId: slot.stopId,
+        name: slot.stopLabel,
+        lon: slot.stopLon,
+        lat: slot.stopLat,
+      };
+    }
+  }
+
+  try {
+    if (r.kind === "mtr" || r.kind === "lrt" || r.kind === "mtr_bus") {
+      if (r.kind === "mtr_bus") await ensureMtrBusData();
+      if (r.kind === "lrt") await ensureLrtRouteData();
+      if (r.kind === "mtr") await ensureMtrStationLinesMap();
+    }
+    // Load stop sequence for this bound so we have a board stop + coords
+    const prevDir = getCardDir(r);
+    setCardDir(r, di);
+    let stops = [];
+    try {
+      stops = await loadEtaRouteStops(r);
+    } finally {
+      setCardDir(r, prevDir);
+    }
+    if (gen !== etaCardLiveFetchGen.get(key)) return false;
+
+    if (!board && stops.length) {
+      // Prefer stop near user when geo known
+      const geo = etaUserGeo
+        ? { lat: etaUserGeo.lat, lon: etaUserGeo.lon }
+        : null;
+      if (geo) {
+        let best = null;
+        let bestD = Infinity;
+        for (const s of stops) {
+          if (!Number.isFinite(s.lat) || !Number.isFinite(s.lon)) continue;
+          const d = haversineMEta(geo.lat, geo.lon, s.lat, s.lon);
+          if (d < bestD) {
+            bestD = d;
+            best = s;
+          }
+        }
+        if (best) {
+          board = {
+            stopId: best.stopId,
+            name: best.name,
+            lon: best.lon,
+            lat: best.lat,
+            stationCode: best.stationCode || best.code,
+            code: best.code || best.stationCode,
+          };
+        }
+      }
+      if (!board) {
+        const s = stops[0];
+        board = {
+          stopId: s.stopId,
+          name: s.name,
+          lon: s.lon,
+          lat: s.lat,
+          stationCode: s.stationCode || s.code,
+          code: s.code || s.stationCode,
+        };
+      }
+    }
+
+    // Still no board coords — for MTR/LRT build from station directories
+    if (!board && r.kind === "mtr") {
+      const liveHint = etaLiveByKey.get(key);
+      const code = liveHint?.stopId || "";
+      const st =
+        (code &&
+          MTR_STATIONS.find(
+            (x) => String(x.code || "").toUpperCase() === String(code).toUpperCase(),
+          )) ||
+        null;
+      if (st) {
+        board = {
+          stopId: `MTR-${st.code}`,
+          name: st.name_en,
+          lon: st.lon,
+          lat: st.lat,
+          stationCode: st.code,
+          code: st.code,
+        };
+      }
+    }
+    if (!board && r.kind === "lrt") {
+      const liveHint = etaLiveByKey.get(key);
+      const sid = liveHint?.stopId || "";
+      const st =
+        LRT_STOPS.find((x) => String(x.stop_id) === String(sid)) ||
+        LRT_STOPS.find(
+          (x) =>
+            Number.isFinite(x.lat) &&
+            etaUserGeo &&
+            haversineMEta(etaUserGeo.lat, etaUserGeo.lon, x.lat, x.lon) < 2000,
+        );
+      if (st) {
+        board = {
+          stopId: String(st.stop_id || ""),
+          name: st.name_en,
+          lon: st.lon,
+          lat: st.lat,
+        };
+      }
+    }
+
+    if (!board) {
+      // At least update dest labels from OD
+      const prev = etaLiveByKey.get(key) || {};
+      etaLiveByKey.set(key, {
+        ...prev,
+        dest: dir.dest || prev.dest,
+        destZh: dir.destZh || prev.destZh,
+        bound: dir.bound || prev.bound,
+      });
+      return false;
+    }
+
+    const opt = etaRouteAsOption(r, stops, dir, board);
+    let result = await fetchBoardEta(opt);
+    if (gen !== etaCardLiveFetchGen.get(key)) return false;
+    result = withScheduledFallback(result, opt, null, 0);
+    const first = result?.etas?.[0];
+    const mins = result?.waitMins ?? first?.waitMins ?? null;
+    const stopLabel =
+      board.name ||
+      result?.stopId ||
+      "";
+    etaLiveByKey.set(key, {
+      minutes: mins,
+      stopLabel,
+      dest: first?.dest || dir.dest || "",
+      destZh: dir.destZh || "",
+      bound: dir.bound || bound,
+      stopId: board.stopId || result?.stopId || "",
+      scheduled: !!(first?.scheduled || result?.scheduled),
+      clock: first?.clock || "",
+    });
+    if (stopLabel) {
+      r.nearbyHint = stopLabel;
+    }
+    // Cache into nearby slots so next Opposite is instant
+    if (mins != null || stopLabel) {
+      /** @type {EtaNearbyDirSlot} */
+      const slot = {
+        bound: String(dir.bound || bound),
+        dest: dir.dest || "",
+        destZh: dir.destZh || "",
+        minutes: mins,
+        stopLabel,
+        stopId: String(board.stopId || ""),
+        distM: Number.isFinite(board.lat) && etaUserGeo
+          ? haversineMEta(
+              etaUserGeo.lat,
+              etaUserGeo.lon,
+              Number(board.lat),
+              Number(board.lon),
+            )
+          : 0,
+        stopLat: board.lat,
+        stopLon: board.lon,
+      };
+      let slots = etaNearbyDirsByKey.get(key) || [];
+      const bi = slots.findIndex(
+        (s) =>
+          String(s.bound || "").toUpperCase() ===
+          String(slot.bound).toUpperCase(),
+      );
+      if (bi >= 0) slots[bi] = { ...slots[bi], ...slot };
+      else slots = [...slots, slot];
+      // Keep O/I order
+      const ordered = [];
+      const byB = new Map(
+        slots.map((s) => [String(s.bound || "").toUpperCase(), s]),
+      );
+      if (byB.has("O")) ordered.push(byB.get("O"));
+      if (byB.has("I")) ordered.push(byB.get("I"));
+      for (const s of slots) {
+        if (!ordered.includes(s)) ordered.push(s);
+      }
+      etaNearbyDirsByKey.set(key, ordered);
+    }
+    return mins != null;
+  } catch (e) {
+    if (!opts.silent) console.warn("[eta] card live refresh", r.id, e);
+    return false;
   }
 }
 
@@ -7735,9 +7965,19 @@ function renderEtaRouteSuggest(hits, hint = "", opts = {}) {
       setCardDir(r, next);
       syncDirChoiceToLive(r, next, dirs);
       etaRouteActive = idx;
+      // Immediate re-render (dest + cached minutes if any)
       renderEtaRouteSuggest(etaRouteHits, hint, { skipPrefetch: true });
       etaRouteActive = idx;
       syncEtaActive();
+      // Fetch live ETA for the new bound, then re-render this card
+      void refreshCardLiveEta(r, { silent: true }).then(() => {
+        if (etaRouteHits[idx] !== r && etaRouteKey(etaRouteHits[idx] || {}) !== etaRouteKey(r))
+          return;
+        applyNearbyDirLive(r);
+        renderEtaRouteSuggest(etaRouteHits, hint, { skipPrefetch: true });
+        etaRouteActive = idx;
+        syncEtaActive();
+      });
       if (
         etaSelectedForDetails &&
         etaRouteKey(etaSelectedForDetails) === etaRouteKey(r) &&
