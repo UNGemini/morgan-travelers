@@ -782,6 +782,8 @@ body.mobile-ui [data-acrylic]::before {
   --lg-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.18);
   --lg-shadow: 0 8px 28px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
 
+  /* Must be after .detail-sidebar (order:1) — default 0 put nav at the top */
+  order: 2;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -790,8 +792,8 @@ body.mobile-ui [data-acrylic]::before {
   z-index: 5;
   isolation: isolate;
   /* Soft top bleed into the list */
-  padding-top: 20px;
-  margin-top: -8px;
+  padding-top: 16px;
+  margin-top: 0;
 }
 
 /* Single gradient behind pills + nav (matches panel glass) */
@@ -2485,10 +2487,6 @@ body.mobile-ui [data-acrylic]::before {
   -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
-}
-
-.app-bottom-nav {
-  order: 2;
 }
 
 /* Sheets (settings / info) */
@@ -5105,7 +5103,7 @@ body.contrib-submitting .bg-orb {
   min-height: 0;
   position: relative;
   z-index: 1;
-  /* Gradient is on .panel-bottom-stack — not a second layer here */
+  order: unset; /* was order:2 when nav was a direct child of toolbar */
 }
 /* Same liquid-glass capsule as .eta-mode-tabs */
 .app-nav-tabs {
