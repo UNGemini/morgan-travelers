@@ -5022,8 +5022,13 @@ body.contrib-submitting .bg-orb {
   color: #fff;
 }
 
-/* ── App bottom nav (replaces toolbar-inner) ────────────────── */
+/* ── App bottom nav — liquid glass tab switcher ─────────────── */
 .app-bottom-nav {
+  --lg-fill: rgba(40, 42, 48, 0.55);
+  --lg-border: rgba(255, 255, 255, 0.14);
+  --lg-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  --lg-shadow: 0 8px 28px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
+
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -5033,40 +5038,57 @@ body.contrib-submitting .bg-orb {
   background: transparent;
   min-height: var(--toolbar-h);
 }
+/* Same liquid-glass capsule as .eta-mode-tabs */
 .app-nav-tabs {
   flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: stretch;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 16px;
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  min-width: 0;
+  justify-content: stretch;
+  gap: 0;
+  padding: 4px;
+  border-radius: 999px;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: var(--lg-fill);
+  border: 1px solid var(--lg-border);
+  box-shadow: var(--lg-highlight), var(--lg-shadow);
+  -webkit-backdrop-filter: blur(32px) saturate(1.7);
+  backdrop-filter: blur(32px) saturate(1.7);
 }
 .app-nav-tab {
+  appearance: none;
   flex: 1 1 0;
-  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 650;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1px;
-  min-width: 0;
-  padding: 6px 4px;
-  border: 0;
-  border-radius: 13px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.55);
-  font: inherit;
-  font-size: 0.62rem;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  gap: 2px;
+  overflow: hidden;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 .app-nav-tab .material-symbols-outlined {
-  font-size: 20px;
-  line-height: 1;
+  font-size: 22px !important;
+  line-height: 1 !important;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+  transition: color 0.2s ease, font-variation-settings 0.2s ease;
 }
 .app-nav-tab-label {
   max-width: 100%;
@@ -5075,15 +5097,35 @@ body.contrib-submitting .bg-orb {
   white-space: nowrap;
 }
 .app-nav-tab.is-active {
-  background: rgba(192, 174, 252, 0.2);
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--accent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 2px 10px rgba(0, 0, 0, 0.15);
+}
+.app-nav-tab.is-active .material-symbols-outlined {
+  font-variation-settings: "FILL" 1, "wght" 500, "GRAD" 0, "opsz" 24;
+  color: var(--accent);
+}
+.app-nav-tab:hover:not(.is-active):not(:disabled) {
   color: #fff;
+  background: rgba(255, 255, 255, 0.06);
 }
 .app-nav-tab:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.app-nav-tab[data-nav="pinned"].has-pins:not(:disabled) {
-  color: rgba(255, 255, 255, 0.85);
+.app-nav-tab[data-nav="pinned"].has-pins:not(:disabled):not(.is-active) {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Circular liquid-glass search (matches eta-search-toggle) */
+.app-nav-search-btn {
+  background: var(--lg-fill);
+  border: 1px solid var(--lg-border);
+  box-shadow: var(--lg-highlight), var(--lg-shadow);
+  -webkit-backdrop-filter: blur(32px) saturate(1.7);
+  backdrop-filter: blur(32px) saturate(1.7);
 }
 
 .app-nav-search-wrap {
@@ -5093,16 +5135,18 @@ body.contrib-submitting .bg-orb {
   position: relative;
 }
 .app-nav-search-btn {
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.08);
   color: #fff;
   display: grid;
   place-items: center;
   cursor: pointer;
-  transition: width 0.2s ease, border-radius 0.2s ease, background 0.15s ease;
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+.app-nav-search-btn:hover {
+  background: rgba(55, 58, 66, 0.75);
 }
 .app-nav-search-btn .material-symbols-outlined {
   font-size: 22px;
@@ -5319,14 +5363,89 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   }
 }
 
-/* ETA filter pills sit above app nav inside list panel */
+/* Method filter pills (none selected = All) */
 .eta-sidebar-bottom-chrome {
   position: sticky;
   bottom: 0;
-  /* no longer hosts search — filters only */
   justify-content: center;
+  padding: 8px 10px 10px;
+  /* list can scroll under; chrome itself is not full liquid bar */
+  background: transparent;
+  border-top: none;
+  pointer-events: none;
 }
-.eta-mode-tabs {
-  flex: 1 1 auto;
+.eta-sidebar-bottom-chrome > * {
+  pointer-events: auto;
+}
+
+.eta-method-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
   max-width: 100%;
+}
+.eta-method-pills.is-all .eta-method-pill {
+  /* subtle “all on” look without filled selection */
+  opacity: 0.92;
+}
+
+.eta-method-pill {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 36px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(40, 42, 48, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 4px 14px rgba(0, 0, 0, 0.22);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  backdrop-filter: blur(24px) saturate(1.5);
+  color: rgba(255, 255, 255, 0.78);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.12s ease;
+}
+.eta-method-pill .material-symbols-outlined {
+  font-size: 18px !important;
+  line-height: 1 !important;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+}
+.eta-method-pill-label {
+  white-space: nowrap;
+}
+.eta-method-pill:hover:not(.is-active) {
+  color: #fff;
+  background: rgba(55, 58, 66, 0.7);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.eta-method-pill.is-active {
+  color: #fff;
+  background: rgba(192, 174, 252, 0.28);
+  border-color: rgba(192, 174, 252, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 2px 12px rgba(192, 174, 252, 0.2);
+}
+.eta-method-pill.is-active .material-symbols-outlined {
+  font-variation-settings: "FILL" 1, "wght" 500, "GRAD" 0, "opsz" 20;
+  color: var(--accent);
+}
+.eta-method-pill:active {
+  transform: scale(0.97);
 }

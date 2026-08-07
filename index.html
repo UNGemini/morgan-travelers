@@ -734,56 +734,52 @@
                 </button>
               </div>
 
-              <!-- Traffic filter pills only (app Search lives in bottom nav) -->
+              <!-- Method filter pills (none selected = All) -->
               <div class="eta-sidebar-bottom-chrome" id="eta-sidebar-bottom-chrome">
                 <div
-                  class="eta-mode-tabs"
-                  role="tablist"
-                  aria-label="Traffic method"
+                  class="eta-method-pills"
+                  role="group"
+                  aria-label="Traffic methods. None selected shows all."
                 >
                   <button
                     type="button"
-                    class="eta-mode-tab is-active"
+                    class="eta-method-pill"
                     data-eta-mode="bus"
-                    role="tab"
-                    aria-selected="true"
+                    aria-pressed="false"
                     title="Bus"
                   >
                     <span class="material-symbols-outlined" aria-hidden="true">directions_bus</span>
-                    <span class="eta-mode-tab-label">Bus</span>
+                    <span class="eta-method-pill-label">Bus</span>
                   </button>
                   <button
                     type="button"
-                    class="eta-mode-tab"
+                    class="eta-method-pill"
                     data-eta-mode="mtr"
-                    role="tab"
-                    aria-selected="false"
+                    aria-pressed="false"
                     title="MTR"
                   >
                     <span class="material-symbols-outlined" aria-hidden="true">subway</span>
-                    <span class="eta-mode-tab-label">MTR</span>
+                    <span class="eta-method-pill-label">MTR</span>
                   </button>
                   <button
                     type="button"
-                    class="eta-mode-tab"
+                    class="eta-method-pill"
                     data-eta-mode="gmb"
-                    role="tab"
-                    aria-selected="false"
+                    aria-pressed="false"
                     title="GMB"
                   >
                     <span class="material-symbols-outlined" aria-hidden="true">airport_shuttle</span>
-                    <span class="eta-mode-tab-label">GMB</span>
+                    <span class="eta-method-pill-label">GMB</span>
                   </button>
                   <button
                     type="button"
-                    class="eta-mode-tab"
+                    class="eta-method-pill"
                     data-eta-mode="lrt"
-                    role="tab"
-                    aria-selected="false"
+                    aria-pressed="false"
                     title="LRT"
                   >
                     <span class="material-symbols-outlined" aria-hidden="true">tram</span>
-                    <span class="eta-mode-tab-label">LRT</span>
+                    <span class="eta-method-pill-label">LRT</span>
                   </button>
                 </div>
               </div>

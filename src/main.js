@@ -836,9 +836,13 @@ let etaRouteCatalog = [];
 /** @type {EtaRouteEntry[]} */
 let etaRouteHits = [];
 let etaRouteActive = -1;
-/** ETA-only traffic filter (not trip-plan prefs). Default Bus like Wheels. */
-/** @type {"all"|"mtr"|"lrt"|"bus"|"gmb"} */
-let etaTrafficMode = "bus";
+/**
+ * ETA method filter pills. Empty set = All methods.
+ * @type {Set<"bus"|"mtr"|"lrt"|"gmb">}
+ */
+let etaTrafficModes = new Set();
+/** @deprecated use etaTrafficModes; kept for any residual string checks */
+let etaTrafficMode = "all";
 /** @type {{ lat: number, lon: number, at: number } | null} */
 let etaUserGeo = null;
 /** @type {Promise<{ lat: number, lon: number } | null> | null} */
@@ -6130,19 +6134,37 @@ function buildEtaRouteCatalog() {
   console.info("[eta] route catalog", etaRouteCatalog.length);
 }
 
+/** Empty pill set = All methods. */
+function etaFilterIsAll() {
+  return !etaTrafficModes || etaTrafficModes.size === 0;
+}
+
+/** @param {"bus"|"mtr"|"lrt"|"gmb"} mode */
+function etaFilterHas(mode) {
+  return etaFilterIsAll() || etaTrafficModes.has(mode);
+}
+
+/** Sync legacy string for any residual callers. */
+function syncEtaTrafficModeLegacy() {
+  if (etaFilterIsAll()) etaTrafficMode = "all";
+  else if (etaTrafficModes.size === 1) {
+    etaTrafficMode = /** @type {"bus"|"mtr"|"lrt"|"gmb"} */ ([
+      ...etaTrafficModes,
+    ][0]);
+  } else {
+    etaTrafficMode = "all"; // multi → filter via set only
+  }
+}
+
 /** @param {EtaRouteEntry} r */
 function etaKindMatchesFilter(r) {
-  if (etaTrafficMode === "all") return true;
-  if (etaTrafficMode === "mtr") return r.kind === "mtr";
-  if (etaTrafficMode === "lrt") return r.kind === "lrt";
-  if (etaTrafficMode === "gmb") return r.kind === "bus" && r.co === "gmb";
-  if (etaTrafficMode === "bus") {
-    // Franchised bus + MTR Bus (not GMB)
-    if (r.kind === "mtr_bus") return true;
-    if (r.kind === "bus") return r.co !== "gmb";
-    return false;
-  }
-  return true;
+  if (etaFilterIsAll()) return true;
+  if (r.kind === "mtr") return etaTrafficModes.has("mtr");
+  if (r.kind === "lrt") return etaTrafficModes.has("lrt");
+  if (r.kind === "mtr_bus") return etaTrafficModes.has("bus");
+  if (r.kind === "bus" && r.co === "gmb") return etaTrafficModes.has("gmb");
+  if (r.kind === "bus") return etaTrafficModes.has("bus");
+  return false;
 }
 
 /**
@@ -7523,10 +7545,9 @@ async function browseEtaRoutes(limit = 28) {
     const hits = catalogSorted.slice(0, limit);
     return {
       hits,
-      hint:
-        etaTrafficMode === "mtr"
-          ? "All MTR lines · allow location for nearby"
-          : "All operators · allow location for nearby routes",
+      hint: etaFilterHas("mtr") && etaTrafficModes.size === 1
+        ? "All MTR lines · allow location for nearby"
+        : "All operators · allow location for nearby routes",
     };
   }
 
@@ -7561,13 +7582,16 @@ async function browseEtaRoutes(limit = 28) {
     }
   }
 
-  if (etaTrafficMode === "mtr" || etaTrafficMode === "all") {
+  const onlyMtr = etaTrafficModes.size === 1 && etaTrafficModes.has("mtr");
+  const onlyLrt = etaTrafficModes.size === 1 && etaTrafficModes.has("lrt");
+
+  if (etaFilterHas("mtr")) {
     const ranked = [...lineNear.entries()].sort((a, b) => a[1].dist - b[1].dist);
     for (const [code, info] of ranked) {
       const entry = filtered.find((r) => r.kind === "mtr" && r.id === code);
       if (entry) push(entry, `~${Math.round(info.dist)} m · ${info.station}`);
     }
-    if (etaTrafficMode === "mtr") {
+    if (onlyMtr) {
       for (const r of filtered.filter((x) => x.kind === "mtr")) push(r);
       const mtrHits = out.slice(0, limit);
       await attachNearbyMtrLiveEtas(mtrHits, geo, lineNear);
@@ -7584,13 +7608,13 @@ async function browseEtaRoutes(limit = 28) {
     }
   }
 
-  if (etaTrafficMode === "lrt" || etaTrafficMode === "all") {
-    if (nearLrt || etaTrafficMode === "lrt") {
+  if (etaFilterHas("lrt")) {
+    if (nearLrt || onlyLrt) {
       for (const r of filtered.filter((x) => x.kind === "lrt")) {
         push(r, nearLrt ? "Near Light Rail" : undefined);
       }
     }
-    if (etaTrafficMode === "lrt") {
+    if (onlyLrt) {
       const lrtHits = out.slice(0, limit);
       if (nearLrt) await attachNearbyLrtLiveEtas(lrtHits, geo);
       return {
@@ -7607,13 +7631,9 @@ async function browseEtaRoutes(limit = 28) {
   }
 
   // Bus / GMB / MTR Bus: multi-op nearby
-  if (
-    etaTrafficMode === "bus" ||
-    etaTrafficMode === "gmb" ||
-    etaTrafficMode === "all"
-  ) {
-    const wantKmb = etaTrafficMode !== "gmb";
-    const wantMtrBus = etaTrafficMode !== "gmb";
+  if (etaFilterHas("bus") || etaFilterHas("gmb")) {
+    const wantKmb = etaFilterHas("bus");
+    const wantMtrBus = etaFilterHas("bus");
     const [nearKmb, nearOther, nearMtrBus] = await Promise.all([
       wantKmb
         ? fetchNearbyKmbEtaHits(geo, Math.min(14, limit))
@@ -7630,7 +7650,6 @@ async function browseEtaRoutes(limit = 28) {
     const mergeSeen = new Set();
     const addMerged = (r) => {
       if (!r || !etaKindMatchesFilter(r)) return;
-      if (etaTrafficMode === "gmb" && r.co !== "gmb") return;
       const k = etaRouteKey(r);
       if (mergeSeen.has(k)) return;
       mergeSeen.add(k);
@@ -7692,6 +7711,7 @@ async function browseEtaRoutes(limit = 28) {
     // Catalog fill only if few true nearby hits
     if (out.length < Math.min(8, limit)) {
       for (const r of catalogSorted) {
+        if (!etaKindMatchesFilter(r)) continue;
         if (r.kind !== "bus" && r.kind !== "mtr_bus") continue;
         push(r);
         if (out.length >= limit) break;
@@ -7699,11 +7719,15 @@ async function browseEtaRoutes(limit = 28) {
     }
   }
 
-  // Live rail ETAs for mixed "all" browse (MTR/LRT already pushed above)
-  if (etaTrafficMode === "all") {
+  // Live rail ETAs for mixed browse (exclusive mtr/lrt already returned above)
+  if (etaFilterHas("mtr") || etaFilterHas("lrt")) {
     await Promise.all([
-      attachNearbyMtrLiveEtas(out, geo, lineNear),
-      nearLrt ? attachNearbyLrtLiveEtas(out, geo) : Promise.resolve(),
+      etaFilterHas("mtr")
+        ? attachNearbyMtrLiveEtas(out, geo, lineNear)
+        : Promise.resolve(),
+      etaFilterHas("lrt") && nearLrt
+        ? attachNearbyLrtLiveEtas(out, geo)
+        : Promise.resolve(),
     ]);
   }
 
@@ -9505,15 +9529,21 @@ async function showEtaRouteDetailsPanel() {
 }
 
 function syncEtaModeChips() {
-  document.querySelectorAll("[data-eta-mode]").forEach((btn) => {
-    if (!btn.classList.contains("eta-mode-tab") && !btn.classList.contains("eta-mode-chip"))
-      return;
-    const on = btn.getAttribute("data-eta-mode") === etaTrafficMode;
+  document.querySelectorAll(".eta-method-pill[data-eta-mode]").forEach((btn) => {
+    const mode = btn.getAttribute("data-eta-mode") || "";
+    const on = etaTrafficModes.has(/** @type {"bus"|"mtr"|"lrt"|"gmb"} */ (mode));
     btn.classList.toggle("is-active", on);
-    if (btn.getAttribute("role") === "tab") {
-      btn.setAttribute("aria-selected", on ? "true" : "false");
-    }
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
   });
+  // Hint on the group when All (none selected)
+  const group = document.querySelector(".eta-method-pills");
+  if (group) {
+    group.classList.toggle("is-all", etaFilterIsAll());
+    group.setAttribute(
+      "data-filter",
+      etaFilterIsAll() ? "all" : [...etaTrafficModes].join("+"),
+    );
+  }
 }
 
 function setEtaSearchOpen(open) {
@@ -9593,13 +9623,18 @@ function initEtaRouteSearchUi() {
     setSidebarPage("search");
   });
 
-  document.querySelectorAll(".eta-mode-tab[data-eta-mode], .eta-mode-chip[data-eta-mode]").forEach((btn) => {
+  document.querySelectorAll(".eta-method-pill[data-eta-mode]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const mode = btn.getAttribute("data-eta-mode") || "bus";
-      etaTrafficMode =
-        mode === "mtr" || mode === "lrt" || mode === "gmb" || mode === "bus"
-          ? mode
-          : "bus";
+      const raw = btn.getAttribute("data-eta-mode") || "";
+      const mode =
+        raw === "mtr" || raw === "lrt" || raw === "gmb" || raw === "bus"
+          ? raw
+          : null;
+      if (!mode) return;
+      // Toggle pill: on → off; none left = All
+      if (etaTrafficModes.has(mode)) etaTrafficModes.delete(mode);
+      else etaTrafficModes.add(mode);
+      syncEtaTrafficModeLegacy();
       etaRouteActive = -1;
       etaSelectedForDetails = null;
       etaSelectedStops = [];
