@@ -718,14 +718,16 @@ body.mobile-ui [data-acrylic]::before {
 
 /* ETA sidebar panel (visible when data-ui-mode=eta) — Wheels-inspired cards */
 .eta-sidebar-panel {
-  /* Tab row (~48) + chrome padding (~20) + safe area */
-  --eta-toolbar-h: calc(68px + env(safe-area-inset-bottom, 0px));
-  --eta-list-fade-h: calc(var(--eta-toolbar-h) + 12px);
+  /* Pills + app nav sit in the soft liquid zone — cards fade under both */
+  --eta-pills-h: 52px;
+  --eta-nav-h: var(--toolbar-h, 58px);
+  --eta-toolbar-h: calc(var(--eta-pills-h) + var(--eta-nav-h) + 8px);
+  --eta-list-fade-h: calc(var(--eta-toolbar-h) + 36px);
 
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
   min-height: 0;
   flex: 1 1 auto;
   height: 100%;
@@ -756,54 +758,57 @@ body.mobile-ui [data-acrylic]::before {
   background: transparent;
 }
 
-/* Search page: float chrome over the list so cards fade behind it */
+/* Method pills float above app nav; soft liquid zone, no hard bar edge */
 .eta-sidebar-panel > .eta-sidebar-bottom-chrome {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
+  /* Sit just above app nav so one continuous glass stack */
+  bottom: calc(var(--eta-nav-h, 58px) - 4px);
   z-index: 4;
-  pointer-events: none; /* let list scroll; buttons re-enable below */
-  /* Extra top pad = soft fade zone above the controls */
-  padding-top: 36px;
-  /* Soft top edge: fade fill + blur (not a hard rect) */
+  pointer-events: none;
+  padding: 28px 10px 10px;
+  border: none;
+  background: transparent;
+  isolation: isolate;
+}
+
+/* Boundless frost: long soft fade into the list (no hard rect) */
+.eta-sidebar-panel > .eta-sidebar-bottom-chrome::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: calc(-1 * var(--eta-nav-h, 58px) - 8px);
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    rgba(14, 16, 22, 0.82) 0%,
+    rgba(16, 18, 24, 0.62) 28%,
+    rgba(18, 20, 28, 0.32) 55%,
+    rgba(18, 20, 28, 0.1) 78%,
+    rgba(18, 20, 28, 0) 100%
+  );
+  -webkit-backdrop-filter: blur(40px) saturate(1.75);
+  backdrop-filter: blur(40px) saturate(1.75);
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.35) 28%,
-    rgba(0, 0, 0, 0.85) 58%,
-    #000 78%,
+    rgba(0, 0, 0, 0.25) 18%,
+    rgba(0, 0, 0, 0.75) 48%,
+    #000 72%,
     #000 100%
   );
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.35) 28%,
-    rgba(0, 0, 0, 0.85) 58%,
-    #000 78%,
+    rgba(0, 0, 0, 0.25) 18%,
+    rgba(0, 0, 0, 0.75) 48%,
+    #000 72%,
     #000 100%
   );
-  -webkit-mask-size: 100% 100%;
-  mask-size: 100% 100%;
-  isolation: isolate;
-}
-
-/* Frosted fill lives on ::before so mask softens blur + tint together */
-.eta-sidebar-panel > .eta-sidebar-bottom-chrome::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background: linear-gradient(
-    to top,
-    rgba(22, 22, 28, 0.78) 0%,
-    rgba(22, 22, 28, 0.5) 42%,
-    rgba(22, 22, 28, 0.18) 72%,
-    rgba(22, 22, 28, 0) 100%
-  );
-  -webkit-backdrop-filter: blur(36px) saturate(1.7);
-  backdrop-filter: blur(36px) saturate(1.7);
 }
 
 .eta-sidebar-panel > .eta-sidebar-bottom-chrome > * {
@@ -1404,8 +1409,8 @@ body.mobile-ui [data-acrylic]::before {
 .eta-route-list-sidebar {
   list-style: none;
   margin: 0;
-  /* Extra scroll room so last card clears the solid→fade zone above toolbar */
-  padding: 4px 8px var(--eta-list-fade-h, 80px);
+  /* Scroll under pills + app nav liquid zone */
+  padding: 4px 8px var(--eta-list-fade-h, 140px);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1414,24 +1419,23 @@ body.mobile-ui [data-acrylic]::before {
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
-  /*
-   * Fade extends through the toolbar height so cards dissolve behind the
-   * liquid-glass chrome. Solid until fade starts just above the bar.
-   */
+  /* Boundless dissolve into bottom liquid glass (no hard cut) */
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - var(--eta-list-fade-h, 80px)),
-    rgba(0, 0, 0, 0.75) calc(100% - var(--eta-list-fade-h, 80px) + 16px),
-    rgba(0, 0, 0, 0.35) calc(100% - 28px),
+    #000 calc(100% - var(--eta-list-fade-h, 140px)),
+    rgba(0, 0, 0, 0.85) calc(100% - var(--eta-list-fade-h, 140px) + 24px),
+    rgba(0, 0, 0, 0.45) calc(100% - 48px),
+    rgba(0, 0, 0, 0.12) calc(100% - 16px),
     transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - var(--eta-list-fade-h, 80px)),
-    rgba(0, 0, 0, 0.75) calc(100% - var(--eta-list-fade-h, 80px) + 16px),
-    rgba(0, 0, 0, 0.35) calc(100% - 28px),
+    #000 calc(100% - var(--eta-list-fade-h, 140px)),
+    rgba(0, 0, 0, 0.85) calc(100% - var(--eta-list-fade-h, 140px) + 24px),
+    rgba(0, 0, 0, 0.45) calc(100% - 48px),
+    rgba(0, 0, 0, 0.12) calc(100% - 16px),
     transparent 100%
   );
 }
@@ -1983,6 +1987,14 @@ body.mobile-ui [data-acrylic]::before {
 .eta-route-list-sidebar li.eta-route-card:hover {
   background: rgba(255, 255, 255, 0.07);
   border-color: rgba(255, 255, 255, 0.14);
+}
+
+.eta-route-list-sidebar li.eta-place-card .eta-card-route {
+  min-width: 2rem;
+}
+.eta-route-list-sidebar li.eta-place-card .eta-card-eta-min {
+  letter-spacing: 0.02em;
+  opacity: 0.85;
 }
 
 .eta-route-list-sidebar li.eta-route-card.is-active {
@@ -5034,21 +5046,60 @@ body.contrib-submitting .bg-orb {
   flex: 1 1 auto;
 }
 
-/* ── App bottom nav — liquid glass tab switcher ─────────────── */
+/* ── App bottom nav — liquid glass tab switcher (boundless top) ─ */
 .app-bottom-nav {
   --lg-fill: rgba(40, 42, 48, 0.55);
   --lg-border: rgba(255, 255, 255, 0.14);
   --lg-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.18);
   --lg-shadow: 0 8px 28px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
+  --nav-morph-dur: 0.34s;
+  --nav-morph-ease: cubic-bezier(0.32, 0.72, 0, 1);
 
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: none;
   background: transparent;
   min-height: var(--toolbar-h);
+  position: relative;
+  z-index: 5;
+  isolation: isolate;
+}
+/* Soft glass bleed upward into the list (no hard edge) */
+.app-bottom-nav::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -48px;
+  bottom: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    rgba(14, 16, 22, 0.88) 0%,
+    rgba(16, 18, 24, 0.55) 45%,
+    rgba(18, 20, 28, 0.15) 78%,
+    rgba(18, 20, 28, 0) 100%
+  );
+  -webkit-backdrop-filter: blur(36px) saturate(1.7);
+  backdrop-filter: blur(36px) saturate(1.7);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.4) 30%,
+    #000 65%,
+    #000 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.4) 30%,
+    #000 65%,
+    #000 100%
+  );
 }
 /* Same liquid-glass capsule as .eta-mode-tabs */
 .app-nav-tabs {
@@ -5131,72 +5182,158 @@ body.contrib-submitting .bg-orb {
   color: rgba(255, 255, 255, 0.9);
 }
 
-/* Circular liquid-glass search (matches eta-search-toggle) */
-.app-nav-search-btn {
-  background: var(--lg-fill);
-  border: 1px solid var(--lg-border);
-  box-shadow: var(--lg-highlight), var(--lg-shadow);
-  -webkit-backdrop-filter: blur(32px) saturate(1.7);
-  backdrop-filter: blur(32px) saturate(1.7);
-}
-
+/*
+ * Search morph: closed = circle; open = pill expands (same timing as old ETA search).
+ * Keep both nodes in layout — do not display:none the button.
+ */
 .app-nav-search-wrap {
-  flex: 0 0 auto;
+  flex: 0 0 48px;
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
   display: flex;
   align-items: center;
   position: relative;
+  overflow: hidden;
+  border-radius: 999px;
+  transition:
+    flex var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1)),
+    width var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1)),
+    min-width var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1)),
+    max-width var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1));
+}
+.app-nav-search-wrap.is-open {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: min(160px, 36vw);
+  max-width: min(280px, 52vw);
+}
+/* When search open, tabs yield space */
+.app-bottom-nav:has(.app-nav-search-wrap.is-open) .app-nav-tabs {
+  flex: 0 1 auto;
+  min-width: 0;
+  transition: flex var(--nav-morph-dur) var(--nav-morph-ease);
 }
 .app-nav-search-btn {
+  position: absolute;
+  inset: 0;
   width: 48px;
   height: 48px;
   min-width: 48px;
+  margin: 0;
+  padding: 0;
   border-radius: 50%;
+  border: 1px solid var(--lg-border);
+  background: var(--lg-fill);
+  box-shadow: var(--lg-highlight), var(--lg-shadow);
+  -webkit-backdrop-filter: blur(32px) saturate(1.7);
+  backdrop-filter: blur(32px) saturate(1.7);
   color: #fff;
   display: grid;
   place-items: center;
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.12s ease;
+  z-index: 2;
+  transition:
+    opacity 0.22s ease,
+    transform var(--nav-morph-dur) var(--nav-morph-ease),
+    background 0.15s ease;
 }
 .app-nav-search-btn:hover {
   background: rgba(55, 58, 66, 0.75);
 }
 .app-nav-search-btn .material-symbols-outlined {
   font-size: 22px;
+  transition: opacity 0.2s ease, transform 0.22s ease;
 }
 .app-nav-search-wrap.is-open .app-nav-search-btn {
-  display: none;
+  opacity: 0;
+  transform: scale(0.55);
+  pointer-events: none;
+}
+.app-nav-search-wrap.is-open .app-nav-search-btn .material-symbols-outlined {
+  opacity: 0;
 }
 .app-nav-search-field {
-  display: flex;
+  display: flex !important;
   align-items: center;
-  gap: 6px;
-  width: min(220px, 42vw);
-  height: 44px;
-  padding: 0 12px 0 10px;
-  border-radius: 22px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(0, 0, 0, 0.35);
+  gap: 0;
+  width: 100%;
+  height: 48px;
+  min-width: 0;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  box-shadow: none;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+  transition:
+    opacity 0.22s ease 0.06s,
+    padding var(--nav-morph-dur) var(--nav-morph-ease),
+    gap var(--nav-morph-dur) var(--nav-morph-ease),
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
 }
 .app-nav-search-field[hidden] {
-  display: none !important;
+  /* Keep in layout for morph — visibility controlled by .is-open */
+  display: flex !important;
+}
+.app-nav-search-wrap.is-open .app-nav-search-field {
+  opacity: 1;
+  pointer-events: auto;
+  gap: 8px;
+  padding: 0 14px 0 12px;
+  border-color: var(--lg-border);
+  background: var(--lg-fill);
+  box-shadow: var(--lg-highlight), var(--lg-shadow);
+  -webkit-backdrop-filter: blur(32px) saturate(1.7);
+  backdrop-filter: blur(32px) saturate(1.7);
 }
 .app-nav-search-icon {
   font-size: 20px;
-  opacity: 0.65;
+  opacity: 0;
   flex: 0 0 auto;
+  transform: scale(0.85);
+  transition: opacity 0.22s ease 0.08s, transform 0.22s ease 0.08s;
+}
+.app-nav-search-wrap.is-open .app-nav-search-icon {
+  opacity: 0.7;
+  transform: scale(1);
 }
 .app-nav-search-input {
   flex: 1 1 auto;
   min-width: 0;
+  width: 100%;
   border: 0;
   background: transparent;
   color: #fff;
   font: inherit;
   font-size: 0.9rem;
   outline: none;
+  opacity: 0;
+  transform: scale(0.96);
+  transition: opacity 0.22s ease 0.08s, transform 0.22s ease 0.08s;
+}
+.app-nav-search-wrap.is-open .app-nav-search-input {
+  opacity: 1;
+  transform: scale(1);
 }
 .app-nav-search-input::placeholder {
   color: rgba(255, 255, 255, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-nav-search-wrap,
+  .app-nav-search-btn,
+  .app-nav-search-field,
+  .app-nav-search-icon,
+  .app-nav-search-input,
+  .app-bottom-nav:has(.app-nav-search-wrap.is-open) .app-nav-tabs {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+  }
 }
 
 .plan-trip-cta {
@@ -5441,14 +5578,9 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
 
 /* Method filter pills (none selected = All) */
 .eta-sidebar-bottom-chrome {
-  position: sticky;
-  bottom: 0;
   justify-content: center;
-  padding: 8px 10px 10px;
-  /* list can scroll under; chrome itself is not full liquid bar */
   background: transparent;
   border-top: none;
-  pointer-events: none;
 }
 .eta-sidebar-bottom-chrome > * {
   pointer-events: auto;

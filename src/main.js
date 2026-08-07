@@ -7696,6 +7696,166 @@ async function browseEtaRoutes(limit = 28) {
 }
 
 /**
+ * Route-like query? Prefer ETA routes until none match, then places.
+ * Keeps patterns like 12A / 70M as routes (digit(s) + letter).
+ * @param {string} s
+ */
+function prefersRoutesSearch(s) {
+  const q = String(s || "").trim();
+  if (!q) return false;
+  // "12A", "70M", "96X"
+  if (/^\d{1,2}[A-Za-z]/.test(q)) return true;
+  // "117", "A21", "K51", "E31", "506"
+  if (/^[A-Za-z]?\d/.test(q) || /^\d/.test(q)) return true;
+  // Very short alphanumeric — route number starting
+  if (q.length <= 2 && /^[A-Za-z0-9\u4e00-\u9fff]/.test(q)) return true;
+  return false;
+}
+
+/**
+ * Unified Destination/Route search (Phase 5).
+ * @param {string} query
+ * @returns {Promise<{ kind: "empty"|"routes"|"places", routes?: EtaRouteEntry[], places?: object[], hint?: string }>}
+ */
+async function runUnifiedSearch(query) {
+  const s = String(query || "").trim();
+  if (!s) return { kind: "empty" };
+
+  if (prefersRoutesSearch(s)) {
+    const routes = searchEtaRoutes(s, 16);
+    if (routes.length) return { kind: "routes", routes };
+    // No routes — fall through to places
+    try {
+      const places = await searchPlaces(s, { limit: 12 });
+      return {
+        kind: "places",
+        places: places || [],
+        hint: places?.length ? "Places" : `No routes or places for “${s}”`,
+      };
+    } catch (e) {
+      console.warn("[search] places fallback", e);
+      return { kind: "routes", routes: [], hint: `No routes match “${s}”` };
+    }
+  }
+
+  // Place-like (CJK names, multi-word, letter without route pattern)
+  try {
+    const places = await searchPlaces(s, { limit: 12 });
+    if (places?.length) return { kind: "places", places, hint: "Places" };
+    // Also try routes as secondary
+    const routes = searchEtaRoutes(s, 12);
+    if (routes.length) return { kind: "routes", routes };
+    return {
+      kind: "places",
+      places: [],
+      hint: `No places match “${s}”`,
+    };
+  } catch (e) {
+    console.warn("[search] places", e);
+    const routes = searchEtaRoutes(s, 12);
+    return {
+      kind: routes.length ? "routes" : "places",
+      routes,
+      places: [],
+      hint: routes.length ? "" : "Search failed",
+    };
+  }
+}
+
+/**
+ * Pick a place from unified search → Trip Plan with dest filled, origin Current location.
+ * @param {{ lat?: number, lon?: number, name?: string, label?: string, isMtr?: boolean, isLrt?: boolean }} place
+ */
+async function applyPlaceAsTripPlanDest(place) {
+  if (!place || !Number.isFinite(Number(place.lat)) || !Number.isFinite(Number(place.lon))) {
+    showToast("Invalid place", 1600);
+    return;
+  }
+  const name = place.name || place.label || "Destination";
+  setEtaSearchOpen(false);
+  if (els.inputEtaRoute) els.inputEtaRoute.value = "";
+  setUiMode("route");
+  setSidebarPage("search");
+  setDetailOpen(true);
+
+  // Origin = current location (default)
+  try {
+    const pos = await getCurrentPosition({
+      enableHighAccuracy: false,
+      timeout: 8000,
+      maximumAge: 60_000,
+    });
+    setPoint("origin", pos.lat, pos.lon, "Current location");
+  } catch (e) {
+    console.warn("[search] geolocation for origin", e);
+    showToast("Allow location for origin, or set From manually", 2800);
+  }
+
+  setPoint("destination", Number(place.lat), Number(place.lon), name, {
+    isMtr: !!place.isMtr,
+    isLrt: !!place.isLrt,
+  });
+  updatePlanButton();
+  showToast(`Trip Plan · to ${name}`, 1800);
+}
+
+/**
+ * Render place hits in the ETA list container (unified search).
+ * @param {object[]} places
+ * @param {string} [hint]
+ */
+function renderPlaceSuggest(places, hint = "") {
+  const list = els.etaRouteListSidebar;
+  if (!list) return;
+  if (els.etaRouteHintSidebar) {
+    if (hint) {
+      els.etaRouteHintSidebar.hidden = false;
+      els.etaRouteHintSidebar.textContent = hint;
+    } else {
+      els.etaRouteHintSidebar.hidden = true;
+    }
+  }
+  etaRouteHits = [];
+  etaRouteActive = -1;
+  if (!places?.length) {
+    list.innerHTML = etaRouteListStatusHtml(
+      "empty",
+      hint || "No places found",
+    );
+    return;
+  }
+  list.innerHTML = places
+    .map((p, i) => {
+      const name = p.name || p.label || "Place";
+      const sub = p.label && p.label !== name ? p.label : p.type || "Place";
+      return `<li role="option" data-place-idx="${i}" class="eta-route-card eta-place-card">
+        <div class="eta-route-card-body">
+          <div class="eta-card-main">
+            <div class="eta-card-route co-place" style="color:var(--accent)">
+              <span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle">location_on</span>
+            </div>
+            <div class="eta-card-dest">
+              <span>${escapeHtml(name)}</span>
+            </div>
+            <div class="eta-card-stop">${escapeHtml(sub)}</div>
+          </div>
+          <div class="eta-card-eta is-na">
+            <span class="eta-card-eta-min" style="font-size:0.75rem">Plan</span>
+          </div>
+        </div>
+      </li>`;
+    })
+    .join("");
+  list.querySelectorAll("li[data-place-idx]").forEach((li) => {
+    li.addEventListener("click", () => {
+      const idx = Number(li.getAttribute("data-place-idx"));
+      const p = places[idx];
+      if (p) void applyPlaceAsTripPlanDest(p);
+    });
+  });
+}
+
+/**
  * Typed search: Bus/LRT match id contains query; MTR matches id or line name.
  * @param {string} query
  * @param {number} [limit]
@@ -8041,19 +8201,37 @@ async function refreshEtaRouteSuggest() {
   const q = String(els.inputEtaRoute?.value || "").trim();
 
   if (q.length >= 1) {
-    // Typed search — brief loading while bounds warm (usually fast)
+    // Unified Destination/Route search (Phase 5)
     etaNearbyDirsByKey.clear();
     renderEtaRouteSuggest([], "Searching…", { status: "loading" });
     try {
       await ensureKmbRouteBounds();
       if (gen !== etaSuggestGen || getUiMode() !== "eta") return;
       if (String(els.inputEtaRoute?.value || "").trim() !== q) return;
-      const hits = searchEtaRoutes(q);
-      renderEtaRouteSuggest(
-        hits,
-        hits.length ? "" : `No routes match “${q}”`,
-        hits.length ? {} : { status: "empty" },
-      );
+      const result = await runUnifiedSearch(q);
+      if (gen !== etaSuggestGen || getUiMode() !== "eta") return;
+      if (String(els.inputEtaRoute?.value || "").trim() !== q) return;
+
+      if (result.kind === "routes") {
+        const hits = result.routes || [];
+        renderEtaRouteSuggest(
+          hits,
+          hits.length ? result.hint || "" : result.hint || `No routes match “${q}”`,
+          hits.length ? {} : { status: "empty" },
+        );
+      } else if (result.kind === "places") {
+        const places = result.places || [];
+        renderPlaceSuggest(
+          places,
+          places.length
+            ? result.hint || "Places · tap to plan trip"
+            : result.hint || `No places match “${q}”`,
+        );
+      } else {
+        renderEtaRouteSuggest([], "Enter a Destination/Route", {
+          status: "empty",
+        });
+      }
     } catch (e) {
       console.warn("[eta] search", e);
       if (gen !== etaSuggestGen) return;
@@ -8062,6 +8240,7 @@ async function refreshEtaRouteSuggest() {
     return;
   }
 
+  // Empty search field — nearby browse (not empty-state copy; that is for open field with no chars only when searching)
   etaNearbyDirsByKey.clear();
   renderEtaRouteSuggest([], "Loading nearby routes…", { status: "loading" });
   try {
@@ -9486,26 +9665,35 @@ function syncEtaModeChips() {
 
 function setEtaSearchOpen(open) {
   const want = !!open;
-  // App-nav expandable search (primary)
+  // Morph via class only (keep field in layout for width animation)
   if (els.appNavSearchWrap) {
     els.appNavSearchWrap.classList.toggle("is-open", want);
   }
   if (els.appNavSearchField) {
-    els.appNavSearchField.hidden = !want;
+    // Never use [hidden] — it fights the expand animation
+    els.appNavSearchField.hidden = false;
+    els.appNavSearchField.setAttribute("aria-hidden", want ? "false" : "true");
+    if (want) els.appNavSearchField.removeAttribute("inert");
+    else els.appNavSearchField.setAttribute("inert", "");
   }
   if (els.btnNavSearch) {
     els.btnNavSearch.setAttribute("aria-expanded", String(want));
-    els.btnNavSearch.hidden = want;
+    // Keep button in DOM for morph (CSS fades it)
+    els.btnNavSearch.hidden = false;
+    els.btnNavSearch.tabIndex = want ? -1 : 0;
   }
   if (want) {
     setDetailOpen(true);
     if (getUiMode() === "route") {
       // Plan mode: search focuses origin field instead
       els.appNavSearchWrap?.classList.remove("is-open");
-      if (els.appNavSearchField) els.appNavSearchField.hidden = true;
       if (els.btnNavSearch) {
-        els.btnNavSearch.hidden = false;
+        els.btnNavSearch.tabIndex = 0;
         els.btnNavSearch.setAttribute("aria-expanded", "false");
+      }
+      if (els.appNavSearchField) {
+        els.appNavSearchField.setAttribute("aria-hidden", "true");
+        els.appNavSearchField.setAttribute("inert", "");
       }
       els.inputOrigin?.focus?.();
       return;
@@ -9514,7 +9702,10 @@ function setEtaSearchOpen(open) {
     if (sidebarPage !== "search" && sidebarPage !== "eta-route") {
       setSidebarPage("search");
     }
-    requestAnimationFrame(() => els.inputEtaRoute?.focus?.());
+    // Double rAF so CSS sees closed → open and runs transition
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => els.inputEtaRoute?.focus?.());
+    });
   }
 }
 
