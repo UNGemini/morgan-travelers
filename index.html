@@ -47,183 +47,6 @@
         </div>
       </div>
 
-      <!-- Settings sheet -->
-      <div id="settings-sheet" class="sheet" hidden role="dialog" aria-labelledby="settings-title">
-        <div class="sheet-backdrop" data-sheet-close></div>
-        <div class="sheet-card" data-acrylic>
-          <header class="sheet-head">
-            <h2 id="settings-title">
-              <span class="material-symbols-outlined" aria-hidden="true">settings</span>
-              Settings
-            </h2>
-            <button type="button" class="btn btn-icon" data-sheet-close aria-label="Close">
-              <span class="material-symbols-outlined" aria-hidden="true">close</span>
-            </button>
-          </header>
-          <div class="sheet-body">
-            <section class="panel-section">
-              <h3>Dataset status</h3>
-              <p id="meta-status" class="status-line">Checking edge metadata…</p>
-              <dl id="meta-details" class="meta-grid" hidden></dl>
-            </section>
-            <section class="panel-section">
-              <h3>Downloads</h3>
-              <div class="btn-stack">
-                <button
-                  type="button"
-                  id="btn-download-gtfs"
-                  class="btn btn-ghost"
-                  data-acrylic
-                  disabled
-                >
-                  <span class="btn-row">
-                    <span class="material-symbols-outlined" aria-hidden="true">folder_zip</span>
-                    Download GTFS
-                  </span>
-                  <span class="btn-sub" id="gtfs-size-label">—</span>
-                </button>
-                <button
-                  type="button"
-                  id="btn-download-pmtiles"
-                  class="btn btn-ghost"
-                  data-acrylic
-                  disabled
-                >
-                  <span class="btn-row">
-                    <span class="material-symbols-outlined" aria-hidden="true">map</span>
-                    Download PMTiles
-                  </span>
-                  <span class="btn-sub" id="pmtiles-size-label">—</span>
-                </button>
-                <a
-                  id="link-metadata"
-                  class="btn btn-ghost"
-                  data-acrylic
-                  href="https://hk-gtfsdata.morgandev.cc/metadata.json"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <span class="btn-row">
-                    <span class="material-symbols-outlined" aria-hidden="true">data_object</span>
-                    Open metadata.json
-                  </span>
-                </a>
-              </div>
-            </section>
-            <section class="panel-section">
-              <h3>Map</h3>
-              <p class="hint">
-                Vector basemap <code>hongkong.pmtiles</code> · WASM RAPTOR
-                <code>hk.wheelsrouter</code>
-              </p>
-            </section>
-            <section class="panel-section" id="settings-fare-section">
-              <h3>Fare</h3>
-              <p class="hint">
-                Ticket type used for trip plans and bus boarding prices on route
-                details.
-              </p>
-              <div class="pref-field fare-type-field settings-fare-field" id="fare-type-field">
-                <label class="loc-label pref-label" for="select-fare-type">
-                  <span class="material-symbols-outlined" aria-hidden="true">payments</span>
-                  Ticket type
-                </label>
-                <select
-                  id="select-fare-type"
-                  class="fare-type-select"
-                  aria-label="Ticket / fare type"
-                >
-                  <option value="octopus_adult">Octopus Adult/Elderly</option>
-                  <option value="octopus_child">Octopus Child</option>
-                  <option value="octopus_student">Octopus Student</option>
-                  <option
-                    value="octopus_joyyou_65"
-                    title="Concessionary fare on domestic routes; excl. AEL, EAL First Class, Lo Wu &amp; Lok Ma Chau"
-                  >
-                    Octopus JoyYou Cards (65+)
-                  </option>
-                  <option
-                    value="octopus_joyyou_60"
-                    title="JoyYou $2/20% scheme; full adult for AEL, Lo Wu, Lok Ma Chau &amp; Racecourse"
-                  >
-                    Octopus JoyYou Cards (60–64)
-                  </option>
-                  <option value="qr_adult" title="Same rates as Octopus Adult/Elderly">
-                    QR Code Adult/Elderly
-                  </option>
-                  <option value="qr_child" title="Same rates as Octopus Child">
-                    QR Code Child
-                  </option>
-                  <option value="single_ride">Single Ride Ticket/Cash</option>
-                  <option value="contactless" title="Same rates as Octopus Adult">
-                    Contactless Bank Cards
-                  </option>
-                  <option value="china_tunion" title="Treated as adult Octopus rates">
-                    China T-Union Cards
-                  </option>
-                </select>
-              </div>
-            </section>
-          </div>
-        </div>
-      </div>
-
-      <!-- Info sheet -->
-      <div id="info-sheet" class="sheet" hidden role="dialog" aria-labelledby="info-title">
-        <div class="sheet-backdrop" data-sheet-close></div>
-        <div class="sheet-card" data-acrylic>
-          <header class="sheet-head">
-            <h2 id="info-title">
-              <span class="material-symbols-outlined" aria-hidden="true">info</span>
-              About
-            </h2>
-            <button type="button" class="btn btn-icon" data-sheet-close aria-label="Close">
-              <span class="material-symbols-outlined" aria-hidden="true">close</span>
-            </button>
-          </header>
-          <div class="sheet-body">
-            <section class="panel-section">
-              <h3>MORGAN Travelers</h3>
-              <p class="hint">
-                Hong Kong transit map &amp; trip planner. Routes use the public GTFS graph
-                (RAPTOR) with Octopus adult fare estimates. Search supports
-                <code>@MTR</code>, <code>@LRT</code>, and <code>@Bus</code> filters.
-              </p>
-              <p class="hint" style="margin-top: 10px">
-                Data: MTR open data · Protomaps · OpenStreetMap contributors.
-              </p>
-            </section>
-            <section
-              class="panel-section contrib-desktop-only"
-              id="contrib-about-section"
-            >
-              <h3>Contribute</h3>
-              <p class="hint">
-                Bus paths are drawn live from the road network and can miss real
-                alignments (e.g. Mei Tung Street vs the bus terminus). On
-                <strong>desktop</strong>, you can load a calculated path and
-                edit turning points for moderators to review.
-              </p>
-              <button
-                type="button"
-                id="btn-contribute-path"
-                class="btn btn-ghost"
-                data-acrylic
-                style="margin-top: 10px; width: 100%"
-              >
-                <span class="btn-row">
-                  <span class="material-symbols-outlined" aria-hidden="true">edit_road</span>
-                  Contribute route path
-                </span>
-              </button>
-              <p class="hint contrib-desktop-note" style="margin-top: 8px">
-                Desktop only · mouse/trackpad recommended.
-              </p>
-            </section>
-          </div>
-        </div>
-      </div>
-
       <!-- Contribute route path (sub-page sheet) -->
       <div
         id="contribute-sheet"
@@ -1113,6 +936,175 @@
                 </button>
               </div>
               <div id="pinned-route-body" class="pinned-route-body" role="list" aria-label="Pinned routes"></div>
+            </div>
+
+            <!-- Page: Settings -->
+            <div id="sidebar-page-settings" class="sidebar-page" hidden>
+              <div class="trip-detail-bar">
+                <button type="button" id="btn-settings-back" class="btn btn-ghost trip-back-btn" data-acrylic>
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
+                    Back
+                  </span>
+                </button>
+              </div>
+              <div class="panel-page-scroll" id="settings-page-body">
+<section class="panel-section">
+              <h3>Dataset status</h3>
+              <p id="meta-status" class="status-line">Checking edge metadata…</p>
+              <dl id="meta-details" class="meta-grid" hidden></dl>
+            </section>
+            <section class="panel-section">
+              <h3>Downloads</h3>
+              <div class="btn-stack">
+                <button
+                  type="button"
+                  id="btn-download-gtfs"
+                  class="btn btn-ghost"
+                  data-acrylic
+                  disabled
+                >
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">folder_zip</span>
+                    Download GTFS
+                  </span>
+                  <span class="btn-sub" id="gtfs-size-label">—</span>
+                </button>
+                <button
+                  type="button"
+                  id="btn-download-pmtiles"
+                  class="btn btn-ghost"
+                  data-acrylic
+                  disabled
+                >
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">map</span>
+                    Download PMTiles
+                  </span>
+                  <span class="btn-sub" id="pmtiles-size-label">—</span>
+                </button>
+                <a
+                  id="link-metadata"
+                  class="btn btn-ghost"
+                  data-acrylic
+                  href="https://hk-gtfsdata.morgandev.cc/metadata.json"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">data_object</span>
+                    Open metadata.json
+                  </span>
+                </a>
+              </div>
+            </section>
+            <section class="panel-section">
+              <h3>Map</h3>
+              <p class="hint">
+                Vector basemap <code>hongkong.pmtiles</code> · WASM RAPTOR
+                <code>hk.wheelsrouter</code>
+              </p>
+            </section>
+            <section class="panel-section" id="settings-fare-section">
+              <h3>Fare</h3>
+              <p class="hint">
+                Ticket type used for trip plans and bus boarding prices on route
+                details.
+              </p>
+              <div class="pref-field fare-type-field settings-fare-field" id="fare-type-field">
+                <label class="loc-label pref-label" for="select-fare-type">
+                  <span class="material-symbols-outlined" aria-hidden="true">payments</span>
+                  Ticket type
+                </label>
+                <select
+                  id="select-fare-type"
+                  class="fare-type-select"
+                  aria-label="Ticket / fare type"
+                >
+                  <option value="octopus_adult">Octopus Adult/Elderly</option>
+                  <option value="octopus_child">Octopus Child</option>
+                  <option value="octopus_student">Octopus Student</option>
+                  <option
+                    value="octopus_joyyou_65"
+                    title="Concessionary fare on domestic routes; excl. AEL, EAL First Class, Lo Wu &amp; Lok Ma Chau"
+                  >
+                    Octopus JoyYou Cards (65+)
+                  </option>
+                  <option
+                    value="octopus_joyyou_60"
+                    title="JoyYou $2/20% scheme; full adult for AEL, Lo Wu, Lok Ma Chau &amp; Racecourse"
+                  >
+                    Octopus JoyYou Cards (60–64)
+                  </option>
+                  <option value="qr_adult" title="Same rates as Octopus Adult/Elderly">
+                    QR Code Adult/Elderly
+                  </option>
+                  <option value="qr_child" title="Same rates as Octopus Child">
+                    QR Code Child
+                  </option>
+                  <option value="single_ride">Single Ride Ticket/Cash</option>
+                  <option value="contactless" title="Same rates as Octopus Adult">
+                    Contactless Bank Cards
+                  </option>
+                  <option value="china_tunion" title="Treated as adult Octopus rates">
+                    China T-Union Cards
+                  </option>
+                </select>
+              </div>
+            </section>
+              </div>
+            </div>
+
+            <!-- Page: About -->
+            <div id="sidebar-page-about" class="sidebar-page" hidden>
+              <div class="trip-detail-bar">
+                <button type="button" id="btn-about-back" class="btn btn-ghost trip-back-btn" data-acrylic>
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
+                    Back
+                  </span>
+                </button>
+              </div>
+              <div class="panel-page-scroll" id="about-page-body">
+<section class="panel-section">
+              <h3>MORGAN Travelers</h3>
+              <p class="hint">
+                Hong Kong transit map &amp; trip planner. Routes use the public GTFS graph
+                (RAPTOR) with Octopus adult fare estimates. Search supports
+                <code>@MTR</code>, <code>@LRT</code>, and <code>@Bus</code> filters.
+              </p>
+              <p class="hint" style="margin-top: 10px">
+                Data: MTR open data · Protomaps · OpenStreetMap contributors.
+              </p>
+            </section>
+            <section
+              class="panel-section contrib-desktop-only"
+              id="contrib-about-section"
+            >
+              <h3>Contribute</h3>
+              <p class="hint">
+                Bus paths are drawn live from the road network and can miss real
+                alignments (e.g. Mei Tung Street vs the bus terminus). On
+                <strong>desktop</strong>, you can load a calculated path and
+                edit turning points for moderators to review.
+              </p>
+              <button
+                type="button"
+                id="btn-contribute-path"
+                class="btn btn-ghost"
+                data-acrylic
+                style="margin-top: 10px; width: 100%"
+              >
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">edit_road</span>
+                  Contribute route path
+                </span>
+              </button>
+              <p class="hint contrib-desktop-note" style="margin-top: 8px">
+                Desktop only · mouse/trackpad recommended.
+              </p>
+            </section>
+              </div>
             </div>
           </div>
         </aside>

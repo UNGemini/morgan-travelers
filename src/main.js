@@ -250,6 +250,10 @@ const els = {
   sidebarPageTrip: document.getElementById("sidebar-page-trip"),
   sidebarPageEtaRoute: document.getElementById("sidebar-page-eta-route"),
   sidebarPagePinned: document.getElementById("sidebar-page-pinned"),
+  sidebarPageSettings: document.getElementById("sidebar-page-settings"),
+  sidebarPageAbout: document.getElementById("sidebar-page-about"),
+  btnSettingsBack: document.getElementById("btn-settings-back"),
+  btnAboutBack: document.getElementById("btn-about-back"),
   pinnedRouteBody: document.getElementById("pinned-route-body"),
   btnPinnedBack: document.getElementById("btn-pinned-back"),
   etaRouteDetailHead: document.getElementById("eta-route-detail-head"),
@@ -467,12 +471,10 @@ function syncPinnedRouteToolbar() {
   const label = els.toolbarPinnedLabel;
   if (!btn) return;
   btn.classList.toggle("has-pins", list.length > 0);
+  // Always keep the tab name “Pinned” (supports multiple stops)
+  if (label) label.textContent = "Pinned";
   if (list.length) {
     btn.disabled = false;
-    if (label) {
-      label.textContent =
-        list.length === 1 ? String(list[0].id) : `${list.length} pinned`;
-    }
     const oneStop =
       list.length === 1 && (list[0].stopName || list[0].stopId)
         ? ` @ ${list[0].stopName || list[0].stopId}`
@@ -480,18 +482,17 @@ function syncPinnedRouteToolbar() {
     btn.title =
       list.length === 1
         ? `Pinned: ${list[0].id}${oneStop}`
-        : `Pinned (${list.length})`;
+        : `Pinned (${list.length} stops)`;
     btn.setAttribute(
       "aria-label",
       list.length === 1
         ? `Open pinned ${list[0].id}${oneStop}`
-        : `Open ${list.length} pinned`,
+        : `Open ${list.length} pinned stops`,
     );
   } else {
     btn.disabled = true;
-    if (label) label.textContent = "Pinned";
     btn.title = "Pin a route stop from route details";
-    btn.setAttribute("aria-label", "No pinned");
+    btn.setAttribute("aria-label", "No pinned stops");
   }
   const pinBtn = els.btnEtaPinRoute;
   if (pinBtn && etaSelectedForDetails) {
@@ -4950,13 +4951,15 @@ function renderPlans(list, ms, opts = {}) {
 }
 
 /**
- * Sidebar navigation: search ↔ trip detail ↔ ETA route detail ↔ pinned.
- * @param {"search"|"trip"|"eta-route"|"pinned"} page
+ * Sidebar navigation: search ↔ trip / route / pinned / settings / about.
+ * @param {"search"|"trip"|"eta-route"|"pinned"|"settings"|"about"} page
  */
 function setSidebarPage(page) {
   if (page === "trip") sidebarPage = "trip";
   else if (page === "eta-route") sidebarPage = "eta-route";
   else if (page === "pinned") sidebarPage = "pinned";
+  else if (page === "settings") sidebarPage = "settings";
+  else if (page === "about") sidebarPage = "about";
   else sidebarPage = "search";
 
   if (els.sidebarPageSearch) {
@@ -4971,6 +4974,12 @@ function setSidebarPage(page) {
   if (els.sidebarPagePinned) {
     els.sidebarPagePinned.hidden = sidebarPage !== "pinned";
   }
+  if (els.sidebarPageSettings) {
+    els.sidebarPageSettings.hidden = sidebarPage !== "settings";
+  }
+  if (els.sidebarPageAbout) {
+    els.sidebarPageAbout.hidden = sidebarPage !== "about";
+  }
   if (els.detailTitle) {
     if (sidebarPage === "trip") {
       els.detailTitle.textContent = "Trip detail";
@@ -4978,6 +4987,10 @@ function setSidebarPage(page) {
       els.detailTitle.textContent = "Route detail";
     } else if (sidebarPage === "pinned") {
       els.detailTitle.textContent = "Pinned";
+    } else if (sidebarPage === "settings") {
+      els.detailTitle.textContent = "Settings";
+    } else if (sidebarPage === "about") {
+      els.detailTitle.textContent = "About";
     } else {
       const mode = getUiMode();
       els.detailTitle.textContent =
@@ -4987,14 +5000,18 @@ function setSidebarPage(page) {
   if (
     sidebarPage === "trip" ||
     sidebarPage === "eta-route" ||
-    sidebarPage === "pinned"
+    sidebarPage === "pinned" ||
+    sidebarPage === "settings" ||
+    sidebarPage === "about"
   ) {
     setDetailOpen(true);
   }
   if (
     (sidebarPage === "trip" ||
       sidebarPage === "eta-route" ||
-      sidebarPage === "pinned") &&
+      sidebarPage === "pinned" ||
+      sidebarPage === "settings" ||
+      sidebarPage === "about") &&
     els.panel
   ) {
     const body = els.panel.querySelector(".detail-sidebar-body");
@@ -9710,32 +9727,48 @@ els.modeButtons().forEach((btn) => {
 setUiMode(getUiMode());
 setDetailOpen(true);
 
-// Settings / Info sheets (profile menu)
-wireSheet(els.settingsSheet);
-wireSheet(els.infoSheet);
-els.btnSettings?.addEventListener("click", () => {
-  closeProfileMenu();
-  openSheet(els.settingsSheet);
-});
-els.btnInfo?.addEventListener("click", () => {
-  closeProfileMenu();
-  openSheet(els.infoSheet);
-});
-
+// Profile menu → Settings / About as panel pages (not modal sheets)
 function closeProfileMenu() {
-  if (els.profileMenu) els.profileMenu.hidden = true;
+  if (els.profileMenu) {
+    els.profileMenu.hidden = true;
+    els.profileMenu.setAttribute("hidden", "");
+  }
   if (els.btnProfile) els.btnProfile.setAttribute("aria-expanded", "false");
 }
-function toggleProfileMenu() {
+function openProfileMenu() {
   if (!els.profileMenu || !els.btnProfile) return;
-  const open = els.profileMenu.hidden;
-  els.profileMenu.hidden = !open;
-  els.btnProfile.setAttribute("aria-expanded", String(open));
+  els.profileMenu.hidden = false;
+  els.profileMenu.removeAttribute("hidden");
+  els.btnProfile.setAttribute("aria-expanded", "true");
 }
+function toggleProfileMenu() {
+  if (!els.profileMenu) return;
+  if (els.profileMenu.hidden || els.profileMenu.hasAttribute("hidden")) {
+    openProfileMenu();
+  } else {
+    closeProfileMenu();
+  }
+}
+// Ensure menu starts closed (CSS must not force display:flex while hidden)
+closeProfileMenu();
+
 els.btnProfile?.addEventListener("click", (e) => {
   e.stopPropagation();
+  e.preventDefault();
   toggleProfileMenu();
 });
+els.btnSettings?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  closeProfileMenu();
+  setSidebarPage("settings");
+});
+els.btnInfo?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  closeProfileMenu();
+  setSidebarPage("about");
+});
+els.btnSettingsBack?.addEventListener("click", () => setSidebarPage("search"));
+els.btnAboutBack?.addEventListener("click", () => setSidebarPage("search"));
 document.addEventListener("click", (e) => {
   const root = els.mapProfile || document.getElementById("map-profile");
   if (!root?.contains(/** @type {Node} */ (e.target))) {

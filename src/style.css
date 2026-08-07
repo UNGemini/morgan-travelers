@@ -451,6 +451,11 @@ body.mobile-ui [data-acrylic]::before {
   gap: 2px;
   z-index: 20;
 }
+/* Critical: class { display:flex } would override [hidden] — force closed */
+.profile-menu[hidden],
+.profile-menu[aria-hidden="true"] {
+  display: none !important;
+}
 .profile-menu-item {
   display: flex;
   align-items: center;
@@ -1193,7 +1198,9 @@ body.mobile-ui [data-acrylic]::before {
 #sidebar-page-search:not([hidden]),
 #sidebar-page-trip:not([hidden]),
 #sidebar-page-eta-route:not([hidden]),
-#sidebar-page-pinned:not([hidden]) {
+#sidebar-page-pinned:not([hidden]),
+#sidebar-page-settings:not([hidden]),
+#sidebar-page-about:not([hidden]) {
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;
@@ -5196,6 +5203,34 @@ body.contrib-submitting .bg-orb {
   width: 100%;
   margin-top: 8px;
   justify-content: center;
+}
+
+/* Settings / About panel pages */
+.panel-page-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 12px 16px;
+  -webkit-overflow-scrolling: touch;
+}
+.panel-page-scroll .panel-section {
+  margin-bottom: 16px;
+}
+.panel-page-scroll .panel-section h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+#sidebar-page-settings,
+#sidebar-page-about {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+#sidebar-page-settings[hidden],
+#sidebar-page-about[hidden] {
+  display: none !important;
 }
 
 /* Hide legacy toolbar if present */
