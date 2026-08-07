@@ -226,7 +226,7 @@ const els = {
   mapPickHint: document.getElementById("map-pick-hint"),
   btnPlan: document.getElementById("btn-plan"),
   planResults: document.getElementById("plan-results"),
-  // Shell: toolbar + detail + sheets
+  // Shell: panel + sheets
   mainToolbar: document.getElementById("main-toolbar"),
 
   btnDetailOpen: document.getElementById("btn-detail-open"),
@@ -234,6 +234,16 @@ const els = {
   detailTitle: document.getElementById("detail-title"),
   btnSettings: document.getElementById("btn-settings"),
   btnInfo: document.getElementById("btn-info"),
+  btnProfile: document.getElementById("btn-profile"),
+  profileMenu: document.getElementById("profile-menu"),
+  mapProfile: document.getElementById("map-profile"),
+  sheetChrome: document.getElementById("sheet-chrome"),
+  sheetGrabber: document.getElementById("sheet-grabber"),
+  sheetTitleRow: document.getElementById("sheet-title-row"),
+  appBottomNav: document.getElementById("app-bottom-nav"),
+  btnNavSearch: document.getElementById("btn-nav-search"),
+  appNavSearchWrap: document.getElementById("app-nav-search-wrap"),
+  appNavSearchField: document.getElementById("app-nav-search-field"),
   settingsSheet: document.getElementById("settings-sheet"),
   infoSheet: document.getElementById("info-sheet"),
   sidebarPageSearch: document.getElementById("sidebar-page-search"),
@@ -262,7 +272,12 @@ const els = {
   etaSidebarSearch: document.getElementById("eta-sidebar-search"),
   btnEtaSearchToggle: document.getElementById("btn-eta-search-toggle"),
   modeButtons: () =>
-    Array.from(document.querySelectorAll(".toolbar-mode-btn[data-ui-mode]")),
+    Array.from(
+      document.querySelectorAll(
+        ".app-nav-tab[data-ui-mode], .toolbar-mode-btn[data-ui-mode]",
+      ),
+    ),
+  navTabs: () => Array.from(document.querySelectorAll(".app-nav-tab[data-nav]")),
 };
 
 const ETA_PINNED_KEY = "morgan.etaPinnedRoutes";
@@ -451,6 +466,7 @@ function syncPinnedRouteToolbar() {
   const btn = els.btnEtaPinned;
   const label = els.toolbarPinnedLabel;
   if (!btn) return;
+  btn.classList.toggle("has-pins", list.length > 0);
   if (list.length) {
     btn.disabled = false;
     if (label) {
@@ -1647,9 +1663,20 @@ const map = new MapLibreMap({
   attributionControl: false,
 });
 
-// Map tools + always-visible © at bottom-right (© is out of flex flow so it
-// never reflows the nav/geolocate stack; BR offset ignores dock expand)
-map.addControl(new NavigationControl({ visualizePitch: true }), "bottom-right");
+// Map tools BR — desktop: nav + geolocate; mobile: geolocate only (gestures zoom)
+const isMobileUi =
+  typeof matchMedia !== "undefined" &&
+  (matchMedia("(max-width: 640px)").matches ||
+    matchMedia("(pointer: coarse)").matches);
+if (document.body) {
+  document.body.classList.toggle("mobile-ui", isMobileUi);
+}
+/** @type {NavigationControl | null} */
+let mapNavControl = null;
+if (!isMobileUi) {
+  mapNavControl = new NavigationControl({ visualizePitch: true });
+  map.addControl(mapNavControl, "bottom-right");
+}
 map.addControl(
   new GeolocateControl({
     positionOptions: { enableHighAccuracy: true },
@@ -4946,11 +4973,11 @@ function setSidebarPage(page) {
     } else if (sidebarPage === "eta-route") {
       els.detailTitle.textContent = "Route detail";
     } else if (sidebarPage === "pinned") {
-      els.detailTitle.textContent = "Pinned route";
+      els.detailTitle.textContent = "Pinned";
     } else {
       const mode = getUiMode();
       els.detailTitle.textContent =
-        mode === "eta" ? "ETA · routes" : "Route planner";
+        mode === "eta" ? "Nearby" : "Trip Plan";
     }
   }
   if (
@@ -4969,6 +4996,7 @@ function setSidebarPage(page) {
     const body = els.panel.querySelector(".detail-sidebar-body");
     if (body) body.scrollTop = 0;
   }
+  if (typeof syncAppNavActive === "function") syncAppNavActive();
 }
 
 /**
@@ -5494,15 +5522,24 @@ async function bootstrapRouter() {
     const preferred = `${EDGE}/hk.wheelsrouter`;
     await initRouter(preferred);
     const stats = getRouterStats();
-    els.routerStatus.textContent = stats
-      ? `Ready · ${stats.stops.toLocaleString()} stops · ${stats.routes.toLocaleString()} routes`
-      : "Router ready";
-    showToast("WASM router ready");
+    // Quiet success — no “Ready · N stops” chip (status element stays visually hidden)
+    if (els.routerStatus) {
+      els.routerStatus.textContent = stats
+        ? `Ready · ${stats.stops.toLocaleString()} stops · ${stats.routes.toLocaleString()} routes`
+        : "Router ready";
+    }
+    console.info("[router] ready", stats);
     updatePlanButton();
   } catch (err) {
     console.error("[router]", err);
     if (els.routerStatus) {
       els.routerStatus.textContent = `Router failed: ${err.message || err}`;
+    }
+    // Surface failures only
+    const chip = document.getElementById("map-status");
+    if (chip) {
+      chip.classList.remove("is-visually-hidden");
+      chip.classList.add("is-error");
     }
     showToast("Router graph failed to load", 5000);
   }
@@ -5801,30 +5838,50 @@ try {
   /* ignore */
 }
 
+/**
+ * Open / close the panel sheet.
+ * Mobile: binary snap only (open ≈ 60vh · closed = chrome+nav).
+ * Desktop: panel always effectively open (left column).
+ * @param {boolean} open
+ */
 function setDetailOpen(open) {
   if (!els.app) return;
-  // Do NOT remeasure width here — Trip Plan open was growing the dock
-  // and ETA mode kept the larger size. Keep locked width only.
+  // Do NOT remeasure width here — keep locked dock width only.
   if (dockLockedWidthPx > 40) applyDockWidth(dockLockedWidthPx);
-  els.app.dataset.detail = open ? "open" : "closed";
+  const isDesktop =
+    typeof matchMedia !== "undefined" &&
+    matchMedia("(min-width: 641px)").matches;
+  const next = isDesktop ? true : !!open;
+  els.app.dataset.detail = next ? "open" : "closed";
+  els.app.dataset.sheet = next ? "open" : "closed";
   if (els.panel) {
-    els.panel.setAttribute("aria-hidden", open ? "false" : "true");
-    els.panel.classList.toggle("collapsed", !open);
+    els.panel.setAttribute("aria-hidden", "false");
+    els.panel.classList.toggle("collapsed", !next);
   }
   if (els.btnDetailOpen) {
-    els.btnDetailOpen.setAttribute("aria-expanded", String(open));
-    els.btnDetailOpen.classList.toggle("is-active", open);
-    els.btnDetailOpen.title = open ? "Collapse trip details" : "Expand trip details";
-    els.btnDetailOpen.setAttribute(
+    els.btnDetailOpen.setAttribute("aria-expanded", String(next));
+    els.btnDetailOpen.classList.toggle("is-active", next);
+  }
+  if (els.sheetGrabber) {
+    els.sheetGrabber.setAttribute(
       "aria-label",
-      open ? "Collapse trip details" : "Expand trip details",
+      next ? "Collapse panel" : "Expand panel",
     );
   }
-  const icon = document.getElementById("btn-detail-open-icon");
-  if (icon) icon.textContent = open ? "expand_more" : "expand_less";
-  // Map tools / © do not move when detail expands — only map canvas may need resize
   resizeMapSoon();
-  setTimeout(() => resizeMapSoon(), 400);
+  setTimeout(() => resizeMapSoon(), 320);
+}
+
+/** Toggle mobile sheet open ↔ closed (no mid stop). */
+function toggleSheetSnap() {
+  if (
+    typeof matchMedia !== "undefined" &&
+    matchMedia("(min-width: 641px)").matches
+  ) {
+    return;
+  }
+  const open = els.app?.dataset?.sheet !== "open";
+  setDetailOpen(open);
 }
 
 function openSheet(sheetEl) {
@@ -5858,6 +5915,13 @@ function setUiMode(mode) {
     btn.classList.toggle("is-active", active);
     btn.setAttribute("aria-selected", String(active));
   });
+  // Clear pinned tab highlight when switching product modes
+  els.navTabs().forEach((btn) => {
+    if (btn.dataset.nav === "pinned") {
+      btn.classList.remove("is-active");
+      btn.setAttribute("aria-selected", "false");
+    }
+  });
 
   // Leave nested detail pages so search page (ETA list / plan form) is visible
   if (sidebarPage === "trip") {
@@ -5879,7 +5943,7 @@ function setUiMode(mode) {
   }
   if (els.detailTitle) {
     els.detailTitle.textContent =
-      next === "eta" ? "ETA · routes" : "Route planner";
+      next === "eta" ? "Nearby" : "Trip Plan";
   }
 
   // plan-results is a sibling of the mode panels — hide in ETA so it doesn't
@@ -5900,11 +5964,26 @@ function setUiMode(mode) {
     void ensureMtrStationLinesMap();
     void refreshEtaRouteSuggest();
   } else {
-    // Trip Plan: keep detail open if user already has plans
-    if (plans?.length) setDetailOpen(true);
+    setDetailOpen(true);
   }
   // Keep sidebar width stable across ETA ↔ Trip Plan (no remeasure / no shrink)
   requestAnimationFrame(() => resizeMapSoon());
+  syncAppNavActive();
+}
+
+/** Highlight the correct left nav tab for the current surface. */
+function syncAppNavActive() {
+  const page = sidebarPage;
+  const mode = getUiMode();
+  els.navTabs().forEach((btn) => {
+    const nav = btn.dataset.nav;
+    let active = false;
+    if (nav === "pinned") active = page === "pinned";
+    else if (nav === "nearby") active = mode === "eta" && page !== "pinned";
+    else if (nav === "plan") active = mode === "route" && page !== "pinned";
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-selected", String(active));
+  });
 }
 
 // ── ETA mode: bus / MTR / LRT route search ──────────────────────────────────
@@ -9438,60 +9517,37 @@ function syncEtaModeChips() {
 }
 
 function setEtaSearchOpen(open) {
-  const chrome = els.etaBottomChrome;
-  const field = els.etaSidebarSearch;
-  const toggle = els.btnEtaSearchToggle;
   const want = !!open;
-  const wasOpen = !!chrome?.classList.contains("is-search-open");
-
-  if (field) {
-    // Always in layout for shape animation; [hidden] no longer forces display:none
-    field.hidden = false;
-    field.setAttribute("aria-hidden", want ? "false" : "true");
-    if (want) field.removeAttribute("inert");
-    else field.setAttribute("inert", "");
+  // App-nav expandable search (primary)
+  if (els.appNavSearchWrap) {
+    els.appNavSearchWrap.classList.toggle("is-open", want);
   }
-  if (toggle) {
-    toggle.setAttribute("aria-expanded", want ? "true" : "false");
-    toggle.tabIndex = want ? -1 : 0;
+  if (els.appNavSearchField) {
+    els.appNavSearchField.hidden = !want;
   }
-
-  // Left mode icon becomes “exit search → full tab switcher”
-  document.querySelectorAll(".eta-mode-tab.is-active").forEach((btn) => {
-    if (want) {
-      btn.setAttribute("title", "Back to modes");
-      btn.setAttribute("aria-label", "Close search and show all modes");
-    } else {
-      const mode = btn.getAttribute("data-eta-mode") || "";
-      const label =
-        mode === "mtr"
-          ? "MTR"
-          : mode === "lrt"
-            ? "LRT"
-            : mode === "gmb"
-              ? "GMB"
-              : "Bus";
-      btn.setAttribute("title", label);
-      btn.removeAttribute("aria-label");
+  if (els.btnNavSearch) {
+    els.btnNavSearch.setAttribute("aria-expanded", String(want));
+    els.btnNavSearch.hidden = want;
+  }
+  if (want) {
+    setDetailOpen(true);
+    if (getUiMode() === "route") {
+      // Plan mode: search focuses origin field instead
+      els.appNavSearchWrap?.classList.remove("is-open");
+      if (els.appNavSearchField) els.appNavSearchField.hidden = true;
+      if (els.btnNavSearch) {
+        els.btnNavSearch.hidden = false;
+        els.btnNavSearch.setAttribute("aria-expanded", "false");
+      }
+      els.inputOrigin?.focus?.();
+      return;
     }
-  });
-
-  if (!chrome) return;
-
-  if (wasOpen === want) {
-    if (want) els.inputEtaRoute?.focus?.();
-    return;
-  }
-
-  // Paint closed/open from-state, then toggle so CSS transitions run
-  requestAnimationFrame(() => {
-    chrome.classList.toggle("is-search-open", want);
-    if (want) {
-      requestAnimationFrame(() => els.inputEtaRoute?.focus?.());
-    } else {
-      els.inputEtaRoute?.blur?.();
+    if (getUiMode() !== "eta") setUiMode("eta");
+    if (sidebarPage !== "search" && sidebarPage !== "eta-route") {
+      setSidebarPage("search");
     }
-  });
+    requestAnimationFrame(() => els.inputEtaRoute?.focus?.());
+  }
 }
 
 function collapseEtaSearchIfEmpty() {
@@ -9539,24 +9595,6 @@ function initEtaRouteSearchUi() {
 
   document.querySelectorAll(".eta-mode-tab[data-eta-mode], .eta-mode-chip[data-eta-mode]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      // When search is open, the left icon exits search (back to full tab switcher)
-      if (els.etaBottomChrome?.classList.contains("is-search-open")) {
-        if (els.inputEtaRoute) els.inputEtaRoute.value = "";
-        setEtaSearchOpen(false);
-        etaRouteActive = -1;
-        // Still apply mode if user tapped a different tab (hidden ones not visible)
-        const mode = btn.getAttribute("data-eta-mode") || "bus";
-        if (mode !== etaTrafficMode) {
-          etaTrafficMode =
-            mode === "mtr" || mode === "lrt" || mode === "gmb" || mode === "bus"
-              ? mode
-              : "bus";
-        }
-        syncEtaModeChips();
-        void refreshEtaRouteSuggest();
-        return;
-      }
-
       const mode = btn.getAttribute("data-eta-mode") || "bus";
       etaTrafficMode =
         mode === "mtr" || mode === "lrt" || mode === "gmb" || mode === "bus"
@@ -9578,6 +9616,11 @@ function initEtaRouteSearchUi() {
   syncPinnedRouteToolbar();
   setEtaSearchOpen(false);
 
+  els.btnNavSearch?.addEventListener("click", () => {
+    setDetailOpen(true);
+    setEtaSearchOpen(true);
+    void refreshEtaRouteSuggest();
+  });
   els.btnEtaSearchToggle?.addEventListener("click", () => {
     setDetailOpen(true);
     setEtaSearchOpen(true);
@@ -9704,17 +9747,101 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-// Mode switch
+// Mode switch (app nav Nearby / Trip Plan)
 els.modeButtons().forEach((btn) => {
   btn.addEventListener("click", () => setUiMode(btn.dataset.uiMode || "eta"));
 });
 setUiMode(getUiMode());
+setDetailOpen(true);
 
-// Settings / Info sheets
+// Settings / Info sheets (profile menu)
 wireSheet(els.settingsSheet);
 wireSheet(els.infoSheet);
-els.btnSettings?.addEventListener("click", () => openSheet(els.settingsSheet));
-els.btnInfo?.addEventListener("click", () => openSheet(els.infoSheet));
+els.btnSettings?.addEventListener("click", () => {
+  closeProfileMenu();
+  openSheet(els.settingsSheet);
+});
+els.btnInfo?.addEventListener("click", () => {
+  closeProfileMenu();
+  openSheet(els.infoSheet);
+});
+
+function closeProfileMenu() {
+  if (els.profileMenu) els.profileMenu.hidden = true;
+  if (els.btnProfile) els.btnProfile.setAttribute("aria-expanded", "false");
+}
+function toggleProfileMenu() {
+  if (!els.profileMenu || !els.btnProfile) return;
+  const open = els.profileMenu.hidden;
+  els.profileMenu.hidden = !open;
+  els.btnProfile.setAttribute("aria-expanded", String(open));
+}
+els.btnProfile?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleProfileMenu();
+});
+document.addEventListener("click", (e) => {
+  if (!els.mapProfile?.contains(/** @type {Node} */ (e.target))) {
+    closeProfileMenu();
+  }
+});
+
+// Expandable Search (right) — primary entry; setEtaSearchOpen mirrors this
+
+// Mobile sheet grabber — binary snap
+function wireSheetSnap() {
+  const chrome = els.sheetChrome;
+  if (!chrome) return;
+  let startY = 0;
+  let dragging = false;
+  const onStart = (y) => {
+    if (matchMedia("(min-width: 641px)").matches) return;
+    dragging = true;
+    startY = y;
+  };
+  const onEnd = (y) => {
+    if (!dragging) return;
+    dragging = false;
+    const dy = y - startY;
+    if (Math.abs(dy) < 36) {
+      // tap → toggle
+      if (Math.abs(dy) < 8) toggleSheetSnap();
+      return;
+    }
+    // drag down → close; drag up → open
+    if (dy > 40) setDetailOpen(false);
+    else if (dy < -40) setDetailOpen(true);
+  };
+  chrome.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (e.target.closest("button") && e.target !== els.sheetGrabber) return;
+      onStart(e.clientY);
+      chrome.setPointerCapture?.(e.pointerId);
+    },
+    { passive: true },
+  );
+  chrome.addEventListener(
+    "pointerup",
+    (e) => {
+      onEnd(e.clientY);
+    },
+    { passive: true },
+  );
+  chrome.addEventListener(
+    "pointercancel",
+    () => {
+      dragging = false;
+    },
+    { passive: true },
+  );
+  els.sheetGrabber?.addEventListener("click", (e) => {
+    e.preventDefault();
+    toggleSheetSnap();
+  });
+  els.sheetTitleRow?.addEventListener("click", () => toggleSheetSnap());
+}
+wireSheetSnap();
 
 /** Contributor path editor (About → Contribute route path) */
 const pathContributor = createPathContributor({

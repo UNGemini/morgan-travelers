@@ -25,7 +25,7 @@
     <div class="bg-orb bg-orb-1" aria-hidden="true"></div>
     <div class="bg-orb bg-orb-2" aria-hidden="true"></div>
 
-    <div id="app" class="app-shell" data-ui-mode="eta" data-toolbar="open" data-detail="closed">
+    <div id="app" class="app-shell" data-ui-mode="eta" data-toolbar="open" data-detail="open" data-sheet="open">
       <!-- Full-bleed map -->
       <div id="map-stage" class="map-stage">
         <main id="map" role="application" aria-label="Hong Kong map"></main>
@@ -41,8 +41,40 @@
             <span class="map-route-loading-label">Drawing route…</span>
           </div>
         </div>
-        <!-- Router / app status — top-right, independent of dock -->
-        <div id="map-status" class="map-status" data-acrylic role="status" aria-live="polite">
+        <!-- Profile menu (top-right) — Settings / About -->
+        <div class="map-profile" id="map-profile">
+          <button
+            type="button"
+            id="btn-profile"
+            class="map-profile-btn"
+            data-acrylic
+            title="Profile"
+            aria-label="Profile menu"
+            aria-haspopup="menu"
+            aria-expanded="false"
+            aria-controls="profile-menu"
+          >
+            <span class="material-symbols-outlined" aria-hidden="true">person</span>
+          </button>
+          <div
+            id="profile-menu"
+            class="profile-menu"
+            role="menu"
+            hidden
+            aria-label="Profile"
+          >
+            <button type="button" class="profile-menu-item" role="menuitem" id="btn-settings" data-acrylic>
+              <span class="material-symbols-outlined" aria-hidden="true">settings</span>
+              Settings
+            </button>
+            <button type="button" class="profile-menu-item" role="menuitem" id="btn-info" data-acrylic>
+              <span class="material-symbols-outlined" aria-hidden="true">info</span>
+              About Travelers
+            </button>
+          </div>
+        </div>
+        <!-- Router status kept for JS but visually hidden (no “Ready · N stops” chip) -->
+        <div id="map-status" class="map-status is-visually-hidden" role="status" aria-live="polite">
           <p id="router-status" class="status-line">Loading WASM router…</p>
         </div>
       </div>
@@ -628,30 +660,31 @@
         </div>
       </div>
 
-      <!-- Closable bottom dock: compact toolbar ↔ expands for detail -->
+      <!-- Panel / drawer: desktop left · mobile bottom sheet -->
       <div id="main-toolbar" class="main-toolbar" data-acrylic>
-        <!-- Expandable detail (above the chrome row) -->
         <aside
           id="side-panel"
           class="detail-sidebar"
-          aria-label="Trip details"
-          aria-hidden="true"
+          aria-label="Travelers panel"
+          aria-hidden="false"
         >
-          <header class="detail-sidebar-head">
-            <h2 class="detail-sidebar-title">
-              <span class="material-symbols-outlined" aria-hidden="true">route</span>
-              <span id="detail-title">Route planner</span>
-            </h2>
+          <!-- Find My–style grabber + title (mobile snap; always shown) -->
+          <div class="sheet-chrome" id="sheet-chrome">
             <button
               type="button"
-              id="btn-detail-close"
-              class="toolbar-icon-btn"
-              title="Collapse details"
-              aria-label="Collapse details"
+              class="sheet-grabber"
+              id="sheet-grabber"
+              aria-label="Expand or collapse panel"
+              title="Expand or collapse"
             >
-              <span class="material-symbols-outlined" aria-hidden="true">expand_more</span>
+              <span class="sheet-grabber-bar" aria-hidden="true"></span>
             </button>
-          </header>
+            <div class="sheet-title-row" id="sheet-title-row">
+              <h2 class="sheet-title">
+                <span id="detail-title">Nearby</span>
+              </h2>
+            </div>
+          </div>
 
           <div class="detail-sidebar-body">
             <!-- Page: search + plan list -->
@@ -701,7 +734,7 @@
                 </button>
               </div>
 
-              <!-- Bottom bar: tab switcher + expandable search (no gradient) -->
+              <!-- Traffic filter pills only (app Search lives in bottom nav) -->
               <div class="eta-sidebar-bottom-chrome" id="eta-sidebar-bottom-chrome">
                 <div
                   class="eta-mode-tabs"
@@ -752,36 +785,6 @@
                     <span class="material-symbols-outlined" aria-hidden="true">tram</span>
                     <span class="eta-mode-tab-label">LRT</span>
                   </button>
-                </div>
-
-                <button
-                  type="button"
-                  class="eta-search-toggle"
-                  id="btn-eta-search-toggle"
-                  title="Search routes"
-                  aria-label="Search routes"
-                  aria-expanded="false"
-                  aria-controls="eta-sidebar-search"
-                >
-                  <span class="material-symbols-outlined" aria-hidden="true">search</span>
-                </button>
-
-                <div class="eta-sidebar-search" id="eta-sidebar-search" hidden>
-                  <span class="material-symbols-outlined eta-sidebar-search-icon" aria-hidden="true"
-                    >search</span
-                  >
-                  <input
-                    id="input-eta-route"
-                    class="eta-sidebar-search-input"
-                    type="search"
-                    enterkeyhint="search"
-                    autocomplete="off"
-                    spellcheck="false"
-                    placeholder="Route no. or MTR line"
-                    aria-label="Search bus, MTR or LRT route"
-                    aria-autocomplete="list"
-                    aria-controls="eta-route-list-sidebar"
-                  />
                 </div>
               </div>
             </section>
@@ -1010,6 +1013,21 @@
                 </p>
               </div>
 
+              <button
+                type="button"
+                id="btn-plan"
+                class="btn btn-primary plan-trip-cta"
+                data-acrylic
+                disabled
+                title="Plan trip"
+                aria-label="Plan trip"
+              >
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">directions</span>
+                  Plan trip
+                </span>
+              </button>
+
               <div class="pref-field" id="eal-first-class-field">
                 <span class="loc-label pref-label">
                   <span class="material-symbols-outlined" aria-hidden="true">airline_seat_recline_extra</span>
@@ -1104,102 +1122,89 @@
           </div>
         </aside>
 
-        <!-- Always-visible chrome row -->
-        <div class="toolbar-inner">
-          <button
-            type="button"
-            id="btn-detail-open"
-            class="toolbar-icon-btn"
-            title="Expand trip details"
-            aria-label="Expand trip details"
-            aria-controls="side-panel"
-            aria-expanded="false"
-          >
-            <span class="material-symbols-outlined" aria-hidden="true" id="btn-detail-open-icon"
-              >expand_less</span
-            >
-          </button>
-
-          <div class="toolbar-mode" role="tablist" aria-label="Search mode">
+        <!-- Liquid glass app nav: left tabs + right expandable search -->
+        <nav class="app-bottom-nav" id="app-bottom-nav" aria-label="Main">
+          <div class="app-nav-tabs" role="tablist" aria-label="App sections">
             <button
               type="button"
-              class="toolbar-mode-btn is-active"
+              class="app-nav-tab is-active"
               data-ui-mode="eta"
+              data-nav="nearby"
               role="tab"
               aria-selected="true"
-              title="ETA · search bus / MTR / LRT routes"
+              title="Nearby"
             >
-              <span class="material-symbols-outlined" aria-hidden="true">schedule</span>
-              <span class="toolbar-mode-label">ETA</span>
+              <span class="material-symbols-outlined" aria-hidden="true">near_me</span>
+              <span class="app-nav-tab-label">Nearby</span>
             </button>
             <button
               type="button"
-              class="toolbar-mode-btn"
+              class="app-nav-tab"
               data-ui-mode="route"
+              data-nav="plan"
               role="tab"
               aria-selected="false"
-              title="Trip Plan · origin to destination"
+              title="Trip Plan"
             >
               <span class="material-symbols-outlined" aria-hidden="true">alt_route</span>
-              <span class="toolbar-mode-label">Trip Plan</span>
+              <span class="app-nav-tab-label">Trip Plan</span>
             </button>
-          </div>
-
-          <!-- One fixed mid slot: Pinned (ETA) / Plan trip swap (same size) -->
-          <div class="toolbar-mid-slot" id="toolbar-mid-slot">
             <button
               type="button"
+              class="app-nav-tab"
               id="btn-eta-pinned"
-              class="toolbar-pinned-btn"
+              data-nav="pinned"
+              role="tab"
+              aria-selected="false"
+              title="Pinned"
               disabled
-              title="Open pinned"
-              aria-label="Open pinned"
             >
-              <span class="material-symbols-outlined toolbar-mid-icon" aria-hidden="true">push_pin</span>
-              <span class="toolbar-pinned-label" id="toolbar-pinned-label">Pinned</span>
-            </button>
-            <button
-              type="button"
-              id="btn-plan"
-              class="toolbar-plan-btn"
-              disabled
-              title="Plan trip"
-              aria-label="Plan trip"
-            >
-              <span class="material-symbols-outlined toolbar-mid-icon" aria-hidden="true">directions</span>
-              <span class="toolbar-plan-label">Plan trip</span>
+              <span class="material-symbols-outlined" aria-hidden="true">push_pin</span>
+              <span class="app-nav-tab-label" id="toolbar-pinned-label">Pinned</span>
             </button>
           </div>
 
-          <div class="toolbar-end">
+          <div class="app-nav-search-wrap" id="app-nav-search-wrap">
             <button
               type="button"
-              id="btn-settings"
-              class="toolbar-icon-btn"
-              title="Settings"
-              aria-label="Settings"
-              aria-controls="settings-sheet"
+              class="app-nav-search-btn"
+              id="btn-nav-search"
+              title="Search destination or route"
+              aria-label="Search destination or route"
+              aria-expanded="false"
+              aria-controls="app-nav-search-field"
             >
-              <span class="material-symbols-outlined" aria-hidden="true">settings</span>
+              <span class="material-symbols-outlined" aria-hidden="true">search</span>
             </button>
-            <button
-              type="button"
-              id="btn-info"
-              class="toolbar-icon-btn"
-              title="About"
-              aria-label="About"
-              aria-controls="info-sheet"
-            >
-              <span class="material-symbols-outlined" aria-hidden="true">info</span>
-            </button>
+            <div class="app-nav-search-field" id="app-nav-search-field" hidden>
+              <span class="material-symbols-outlined app-nav-search-icon" aria-hidden="true"
+                >search</span
+              >
+              <input
+                id="input-eta-route"
+                class="app-nav-search-input"
+                type="search"
+                enterkeyhint="search"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="Enter a Destination/Route"
+                aria-label="Enter a Destination or Route"
+                aria-autocomplete="list"
+                aria-controls="eta-route-list-sidebar"
+              />
+            </div>
           </div>
-        </div>
+        </nav>
       </div>
 
       <!-- Legacy IDs kept for JS wiring (hidden) -->
       <button type="button" id="btn-panel-toggle" hidden aria-hidden="true"></button>
       <button type="button" id="btn-pick-origin" hidden aria-hidden="true"></button>
       <button type="button" id="btn-pick-dest" hidden aria-hidden="true"></button>
+      <button type="button" id="btn-detail-open" hidden aria-hidden="true" aria-expanded="true"></button>
+      <button type="button" id="btn-detail-close" hidden aria-hidden="true"></button>
+      <button type="button" id="btn-eta-search-toggle" hidden aria-hidden="true" aria-expanded="false"></button>
+      <div id="eta-sidebar-search" hidden></div>
 
       <div id="toast" class="toast" hidden role="status"></div>
     </div>
