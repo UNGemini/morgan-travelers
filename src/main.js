@@ -1682,15 +1682,14 @@ if (!isMobileUi) {
   mapNavControl = new NavigationControl({ visualizePitch: true });
   map.addControl(mapNavControl, "bottom-right");
 }
-map.addControl(
-  new GeolocateControl({
-    positionOptions: { enableHighAccuracy: true },
-    trackUserLocation: true,
-  }),
-  "bottom-right",
-);
-// compact: false → always expanded OSM / Protomaps attribution
-map.addControl(new AttributionControl({ compact: false }), "bottom-right");
+const geolocateControl = new GeolocateControl({
+  positionOptions: { enableHighAccuracy: true },
+  trackUserLocation: true,
+  showUserHeading: true,
+});
+map.addControl(geolocateControl, "bottom-right");
+// © bottom-left so it stays on-screen (not clipped under tools / sheet)
+map.addControl(new AttributionControl({ compact: false }), "bottom-left");
 
 // Scale — top-centre; shown while zooming, fades after scale settles
 const scaleControl = new ScaleControl({ unit: "metric", maxWidth: 120 });
@@ -1741,6 +1740,8 @@ map.on("load", () => {
   bootstrapMtrLayers().catch((err) => {
     console.warn("[mtrLayer]", err);
   });
+  // Default Nearby center = user location when permission granted
+  void bootstrapNearbyUserLocation({ fly: true, triggerControl: true });
 });
 
 /** Load MTR GeoJSON, enrich search directory, draw layers + click popups. */
@@ -2203,24 +2204,97 @@ function placeMarker(kind, lat, lon, label, meta) {
   setPoint(kind, lat, lon, label, meta);
 }
 
-// Map click is secondary — only applies when user armed pick via hint links
-// or when a field is still empty (soft assist).
+/**
+ * Nearby browse pin — map tap sets location and refreshes nearby routes (Wheels-like).
+ * @type {import("maplibre-gl").Marker | null}
+ */
+let nearbyBrowseMarker = null;
+
+/**
+ * Set the “here” point for Nearby ETA browse and refresh the list.
+ * @param {number} lat
+ * @param {number} lon
+ * @param {{ fly?: boolean, label?: string }} [opts]
+ */
+function setNearbyBrowseLocation(lat, lon, opts = {}) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  etaUserGeo = { lat, lon, at: Date.now() };
+
+  // Pin marker on map
+  try {
+    if (!nearbyBrowseMarker) {
+      const el = document.createElement("div");
+      el.className = "nearby-browse-pin";
+      el.title = "Nearby search location";
+      nearbyBrowseMarker = new Marker({ element: el, anchor: "center" })
+        .setLngLat([lon, lat])
+        .addTo(map);
+    } else {
+      nearbyBrowseMarker.setLngLat([lon, lat]);
+    }
+  } catch (e) {
+    console.warn("[nearby] marker", e);
+  }
+
+  if (opts.fly !== false) {
+    try {
+      map.easeTo({
+        center: [lon, lat],
+        zoom: Math.max(map.getZoom(), 14.2),
+        duration: 650,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (getUiMode() === "eta") {
+    setDetailOpen(true);
+    if (sidebarPage !== "search" && sidebarPage !== "eta-route") {
+      setSidebarPage("search");
+    }
+    void refreshEtaRouteSuggest();
+  }
+}
+
+// Map click:
+//  · Nearby — set browse location + refresh nearby routes (Wheels)
+//  · Trip Plan — origin/destination pick only (armed or empty field)
 // Path contribute mode owns map clicks while open.
 map.on("click", (e) => {
   if (pathContributor?.isOpen()) return;
+  const { lng, lat } = e.lngLat;
+
+  // Nearby tab: tap map to re-center “nearby” search
+  if (getUiMode() === "eta") {
+    if (mapPickArmed) {
+      // Ignore plan-pick arming in Nearby
+      mapPickArmed = false;
+      els.mapPickHint?.classList.remove("is-picking");
+    }
+    setNearbyBrowseLocation(lat, lng);
+    reverseGeocode(lat, lng).then((label) => {
+      if (label && nearbyBrowseMarker) {
+        nearbyBrowseMarker.getElement().title = label;
+      }
+    });
+    return;
+  }
+
+  // Trip Plan only below
+  if (getUiMode() !== "route") return;
+
   if (!mapPickArmed) {
     if (!origin) {
       pickMode = "origin";
     } else if (!destination) {
       pickMode = "destination";
     } else {
-      return; // both set — ignore map clicks unless armed via hint
+      return; // both set — ignore unless armed via hint
     }
   }
   const kind = pickMode;
-  const { lng, lat } = e.lngLat;
   setPoint(kind, lat, lng, fmtCoord(lat, lng));
-  // Reverse-geocode in background for a nicer label
   reverseGeocode(lat, lng).then((label) => {
     const cur = kind === "origin" ? origin : destination;
     if (cur && Math.abs(cur.lat - lat) < 1e-8 && Math.abs(cur.lon - lng) < 1e-8) {
@@ -5904,6 +5978,10 @@ function setUiMode(mode) {
     // Clear ETA route selection chrome so list fills cleanly
     if (els.etaRouteActions) els.etaRouteActions.hidden = true;
     void ensureMtrStationLinesMap();
+    // Prefer user location for Nearby when we don't have a browse point yet
+    if (!etaUserGeo) {
+      void bootstrapNearbyUserLocation({ fly: false, triggerControl: true });
+    }
     void refreshEtaRouteSuggest();
   } else {
     setDetailOpen(true);
@@ -7433,6 +7511,78 @@ function ensureEtaUserGeo() {
     });
   return etaGeoPromise;
 }
+
+/**
+ * On load / Nearby: prefer device location (same intent as map “Current location”).
+ * @param {{ fly?: boolean, triggerControl?: boolean }} [opts]
+ */
+async function bootstrapNearbyUserLocation(opts = {}) {
+  const fly = opts.fly !== false;
+  try {
+    // Prefer MapLibre geolocate (shows accuracy ring) when available
+    if (opts.triggerControl !== false && geolocateControl) {
+      const once = () => {
+        try {
+          const ll = map.getCenter?.();
+          // geolocate fires moveto user; also read from event if needed
+        } catch {
+          /* ignore */
+        }
+      };
+      geolocateControl.once?.("geolocate", (ev) => {
+        const c = ev?.coords;
+        if (c && Number.isFinite(c.latitude) && Number.isFinite(c.longitude)) {
+          etaUserGeo = {
+            lat: c.latitude,
+            lon: c.longitude,
+            at: Date.now(),
+          };
+          if (getUiMode() === "eta") void refreshEtaRouteSuggest();
+        }
+        once();
+      });
+      try {
+        geolocateControl.trigger();
+        return;
+      } catch (e) {
+        console.warn("[nearby] geolocate trigger", e);
+      }
+    }
+    const geo = await ensureEtaUserGeo();
+    if (geo) {
+      setNearbyBrowseLocation(geo.lat, geo.lon, { fly });
+    }
+  } catch (e) {
+    console.warn("[nearby] user location", e);
+  }
+}
+
+// When user uses the locate control, also drive Nearby browse center
+geolocateControl.on?.("geolocate", (ev) => {
+  const c = ev?.coords;
+  if (!c || !Number.isFinite(c.latitude) || !Number.isFinite(c.longitude)) return;
+  etaUserGeo = { lat: c.latitude, lon: c.longitude, at: Date.now() };
+  if (getUiMode() === "eta") {
+    // Don't double-fly; control already moved the camera
+    try {
+      if (!nearbyBrowseMarker) {
+        const el = document.createElement("div");
+        el.className = "nearby-browse-pin is-user";
+        el.title = "Your location";
+        nearbyBrowseMarker = new Marker({ element: el, anchor: "center" })
+          .setLngLat([c.longitude, c.latitude])
+          .addTo(map);
+      } else {
+        nearbyBrowseMarker.setLngLat([c.longitude, c.latitude]);
+        nearbyBrowseMarker.getElement().classList.add("is-user");
+        nearbyBrowseMarker.getElement().title = "Your location";
+      }
+    } catch {
+      /* ignore */
+    }
+    void refreshEtaRouteSuggest();
+  }
+});
 
 /**
  * Empty query browse list.

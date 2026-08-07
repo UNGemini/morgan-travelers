@@ -46,6 +46,9 @@
   --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
   --glass: rgba(18, 22, 28, 0.78);
   --glass-border: rgba(255, 255, 255, 0.12);
+  /* Shared liquid-stack gradient (must match panel + nav + filters) */
+  --glass-rgb: 18, 22, 28;
+  --panel-radius: 28px;
 }
 
 .app-shell[data-toolbar="closed"] {
@@ -298,47 +301,63 @@ body.mobile-ui [data-acrylic]::before {
 
 /* ── MapLibre: tools + © BR (fixed vs dock expand) · scale top-centre ── */
 
-/* Fixed bottom offset = compact toolbar only; detail expand does not move this */
+/* Tools sit above panel; © lives bottom-left so it never falls off-screen */
 .maplibregl-ctrl-bottom-right {
   bottom: var(--map-tools-bottom) !important;
   right: 12px !important;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 8px;
-  /* Keep a stable height box for tool groups; © is taken out of flow */
+  gap: 10px;
   position: absolute;
-}
-
-/* © always visible under tools; out of flex flow so expand never shifts tools */
-.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib {
-  position: absolute !important;
-  right: 0;
-  top: 100%;
-  margin-top: 6px !important;
-  z-index: 2;
-  max-width: none;
-  white-space: nowrap !important;
-  display: block !important;
-}
-
-/* Never collapse to the compact “i” control */
-.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib.maplibregl-compact,
-.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib.maplibregl-compact-show {
-  min-height: 0 !important;
-  padding: 2px 8px !important;
-}
-.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-button {
-  display: none !important;
-}
-.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-inner {
-  display: inline !important;
-  white-space: nowrap !important;
 }
 
 .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group {
   position: relative;
   z-index: 1;
+}
+
+/* OSM / Protomaps © — bottom-left of map, always fully on screen */
+.maplibregl-ctrl-bottom-left {
+  bottom: calc(10px + var(--safe-bottom)) !important;
+  left: 10px !important;
+  max-width: min(70vw, 420px);
+  z-index: 2;
+}
+/* Desktop: keep © clear of the left panel */
+@media (min-width: 641px) {
+  .maplibregl-ctrl-bottom-left {
+    left: calc(var(--dock-pad) + min(480px, 34vw) + 16px) !important;
+    bottom: calc(12px + var(--safe-bottom)) !important;
+  }
+}
+.maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib {
+  position: static !important;
+  max-width: 100%;
+  white-space: normal !important;
+  display: block !important;
+  margin: 0 !important;
+  padding: 4px 10px !important;
+  border-radius: 10px !important;
+  background: rgba(var(--glass-rgb), 0.72) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  font-size: 11px !important;
+  line-height: 1.35 !important;
+  color: rgba(255, 255, 255, 0.72) !important;
+}
+.maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib.maplibregl-compact,
+.maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib.maplibregl-compact-show {
+  min-height: 0 !important;
+  padding: 4px 10px !important;
+}
+.maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-button {
+  display: none !important;
+}
+.maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-inner {
+  display: inline !important;
+  white-space: normal !important;
 }
 
 /* Scale host — top centre; faded until zoom updates it */
@@ -497,7 +516,8 @@ body.mobile-ui [data-acrylic]::before {
   flex-direction: column;
   align-items: stretch;
   max-height: calc(100dvh - 2 * var(--dock-pad) - var(--safe-bottom) - var(--safe-top));
-  border-radius: 22px;
+  /* Phone-like shell — all UI chrome lives inside this radius */
+  border-radius: var(--panel-radius, 28px);
   background: var(--glass);
   border: 1px solid var(--glass-border);
   backdrop-filter: blur(28px) saturate(1.35);
@@ -718,11 +738,11 @@ body.mobile-ui [data-acrylic]::before {
 
 /* ETA sidebar panel (visible when data-ui-mode=eta) — Wheels-inspired cards */
 .eta-sidebar-panel {
-  /* Pills + app nav sit in the soft liquid zone — cards fade under both */
-  --eta-pills-h: 52px;
+  /* Pills sit tight above nav — shorter liquid zone */
+  --eta-pills-h: 44px;
   --eta-nav-h: var(--toolbar-h, 58px);
-  --eta-toolbar-h: calc(var(--eta-pills-h) + var(--eta-nav-h) + 8px);
-  --eta-list-fade-h: calc(var(--eta-toolbar-h) + 36px);
+  --eta-toolbar-h: calc(var(--eta-pills-h) + var(--eta-nav-h) + 4px);
+  --eta-list-fade-h: calc(var(--eta-toolbar-h) + 20px);
 
   position: relative;
   display: flex;
@@ -758,55 +778,54 @@ body.mobile-ui [data-acrylic]::before {
   background: transparent;
 }
 
-/* Method pills float above app nav; soft liquid zone, no hard bar edge */
+/* Method pills — tight above app nav (were too high) */
 .eta-sidebar-panel > .eta-sidebar-bottom-chrome {
   position: absolute;
   left: 0;
   right: 0;
-  /* Sit just above app nav so one continuous glass stack */
-  bottom: calc(var(--eta-nav-h, 58px) - 4px);
+  bottom: calc(var(--eta-nav-h, 58px) - 6px);
   z-index: 4;
   pointer-events: none;
-  padding: 28px 10px 10px;
+  padding: 10px 10px 4px;
   border: none;
   background: transparent;
   isolation: isolate;
 }
 
-/* Boundless frost: long soft fade into the list (no hard rect) */
+/* Same glass RGB as panel/nav — continuous liquid stack */
 .eta-sidebar-panel > .eta-sidebar-bottom-chrome::before {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
   top: 0;
-  bottom: calc(-1 * var(--eta-nav-h, 58px) - 8px);
+  bottom: calc(-1 * var(--eta-nav-h, 58px) - 4px);
   z-index: -1;
   pointer-events: none;
   background: linear-gradient(
     to top,
-    rgba(14, 16, 22, 0.82) 0%,
-    rgba(16, 18, 24, 0.62) 28%,
-    rgba(18, 20, 28, 0.32) 55%,
-    rgba(18, 20, 28, 0.1) 78%,
-    rgba(18, 20, 28, 0) 100%
+    rgba(var(--glass-rgb), 0.92) 0%,
+    rgba(var(--glass-rgb), 0.72) 32%,
+    rgba(var(--glass-rgb), 0.38) 58%,
+    rgba(var(--glass-rgb), 0.12) 80%,
+    rgba(var(--glass-rgb), 0) 100%
   );
   -webkit-backdrop-filter: blur(40px) saturate(1.75);
   backdrop-filter: blur(40px) saturate(1.75);
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.25) 18%,
-    rgba(0, 0, 0, 0.75) 48%,
-    #000 72%,
+    rgba(0, 0, 0, 0.25) 16%,
+    rgba(0, 0, 0, 0.8) 45%,
+    #000 70%,
     #000 100%
   );
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.25) 18%,
-    rgba(0, 0, 0, 0.75) 48%,
-    #000 72%,
+    rgba(0, 0, 0, 0.25) 16%,
+    rgba(0, 0, 0, 0.8) 45%,
+    #000 70%,
     #000 100%
   );
 }
@@ -5067,37 +5086,37 @@ body.contrib-submitting .bg-orb {
   z-index: 5;
   isolation: isolate;
 }
-/* Soft glass bleed upward into the list (no hard edge) */
+/* Soft glass bleed — same --glass-rgb as panel + method frost */
 .app-bottom-nav::before {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
-  top: -48px;
+  top: -40px;
   bottom: 0;
   z-index: -1;
   pointer-events: none;
   background: linear-gradient(
     to top,
-    rgba(14, 16, 22, 0.88) 0%,
-    rgba(16, 18, 24, 0.55) 45%,
-    rgba(18, 20, 28, 0.15) 78%,
-    rgba(18, 20, 28, 0) 100%
+    rgba(var(--glass-rgb), 0.94) 0%,
+    rgba(var(--glass-rgb), 0.78) 40%,
+    rgba(var(--glass-rgb), 0.28) 75%,
+    rgba(var(--glass-rgb), 0) 100%
   );
   -webkit-backdrop-filter: blur(36px) saturate(1.7);
   backdrop-filter: blur(36px) saturate(1.7);
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.4) 30%,
-    #000 65%,
+    rgba(0, 0, 0, 0.4) 28%,
+    #000 62%,
     #000 100%
   );
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.4) 30%,
-    #000 65%,
+    rgba(0, 0, 0, 0.4) 28%,
+    #000 62%,
     #000 100%
   );
 }
@@ -5429,15 +5448,6 @@ body.contrib-submitting .bg-orb {
 .maplibregl-ctrl-icon {
   filter: invert(1) brightness(1.15);
 }
-/* Attribution stays plain text under tools */
-.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib {
-  border-radius: 10px !important;
-  background: rgba(22, 26, 34, 0.55) !important;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-}
-
 body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.maplibregl-ctrl-geolocate)) {
   display: none !important;
 }
@@ -5455,7 +5465,7 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     max-width: min(480px, calc(100vw - 2 * var(--dock-pad)));
     max-height: none;
     height: auto;
-    border-radius: 22px;
+    border-radius: var(--panel-radius, 28px);
   }
 
   .app-shell[data-detail="open"] .main-toolbar,
@@ -5468,6 +5478,7 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     width: clamp(300px, 34vw, 440px);
     min-width: min(300px, calc(100vw - 2 * var(--dock-pad)));
     max-width: min(480px, calc(100vw - 2 * var(--dock-pad)));
+    border-radius: var(--panel-radius, 28px);
   }
 
   .detail-sidebar {
@@ -5509,7 +5520,8 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     width: 100% !important;
     min-width: 100% !important;
     max-width: 100% !important;
-    border-radius: 18px 18px 0 0;
+    /* Phone sheet: rounded top, square bottom edge to home indicator */
+    border-radius: var(--panel-radius, 28px) var(--panel-radius, 28px) 0 0;
     bottom: 0;
     top: auto;
     max-height: none;
@@ -5606,8 +5618,8 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-height: 36px;
-  padding: 6px 14px;
+  min-height: 32px;
+  padding: 5px 12px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(40, 42, 48, 0.55);
@@ -5656,4 +5668,21 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
 }
 .eta-method-pill:active {
   transform: scale(0.97);
+}
+
+/* Nearby map-tap pin (Wheels-like browse location) */
+.nearby-browse-pin {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(192, 174, 252, 0.95);
+  border: 3px solid #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.nearby-browse-pin.is-user {
+  background: #4da3ff;
+  box-shadow:
+    0 0 0 6px rgba(77, 163, 255, 0.25),
+    0 2px 10px rgba(0, 0, 0, 0.4);
 }
