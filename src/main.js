@@ -12163,7 +12163,7 @@ loadManifest().catch((err) => {
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
     // Query-bust so browsers re-fetch sw.js even when an old cache-first SW is live
-    const swUrl = `${import.meta.env.BASE_URL}sw.js?v=7`;
+    const swUrl = `${import.meta.env.BASE_URL}sw.js?v=8`;
     let refreshing = false;
     const reloadOnce = () => {
       if (refreshing) return;

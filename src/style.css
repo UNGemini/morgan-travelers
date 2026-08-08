@@ -38,11 +38,11 @@
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   /*
-   * Default: desktop / no home-indicator — normal panel foot.
-   * Mobile overrides below. (Do not use a global 6px — that sank Chrome
-   * desktop while stuck PWAs still showed old full-safe-area CSS.)
+   * Space under tab capsule — fixed only, no safe-area (that floated
+   * release PWA tabs high vs npm dev). Glass still fills home bar via
+   * .app-shell::after / stack background.
    */
-  --safe-bottom-content: 10px;
+  --safe-bottom-content: 8px;
   --detail-max-h: calc(
     100dvh - var(--dock-pad) - var(--safe-top) - var(--dock-pad) - var(--safe-bottom) -
       var(--toolbar-h) - var(--sheet-chrome-h)
@@ -5858,15 +5858,8 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
 @media (max-width: 640px) {
   :root {
     --dock-pad: 0px;
-    /*
-     * Tab content inset: slightly less than full safe-area so capsule sits
-     * nearer the home indicator (Music-like), without a hard 6px that
-     * clips on Chrome. ~safe − 12px on notch phones; min 8px when inset is 0.
-     */
-    --safe-bottom-content: max(
-      8px,
-      calc(env(safe-area-inset-bottom, 0px) - 12px)
-    );
+    /* No bottom safe-area on controls — match npm dev sit height */
+    --safe-bottom-content: 6px;
     /* Fallbacks until JS measures (nav includes content inset) */
     --nav-dock-h: calc(var(--toolbar-h) + var(--safe-bottom-content) + 6px);
     --sheet-h: var(--sheet-chrome-h);
@@ -6084,12 +6077,12 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     background: rgba(var(--glass-rgb), 0.96) !important;
   }
 
-  /* Mobile tab foot — uses --safe-bottom-content from :root above */
+  /* Mobile tab foot — fixed, no env(safe-area-inset-bottom) */
   .app-bottom-nav {
-    padding: 4px 10px var(--safe-bottom-content) !important;
+    padding: 4px 10px 6px !important;
   }
   #eta-route-detail-chrome {
-    padding: 4px 10px var(--safe-bottom-content) !important;
+    padding: 4px 10px 6px !important;
   }
 
   /*
@@ -6214,9 +6207,9 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     --map-tools-bottom: calc(var(--nav-dock-h) + var(--sheet-chrome-h) + 10px);
   }
 
-  /* Nav / Back+Pin */
+  /* Nav / Back+Pin — no bottom safe-area */
   .app-bottom-nav {
-    padding: 4px 10px var(--safe-bottom-content) !important;
+    padding: 4px 10px 6px !important;
     background: transparent !important;
   }
 
@@ -6250,22 +6243,16 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     padding-bottom: 0 !important;
   }
 
-  /*
-   * Standalone: same formula as mobile Safari. Prefer a hair lower so it
-   * matches Music; glass ::after still fills the home-indicator band.
-   */
+  /* Standalone: same fixed foot as mobile — no safe-area under tabs */
   html.pwa {
-    --safe-bottom-content: max(
-      6px,
-      calc(env(safe-area-inset-bottom, 0px) - 16px)
-    );
+    --safe-bottom-content: 6px;
   }
   html.pwa .app-bottom-nav,
   html.pwa #eta-route-detail-chrome {
     padding-top: 4px !important;
     padding-left: 10px !important;
     padding-right: 10px !important;
-    padding-bottom: var(--safe-bottom-content) !important;
+    padding-bottom: 6px !important;
   }
 
   html.pwa .app-shell::after {
