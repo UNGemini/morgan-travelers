@@ -10247,10 +10247,12 @@ function fitMapToRouteCoords(coords, opts = {}) {
     minLat -= 0.008;
     maxLat += 0.008;
   }
-  const run = () => {
+
+  const run = (attempt = 0) => {
     try {
       if (!map?.getStyle?.()) return;
       map.resize?.();
+      map.stop?.();
       const bounds = [
         [minLon, minLat],
         [maxLon, maxLat],
@@ -10261,26 +10263,29 @@ function fitMapToRouteCoords(coords, opts = {}) {
         bottom: 20,
         left: 16,
       });
+      const duration = opts.duration ?? 900;
+      const maxZoom = opts.maxZoom ?? 15;
       if (typeof map.cameraForBounds === "function") {
         const camera = map.cameraForBounds(bounds, {
           padding,
-          maxZoom: opts.maxZoom ?? 15,
+          maxZoom,
         });
         if (camera?.center && Number.isFinite(camera?.zoom)) {
           map.flyTo({
             center: camera.center,
             zoom: camera.zoom,
-            duration: opts.duration ?? 900,
+            duration: attempt === 0 ? duration : Math.max(300, duration - 300),
             essential: true,
             curve: 1.2,
+            padding,
           });
           return;
         }
       }
       map.fitBounds(bounds, {
         padding,
-        maxZoom: opts.maxZoom ?? 15,
-        duration: opts.duration ?? 900,
+        maxZoom,
+        duration: attempt === 0 ? duration : Math.max(300, duration - 300),
         essential: true,
         linear: false,
         curve: 1.2,
@@ -10289,11 +10294,13 @@ function fitMapToRouteCoords(coords, opts = {}) {
       /* ignore */
     }
   };
-  // Wait for style + sheet layout so padding = true visual centre
+
   const schedule = () => {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        setTimeout(run, 40);
+        setTimeout(() => run(0), 60);
+        setTimeout(() => run(1), 320);
+        setTimeout(() => run(2), 760);
       });
     });
   };
