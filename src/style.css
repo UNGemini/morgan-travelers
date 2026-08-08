@@ -38,14 +38,12 @@
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   /*
-   * Home-indicator band for *controls* (not glass fill).
-   * Full env(safe-area) as padding lifts tabs too high vs native apps;
-   * keep a small air gap above the pill, glass still paints to the edge.
+   * Space under tab capsule (not full safe-area).
+   * Apple Music sits tabs ~flush with the home-indicator band; using
+   * env(safe-area) as padding left a large empty glass strip. Fixed
+   * small inset; stack glass + ::after still paint to the physical edge.
    */
-  --safe-bottom-content: max(
-    2px,
-    calc(env(safe-area-inset-bottom, 0px) - 20px)
-  );
+  --safe-bottom-content: 6px;
   --detail-max-h: calc(
     100dvh - var(--dock-pad) - var(--safe-top) - var(--dock-pad) - var(--safe-bottom) -
       var(--toolbar-h) - var(--sheet-chrome-h)
@@ -1040,8 +1038,8 @@ body.mobile-ui [data-acrylic]::before {
   gap: 10px;
   width: 100%;
   box-sizing: border-box;
-  /* Sit low in home-bar band; glass stack fills the rest */
-  padding: 4px 10px var(--safe-bottom-content);
+  /* Sit low like native tab bars; glass stack fills the rest */
+  padding: 2px 10px var(--safe-bottom-content);
   margin: 0;
   border: none;
   background: transparent;
@@ -5428,8 +5426,8 @@ body.contrib-submitting .bg-orb {
   display: flex;
   align-items: center;
   gap: 10px;
-  /* Low in the home-bar band (not full safe-area — that floats tabs) */
-  padding: 4px 10px var(--safe-bottom-content);
+  /* Native-app sit: small fixed foot, not full safe-area */
+  padding: 2px 10px var(--safe-bottom-content);
   border-top: none;
   background: transparent;
   min-height: 0;
@@ -6030,13 +6028,13 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
       rgba(var(--glass-rgb), 0.99) 45%,
       rgba(var(--glass-rgb), 0.96) 100%
     ) !important;
-    box-shadow: none !important;
     border: none !important;
     -webkit-backdrop-filter: blur(28px) saturate(1.55);
     backdrop-filter: blur(28px) saturate(1.55);
-    /* Extra bleed past bottom in case of sub-pixel / toolbar mis-measure */
+    /* Tabs use small --safe-bottom-content; no extra min-height lifting them */
     padding-bottom: 0;
-    min-height: env(safe-area-inset-bottom, 0px);
+    min-height: 0;
+    box-shadow: none;
   }
   /* Soft dissolve on the *top* of the dock only (list → glass) */
   .panel-bottom-stack::before {
@@ -6078,14 +6076,12 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     background: rgba(var(--glass-rgb), 0.96) !important;
   }
 
-  /* Controls sit low; full safe-area is glass only (stack + ::after) */
+  /* Controls sit low like Apple Music; glass stack + ::after fill home bar */
   .app-bottom-nav {
-    padding: 4px 10px max(2px, calc(constant(safe-area-inset-bottom) - 20px)) !important;
-    padding: 4px 10px var(--safe-bottom-content) !important;
+    padding: 2px 10px var(--safe-bottom-content) !important;
   }
   #eta-route-detail-chrome {
-    padding: 4px 10px max(2px, calc(constant(safe-area-inset-bottom) - 20px)) !important;
-    padding: 4px 10px var(--safe-bottom-content) !important;
+    padding: 2px 10px var(--safe-bottom-content) !important;
   }
 
   /*
@@ -6210,10 +6206,9 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     --map-tools-bottom: calc(var(--nav-dock-h) + var(--sheet-chrome-h) + 10px);
   }
 
-  /* Nav / Back+Pin: reduced home-bar content inset (native-app sit height) */
+  /* Nav / Back+Pin: native tab-bar sit height */
   .app-bottom-nav {
-    padding: 4px 10px max(2px, calc(constant(safe-area-inset-bottom) - 20px)) !important;
-    padding: 4px 10px var(--safe-bottom-content) !important;
+    padding: 2px 10px var(--safe-bottom-content) !important;
     background: transparent !important;
   }
 
@@ -6242,19 +6237,16 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     --sheet-h: calc(var(--vv-h) - var(--nav-dock-h));
   }
 
-  /* Safe-area on dock stack, not double-padded on children */
   html.pwa .panel-bottom-stack {
     min-height: 0;
-    padding-bottom: 0;
+    padding-bottom: 0 !important;
   }
 
   html.pwa .app-bottom-nav,
   html.pwa #eta-route-detail-chrome {
-    padding-top: 4px !important;
+    padding-top: 2px !important;
     padding-left: 10px !important;
     padding-right: 10px !important;
-    /* Same reduced inset as Safari — full safe-area was floating the tabs */
-    padding-bottom: max(2px, calc(constant(safe-area-inset-bottom) - 20px)) !important;
     padding-bottom: var(--safe-bottom-content) !important;
   }
 

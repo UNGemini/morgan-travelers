@@ -8,7 +8,7 @@
  *
  * Bump CACHE when install/activate logic changes so old shells are dropped.
  */
-const CACHE = "mtravelers-shell-v5";
+const CACHE = "mtravelers-shell-v6";
 const PRECACHE = ["./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
