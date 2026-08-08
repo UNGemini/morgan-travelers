@@ -1991,8 +1991,29 @@ const isMobileUi =
   typeof matchMedia !== "undefined" &&
   (matchMedia("(max-width: 640px)").matches ||
     matchMedia("(pointer: coarse)").matches);
+/** Home-screen / installed PWA (safe-area + 100dvh differ from in-Safari) */
+function isStandalonePwa() {
+  try {
+    if (typeof matchMedia !== "undefined") {
+      if (matchMedia("(display-mode: standalone)").matches) return true;
+      if (matchMedia("(display-mode: fullscreen)").matches) return true;
+    }
+    // iOS Safari “Add to Home Screen”
+    if (typeof navigator !== "undefined" && navigator.standalone === true) {
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+const isPwaStandalone = isStandalonePwa();
+if (document.documentElement) {
+  document.documentElement.classList.toggle("pwa", isPwaStandalone);
+}
 if (document.body) {
   document.body.classList.toggle("mobile-ui", isMobileUi);
+  document.body.classList.toggle("pwa-standalone", isPwaStandalone);
 }
 /** @type {NavigationControl | null} */
 let mapNavControl = null;
@@ -6412,6 +6433,20 @@ function measureDockChromeNatural() {
 }
 
 /**
+ * Visual viewport height (iOS PWA/Safari often disagree with 100dvh).
+ * @returns {number}
+ */
+function viewportHeightPx() {
+  try {
+    const vv = window.visualViewport?.height;
+    if (vv && vv > 100) return Math.round(vv);
+  } catch {
+    /* ignore */
+  }
+  return Math.round(window.innerHeight || 700);
+}
+
+/**
  * Measure fixed bottom dock height and publish --nav-dock-h.
  * Nav padding already includes safe-area — do not add it again.
  * @returns {number}
@@ -6427,11 +6462,48 @@ function measureNavDockH() {
   const nav = els.appBottomNav || document.getElementById("app-bottom-nav");
   if (nav) {
     const nh = Math.ceil(nav.getBoundingClientRect().height);
-    if (nh >= 40 && nh <= 120) {
+    if (nh >= 40 && nh <= 140) {
       document.documentElement.style.setProperty("--toolbar-h", `${nh}px`);
     }
   }
+  // Publish real visual height for full-sheet calc (PWA-safe)
+  try {
+    document.documentElement.style.setProperty(
+      "--vv-h",
+      `${viewportHeightPx()}px`,
+    );
+    document.documentElement.classList.add("vv-ready");
+  } catch {
+    /* ignore */
+  }
   return h;
+}
+
+/** iOS often applies safe-area a tick after first paint in standalone */
+function schedulePwaDockRemeasure() {
+  if (!isPwaStandalone && !isMobileUi) return;
+  const run = () => {
+    try {
+      measureNavDockH();
+      if (
+        typeof matchMedia !== "undefined" &&
+        matchMedia("(max-width: 640px)").matches
+      ) {
+        const cur = els.app?.dataset?.sheet || "open";
+        // Refresh --sheet-h without fighting an in-progress drag
+        if (!document.getElementById("main-toolbar")?.classList.contains(
+          "is-sheet-dragging",
+        )) {
+          setSheetState(cur);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+  requestAnimationFrame(run);
+  setTimeout(run, 120);
+  setTimeout(run, 480);
 }
 
 /**
@@ -6476,12 +6548,8 @@ try {
  * @returns {{ closed: number, open: number, full: number, dock: number }}
  */
 function sheetSnapHeights() {
-  const vh = Math.round(
-    Math.max(
-      window.innerHeight || 700,
-      window.visualViewport?.height || 0,
-    ),
-  );
+  // Prefer visualViewport — on iOS PWA 100dvh can overshoot and leave a gap/band
+  const vh = viewportHeightPx();
   const readCssLen = (name, fallbackPx) => {
     const raw = getComputedStyle(document.documentElement)
       .getPropertyValue(name)
@@ -11962,8 +12030,18 @@ try {
     typeof matchMedia !== "undefined" &&
     matchMedia("(max-width: 640px)").matches
   ) {
+    measureNavDockH();
     setSheetState(els.app?.dataset?.sheet || "open");
   }
+} catch {
+  /* ignore */
+}
+// iOS PWA: safe-area + visualViewport settle after first paint
+try {
+  schedulePwaDockRemeasure();
+  window.addEventListener("orientationchange", () => {
+    setTimeout(() => schedulePwaDockRemeasure(), 200);
+  });
 } catch {
   /* ignore */
 }

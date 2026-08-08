@@ -110,6 +110,31 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/*
+ * Installed PWA / home-screen (iOS): 100dvh often overshoots the visual frame.
+ * Prefer -webkit-fill-available; JS sets --vv-h after layout for pixel-perfect fit.
+ */
+html.pwa,
+html.pwa body {
+  height: 100%;
+  min-height: 100%;
+  min-height: -webkit-fill-available;
+}
+html.pwa.vv-ready,
+html.pwa.vv-ready body {
+  height: var(--vv-h);
+  min-height: var(--vv-h);
+}
+html.pwa #app {
+  height: 100%;
+  min-height: 100%;
+  min-height: -webkit-fill-available;
+}
+html.pwa.vv-ready #app {
+  height: var(--vv-h);
+  min-height: var(--vv-h);
+}
+
 .material-symbols-outlined {
   font-family: "Material Symbols Outlined";
   font-weight: normal;
@@ -6200,6 +6225,41 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   .brand-divider,
   .btn-label {
     display: none;
+  }
+}
+
+/*
+ * Standalone PWA only — Safari-in-tab already looks correct.
+ * iOS home-screen: real safe-area; 100dvh overshoot fixed via --vv-h.
+ */
+@media (max-width: 640px) {
+  html.pwa.vv-ready .app-shell[data-sheet="full"] {
+    --sheet-h: calc(var(--vv-h) - var(--nav-dock-h));
+  }
+
+  html.pwa .app-bottom-nav,
+  html.pwa #eta-route-detail-chrome {
+    padding-top: 6px !important;
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+    /* older iOS first, then env() wins on modern */
+    padding-bottom: max(6px, constant(safe-area-inset-bottom)) !important;
+    padding-bottom: max(6px, env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  html.pwa .app-shell::after {
+    height: constant(safe-area-inset-bottom);
+    height: env(safe-area-inset-bottom, 0px);
+    background: rgb(var(--glass-rgb));
+  }
+
+  html.pwa .panel-bottom-stack {
+    min-height: 0;
+  }
+
+  html.pwa .app-shell[data-sheet="full"] .sheet-chrome {
+    padding-top: max(8px, constant(safe-area-inset-top));
+    padding-top: max(8px, env(safe-area-inset-top, 0px));
   }
 }
 
