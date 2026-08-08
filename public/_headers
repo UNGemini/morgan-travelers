@@ -6,6 +6,12 @@
   Referrer-Policy: strict-origin-when-cross-origin
 
 /sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/
+  Cache-Control: no-cache
+
+/index.html
   Cache-Control: no-cache
 
 /src/pkg/*
