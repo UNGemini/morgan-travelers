@@ -189,10 +189,10 @@ export function mtrLineDirections(lineId) {
   const line = String(lineId || "").toUpperCase();
   const variants = MTR_LINE_VARIANTS[line];
 
-  // ── Branched lines: third direction for the branch terminus ──
+  // ── Branched lines: both termini each way (4 dirs — not 3)
+  // Missing one inbound branch made Opposite skip a whole terminus path.
   if (line === "EAL" && variants) {
     const low = variants.LOW;
-    const lmc = variants.LMC;
     const south = mtrStationLabel(low[0]); // Admiralty
     const loWu = mtrStationLabel("LOW");
     const lmcLab = mtrStationLabel("LMC");
@@ -221,11 +221,18 @@ export function mtrLineDirections(lineId) {
         orig: loWu.en,
         origZh: loWu.zh,
       },
+      {
+        bound: "I",
+        branch: "LMC",
+        dest: south.en,
+        destZh: south.zh,
+        orig: lmcLab.en,
+        origZh: lmcLab.zh,
+      },
     ];
   }
   if (line === "TKL" && variants) {
     const poa = variants.POA;
-    const lhp = variants.LHP;
     const city = mtrStationLabel(poa[0]); // North Point
     const poLam = mtrStationLabel("POA");
     const lohas = mtrStationLabel("LHP");
@@ -253,6 +260,14 @@ export function mtrLineDirections(lineId) {
         destZh: city.zh,
         orig: poLam.en,
         origZh: poLam.zh,
+      },
+      {
+        bound: "I",
+        branch: "LHP",
+        dest: city.en,
+        destZh: city.zh,
+        orig: lohas.en,
+        origZh: lohas.zh,
       },
     ];
   }

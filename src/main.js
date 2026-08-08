@@ -1030,6 +1030,7 @@ const etaLiveByKey = new Map();
  * Index 0 = preferred “going away from user”.
  * @typedef {{
  *   bound: string,
+ *   branch?: string,
  *   dest: string,
  *   destZh: string,
  *   minutes: number | null,
@@ -1039,6 +1040,7 @@ const etaLiveByKey = new Map();
  *   stopLat?: number,
  *   stopLon?: number,
  *   awayScore?: number,
+ *   clock?: string,
  * }} EtaNearbyDirSlot
  * @type {Map<string, EtaNearbyDirSlot[]>}
  */
@@ -1191,31 +1193,41 @@ function commitNearbyDirSlots(routeKey, entry, scoredSlots) {
   const pool = awaySlots.length ? awaySlots : scoredSlots;
   const preferred = sortSlotsGoingAway(pool)[0];
   /** @type {EtaNearbyDirSlot[]} */
-  const ordered = [];
-  const byB = new Map(
-    scoredSlots.map((s) => [String(s.bound || "").toUpperCase(), s]),
-  );
-  // Stable O then I (same as CTB/KMB OD lists)
-  if (byB.has("O")) ordered.push(/** @type {EtaNearbyDirSlot} */ (byB.get("O")));
-  if (byB.has("I")) ordered.push(/** @type {EtaNearbyDirSlot} */ (byB.get("I")));
+  // Dedupe by bound|branch (not bound alone — EAL/TKL have 2× O and 2× I)
+  const byKey = new Map();
   for (const s of scoredSlots) {
-    if (!ordered.includes(s)) ordered.push(s);
+    byKey.set(etaDirSlotKey(s), s);
   }
+  const ordered = [...byKey.values()].sort((a, b) => {
+    const ba = String(a.bound || "").toUpperCase();
+    const bb = String(b.bound || "").toUpperCase();
+    if (ba !== bb) {
+      if (ba === "O") return -1;
+      if (bb === "O") return 1;
+      if (ba === "I") return -1;
+      if (bb === "I") return 1;
+    }
+    return String(a.branch || "").localeCompare(String(b.branch || ""));
+  });
   etaNearbyDirsByKey.set(routeKey, ordered);
   // Prefer away-bound index when that bound exists in ordered
   let prefIdx = 0;
   if (preferred) {
-    const prefBound = String(preferred.bound || "").toUpperCase();
-    const prefDest = etaDestKey(preferred.destZh || preferred.dest);
-    const i = ordered.findIndex((s) => {
-      if (prefBound && String(s.bound || "").toUpperCase() === prefBound) {
-        // Same bound may have branch variants — match dest when present
-        if (!prefDest) return true;
-        return etaDestKey(s.destZh || s.dest) === prefDest || !s.dest;
-      }
-      return false;
-    });
+    const prefKey = etaDirSlotKey(preferred);
+    const i = ordered.findIndex((s) => etaDirSlotKey(s) === prefKey);
     if (i >= 0) prefIdx = i;
+    else {
+      const prefBound = String(preferred.bound || "").toUpperCase();
+      const prefDest = etaDestKey(preferred.destZh || preferred.dest);
+      const j = ordered.findIndex((s) => {
+        if (prefBound && String(s.bound || "").toUpperCase() === prefBound) {
+          if (!prefDest) return true;
+          return etaDestKey(s.destZh || s.dest) === prefDest || !s.dest;
+        }
+        return false;
+      });
+      if (j >= 0) prefIdx = j;
+    }
   }
   setCardDir(entry, prefIdx);
   applyNearbyDirLive(entry);
@@ -1236,11 +1248,30 @@ function applyNearbyDirLive(r, opts = {}) {
   const slots = etaNearbyDirsByKey.get(key);
   if (!slots?.length) return false;
 
-  const want = cardDirWantBound(r, opts.dirs || null);
+  const list =
+    opts.dirs?.length >= 1 ? opts.dirs : etaRouteDirections(r, { full: true });
+  const di = resolveCardDirIndex(r, list);
+  const wantDir = list[di] || null;
+  const wantKey = wantDir ? etaDirSlotKey(wantDir) : "";
+  const wantBound = cardDirWantBound(r, list);
+  const wantBranch = String(wantDir?.branch || "").toUpperCase();
+
+  // Prefer exact bound|branch, then bound + dest, then bound alone
   let slot =
-    (want &&
-      slots.find((s) => String(s.bound || "").toUpperCase() === want)) ||
+    (wantKey && slots.find((s) => etaDirSlotKey(s) === wantKey)) ||
     null;
+  if (!slot && wantBound) {
+    slot =
+      slots.find((s) => {
+        if (String(s.bound || "").toUpperCase() !== wantBound) return false;
+        if (wantBranch && String(s.branch || "").toUpperCase() !== wantBranch) {
+          return false;
+        }
+        return true;
+      }) ||
+      slots.find((s) => String(s.bound || "").toUpperCase() === wantBound) ||
+      null;
+  }
   // Only fall back to index when bounds are missing on slots
   if (!slot) {
     const allBoundless = slots.every((s) => !String(s.bound || "").trim());
@@ -1486,24 +1517,25 @@ async function refreshCardLiveEta(r, opts = {}) {
         stopLon: board.lon,
       };
       let slots = etaNearbyDirsByKey.get(key) || [];
-      const bi = slots.findIndex(
-        (s) =>
-          String(s.bound || "").toUpperCase() ===
-          String(slot.bound).toUpperCase(),
-      );
+      // Merge by bound|branch so branch lines keep every OD path
+      const slotKey = etaDirSlotKey({
+        ...slot,
+        branch: dir?.branch || slot.branch,
+      });
+      if (dir?.branch && !slot.branch) slot = { ...slot, branch: dir.branch };
+      const bi = slots.findIndex((s) => etaDirSlotKey(s) === slotKey);
       if (bi >= 0) slots[bi] = { ...slots[bi], ...slot };
       else slots = [...slots, slot];
-      // Ensure both real OD bounds exist as slots (shell for the unfetched side)
+      // Ensure every real OD direction exists as a slot (shell for unfetched)
       const odDirs = etaUniqueDirections(etaRouteDirectionsFromOd(r));
       if (odDirs.length >= 2 && etaHasRealOpposite(odDirs)) {
-        const have = new Set(
-          slots.map((s) => String(s.bound || "").toUpperCase()),
-        );
+        const have = new Set(slots.map((s) => etaDirSlotKey(s)));
         for (const d of odDirs) {
-          const b = String(d.bound || "").toUpperCase();
-          if (!b || have.has(b)) continue;
+          const k = etaDirSlotKey(d);
+          if (!k || have.has(k)) continue;
           slots.push({
             bound: d.bound,
+            branch: d.branch || "",
             dest: d.dest || "",
             destZh: d.destZh || "",
             minutes: null,
@@ -1511,19 +1543,21 @@ async function refreshCardLiveEta(r, opts = {}) {
             stopId: "",
             distM: 0,
           });
-          have.add(b);
+          have.add(k);
         }
       }
-      // Keep O/I order
-      const ordered = [];
-      const byB = new Map(
-        slots.map((s) => [String(s.bound || "").toUpperCase(), s]),
-      );
-      if (byB.has("O")) ordered.push(byB.get("O"));
-      if (byB.has("I")) ordered.push(byB.get("I"));
-      for (const s of slots) {
-        if (!ordered.includes(s)) ordered.push(s);
-      }
+      // Stable O* then I* (keep all branch rows)
+      const ordered = [...slots].sort((a, b) => {
+        const ba = String(a.bound || "").toUpperCase();
+        const bb = String(b.bound || "").toUpperCase();
+        if (ba !== bb) {
+          if (ba === "O") return -1;
+          if (bb === "O") return 1;
+          if (ba === "I") return -1;
+          if (bb === "I") return 1;
+        }
+        return String(a.branch || "").localeCompare(String(b.branch || ""));
+      });
       etaNearbyDirsByKey.set(key, ordered);
     }
     return mins != null;
@@ -7454,22 +7488,28 @@ async function filterDirsWithRealStops(route, dirs) {
  * Drop duplicate / fake directions so Opposite is not shown for one-way routes.
  * @param {Array<{ dest?: string, destZh?: string, bound?: string, orig?: string, stopId?: string }>} dirs
  */
+/**
+ * Stable key for a direction / nearby slot (bound + optional branch).
+ * EAL/TKL have multiple O and I rows that share dest (e.g. both I → Admiralty).
+ * @param {{ bound?: string, branch?: string, dest?: string, destZh?: string }} d
+ */
+function etaDirSlotKey(d) {
+  const b = String(d?.bound || "").toUpperCase();
+  const branch = String(d?.branch || "").toUpperCase();
+  if (branch) return `${b}|${branch}`;
+  const dest = etaDestKey(d?.destZh || d?.dest);
+  if (dest && dest !== "—") return `d:${dest}|${b || "x"}`;
+  return b || "x";
+}
+
 function etaUniqueDirections(dirs) {
   if (!dirs?.length) return [];
   /** @type {typeof dirs} */
   const out = [];
   const seen = new Set();
   for (const d of dirs) {
-    const b = String(d.bound || "").toUpperCase();
-    const branch = String(d.branch || "").toUpperCase();
-    const dest = etaDestKey(d.destZh || d.dest);
-    // Branch lines (EAL LMC, TKL LOHAS) share bound "O" — key by branch + dest
-    const key =
-      dest && dest !== "—"
-        ? `d:${dest}`
-        : branch
-          ? `b:${b}|${branch}`
-          : `b:${b}`;
+    // Prefer bound|branch so EAL/TKL keep both inbounds (same dest city end)
+    const key = etaDirSlotKey(d);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(d);
