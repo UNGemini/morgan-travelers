@@ -11575,9 +11575,14 @@ function setEtaSearchOpen(open) {
   if (els.appNavSearchWrap) {
     els.appNavSearchWrap.classList.toggle("is-open", want);
   }
-  // Apple Music–style: only current tab icon stays visible while search is open
+  // Apple Music–style: only current tab icon stays visible while search is open.
+  // Always clear both classes together so CSS can't stick in open layout.
   if (els.appBottomNav) {
     els.appBottomNav.classList.toggle("is-search-open", want);
+  }
+  if (!want) {
+    els.appNavSearchWrap?.classList.remove("is-open");
+    els.appBottomNav?.classList.remove("is-search-open");
   }
   if (els.appNavSearchField) {
     // Never use [hidden] — it fights the expand animation
@@ -12257,7 +12262,7 @@ loadManifest().catch((err) => {
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
     // Query-bust so browsers re-fetch sw.js even when an old cache-first SW is live
-    const swUrl = `${import.meta.env.BASE_URL}sw.js?v=9`;
+    const swUrl = `${import.meta.env.BASE_URL}sw.js?v=10`;
     let refreshing = false;
     const reloadOnce = () => {
       if (refreshing) return;

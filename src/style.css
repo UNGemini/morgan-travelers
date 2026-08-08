@@ -5425,6 +5425,8 @@ body.contrib-submitting .bg-orb {
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
   /* Desktop default; mobile sets safe-area-aware padding */
   padding: 8px 10px var(--safe-bottom-content);
   border-top: none;
@@ -5538,44 +5540,46 @@ body.contrib-submitting .bg-orb {
 .app-nav-search-wrap.is-open {
   flex: 1 1 auto;
   width: auto;
-  min-width: min(160px, 40vw);
-  max-width: none;
+  min-width: min(140px, 36vw);
+  max-width: min(320px, 58vw);
 }
+
 /*
- * Search open (Apple Music Classical style):
- *  · Only the active tab remains — as a circular icon
- *  · Search field takes the rest of the bar
- *  · Tapping the icon closes search (handled in JS)
+ * Search open (Apple Music Classical):
+ * Driven only by .app-bottom-nav.is-search-open (set in JS) so closed
+ * state never inherits open styles. Icon circle + expanding field.
  */
-.app-bottom-nav.is-search-open .app-nav-tabs,
-.app-bottom-nav:has(.app-nav-search-wrap.is-open) .app-nav-tabs {
-  flex: 0 0 auto;
-  width: auto;
-  min-width: 0;
-  max-width: none;
-  gap: 0;
+.app-bottom-nav.is-search-open {
+  gap: 10px;
+}
+.app-bottom-nav.is-search-open .app-nav-tabs {
+  flex: 0 0 48px;
+  width: 48px;
+  min-width: 48px;
+  max-width: 48px;
+  height: 48px;
   padding: 0;
+  gap: 0;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: none;
   box-shadow: none;
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  transition:
-    flex var(--nav-morph-dur) var(--nav-morph-ease),
-    width var(--nav-morph-dur) var(--nav-morph-ease);
+  overflow: visible;
 }
-.app-bottom-nav.is-search-open .app-nav-tab:not(.is-active),
-.app-bottom-nav:has(.app-nav-search-wrap.is-open) .app-nav-tab:not(.is-active) {
+.app-bottom-nav.is-search-open .app-nav-tab:not(.is-active) {
   display: none !important;
 }
-.app-bottom-nav.is-search-open .app-nav-tab.is-active,
-.app-bottom-nav:has(.app-nav-search-wrap.is-open) .app-nav-tab.is-active {
+.app-bottom-nav.is-search-open .app-nav-tab.is-active {
   flex: 0 0 48px;
   width: 48px;
   min-width: 48px;
   max-width: 48px;
   min-height: 48px;
   height: 48px;
+  margin: 0;
   padding: 0;
   border-radius: 50%;
   border: 1px solid var(--lg-border);
@@ -5584,23 +5588,23 @@ body.contrib-submitting .bg-orb {
   -webkit-backdrop-filter: blur(32px) saturate(1.7);
   backdrop-filter: blur(32px) saturate(1.7);
   color: #fff;
+  gap: 0;
 }
-.app-bottom-nav.is-search-open .app-nav-tab.is-active .app-nav-tab-label,
-.app-bottom-nav:has(.app-nav-search-wrap.is-open) .app-nav-tab.is-active .app-nav-tab-label {
+.app-bottom-nav.is-search-open .app-nav-tab.is-active .app-nav-tab-label {
   display: none !important;
 }
-.app-bottom-nav.is-search-open .app-nav-tab.is-active .material-symbols-outlined,
-.app-bottom-nav:has(.app-nav-search-wrap.is-open) .app-nav-tab.is-active .material-symbols-outlined {
+.app-bottom-nav.is-search-open .app-nav-tab.is-active .material-symbols-outlined {
   font-size: 22px !important;
+  line-height: 1 !important;
   color: #fff;
   font-variation-settings: "FILL" 1, "wght" 500, "GRAD" 0, "opsz" 24;
 }
-.app-bottom-nav.is-search-open .app-nav-search-wrap,
-.app-bottom-nav:has(.app-nav-search-wrap.is-open) .app-nav-search-wrap.is-open {
+.app-bottom-nav.is-search-open .app-nav-search-wrap {
   flex: 1 1 auto;
   width: auto;
   min-width: 0;
   max-width: none;
+  height: 48px;
 }
 .app-nav-search-btn {
   position: absolute;
@@ -5718,7 +5722,8 @@ body.contrib-submitting .bg-orb {
   .app-nav-search-field,
   .app-nav-search-icon,
   .app-nav-search-input,
-  .app-bottom-nav:has(.app-nav-search-wrap.is-open) .app-nav-tabs {
+  .app-bottom-nav.is-search-open .app-nav-tabs,
+  .app-bottom-nav.is-search-open .app-nav-tab.is-active {
     transition-duration: 0.01ms !important;
     transition-delay: 0s !important;
   }
