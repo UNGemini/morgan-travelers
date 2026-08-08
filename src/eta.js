@@ -94,6 +94,13 @@ export function etaOperator(opt) {
   if (/\bctb\b|citybus|nwfb|new\s*world/.test(agency) || /^CTB-/i.test(routeId))
     return "ctb";
   if (
+    /\bgmb\b|green\s*mini|minibus|專線/.test(agency) ||
+    /^GMB-/i.test(routeId) ||
+    kind === "gmb"
+  ) {
+    return "gmb";
+  }
+  if (
     /\bkmb\b|lwb|long\s*win|kowloon\s*motor/.test(agency) ||
     /^KMB-/i.test(routeId) ||
     /^LWB-/i.test(routeId)
@@ -193,6 +200,8 @@ function normalizeEtaIso(raw) {
  *   multiPlatform?: boolean,
  *   fetchedAt?: number,
  *   scheduled?: boolean,
+ *   outsideService?: boolean,
+ *   remark?: string,
  * }} LegEtaResult
  */
 
@@ -232,6 +241,76 @@ export function defaultHeadwayMins(opt, operator = "") {
 }
 
 /**
+ * Overnight franchised bus (N-routes) — in service at midnight.
+ * @param {string} [route]
+ */
+export function isOvernightRouteCode(route) {
+  const r = String(route || "")
+    .trim()
+    .toUpperCase()
+    // Strip operator prefixes: KMB-N64 → N64
+    .replace(/^[A-Z]+[-_]/, "");
+  // N64, NA21, N11, NB3, N260…
+  return /^N[A-Z]?\d/.test(r);
+}
+
+/**
+ * Rough Hong Kong service window for inventing headways / showing “outside service”.
+ * Not a full GTFS calendar — only gates placeholder times.
+ *
+ *  · Day routes: ~05:30–01:15 (covers last trains/buses after midnight)
+ *  · Overnight N-routes: ~23:00–06:30
+ *
+ * @param {{
+ *   operator?: string,
+ *   mode?: string,
+ *   route?: string,
+ *   route_short_name?: string,
+ * }} [opts]
+ * @param {Date} [now]
+ * @returns {boolean}
+ */
+export function isTypicalServiceWindow(opts = {}, now = new Date()) {
+  const hk = getHongKongParts(now);
+  const mins = (hk.hour || 0) * 60 + (hk.minute || 0);
+  const route = String(
+    opts.route || opts.route_short_name || "",
+  ).toUpperCase();
+
+  if (isOvernightRouteCode(route)) {
+    // Overnight: late evening through early morning
+    return mins >= 23 * 60 || mins <= 6 * 60 + 30;
+  }
+
+  // Standard day service: from 05:30 through 01:15 next calendar day
+  const dayStart = 5 * 60 + 30;
+  const afterMidnightEnd = 1 * 60 + 15;
+  return mins >= dayStart || mins <= afterMidnightEnd;
+}
+
+/**
+ * Empty ETA payload for outside hours / no timetable.
+ * @param {object} [base]
+ * @param {string} [remark]
+ * @returns {LegEtaResult}
+ */
+export function outsideServiceEtaResult(base = {}, remark = "Outside service hours") {
+  return {
+    operator: String(base.operator || "unknown"),
+    route: String(base.route || ""),
+    stopId: String(base.stopId || ""),
+    etas: [],
+    waitMins: null,
+    etaIso: null,
+    scheduled: false,
+    outsideService: true,
+    remark,
+    error: null,
+    fetchedAt: Date.now(),
+  };
+}
+
+/**
  * @param {string} clock HH:MM
  * @param {number} addMins
  */
@@ -243,6 +322,36 @@ export function addMinutesToClock(clock, addMins) {
   const hh = Math.floor(total / 60);
   const mm = total % 60;
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+/**
+ * Wall-clock (HH:MM, Asia/Hong_Kong) from wait minutes after `now`.
+ * @param {number | null | undefined} waitMins
+ * @param {Date} [now]
+ * @returns {string}
+ */
+export function clockFromWaitMins(waitMins, now = new Date()) {
+  if (waitMins == null || !Number.isFinite(Number(waitMins))) return "";
+  const ms = now.getTime() + Math.round(Number(waitMins)) * 60_000;
+  const c = formatHkClock(ms);
+  return c && c !== "—" ? c : "";
+}
+
+/**
+ * Prefer explicit clock / etaIso; else derive from wait minutes.
+ * @param {{ clock?: string, etaIso?: string|null, waitMins?: number|null }} slot
+ * @param {Date} [now]
+ * @returns {string}
+ */
+export function resolveSlotClock(slot, now = new Date()) {
+  if (!slot) return "";
+  const direct = String(slot.clock || "").trim();
+  if (direct && direct !== "—") return direct;
+  if (slot.etaIso) {
+    const c = formatHkClock(slot.etaIso);
+    if (c && c !== "—") return c;
+  }
+  return clockFromWaitMins(slot.waitMins, now);
 }
 
 /**
@@ -262,11 +371,16 @@ export function expandTimetableSlots(first, opts = {}) {
     first.waitMins != null && Number.isFinite(Number(first.waitMins))
       ? Math.max(0, Math.round(Number(first.waitMins)))
       : 0;
-  const baseClock = first.clock || null;
+  const baseClock =
+    first.clock ||
+    (first.etaIso ? formatHkClock(first.etaIso) : "") ||
+    clockFromWaitMins(baseWait) ||
+    null;
   for (let i = 0; i < count; i++) {
     const waitMins = baseWait + i * headway;
     const clock =
       (baseClock && addMinutesToClock(baseClock, i * headway)) ||
+      clockFromWaitMins(waitMins) ||
       null;
     out.push({
       waitMins,
@@ -402,11 +516,34 @@ export function scheduledSlotsFromPlanLeg(
 /**
  * ETA-mode timetable when no live minutes: next departures on a headway grid.
  * Aligns first trip to the next headway boundary after "now".
- * @param {{ dest?: string, operator?: string, mode?: string, headwayMins?: number, count?: number }} [opts]
+ * Returns [] outside typical service windows (no invented mid-night buses).
+ *
+ * @param {{
+ *   dest?: string,
+ *   operator?: string,
+ *   mode?: string,
+ *   route?: string,
+ *   headwayMins?: number,
+ *   count?: number,
+ *   force?: boolean,
+ * }} [opts]
  * @param {Date} [now]
  * @returns {EtaSlot[]}
  */
 export function headwayTimetableSlots(opts = {}, now = new Date()) {
+  if (
+    !opts.force &&
+    !isTypicalServiceWindow(
+      {
+        operator: opts.operator,
+        mode: opts.mode,
+        route: opts.route,
+      },
+      now,
+    )
+  ) {
+    return [];
+  }
   const headway = Math.max(
     2,
     Math.min(60, opts.headwayMins ?? defaultHeadwayMins({ mode: opts.mode }, opts.operator)),
@@ -1201,14 +1338,112 @@ async function fetchLrtEta(opt, board) {
 }
 
 /**
+ * GMB live ETA: GET /eta/gmb/eta/route-stop/{route_id}/{route_seq}/{stop_seq}
+ * @param {object} opt
+ * @param {object} board
+ */
+async function fetchGmbEta(opt, board) {
+  const route = routeShort(opt);
+  const stopId = stripOperatorStopId(stopIdOf(board));
+  const routeId = String(
+    board.gmbRouteId ||
+      opt.gmbRouteId ||
+      opt.from?.gmbRouteId ||
+      "",
+  ).trim();
+  const routeSeq = Number(
+    board.gmbRouteSeq || opt.gmbRouteSeq || opt.from?.gmbRouteSeq || 1,
+  );
+  const stopSeq = Number(board.seq || board.stop_seq || board.gmbStopSeq || 0);
+  if (!routeId || !stopSeq) {
+    return {
+      operator: "gmb",
+      route,
+      stopId,
+      etas: [],
+      waitMins: null,
+      etaIso: null,
+      error: "missing GMB route_id / stop_seq",
+    };
+  }
+  try {
+    const res = await fetch(
+      `${ETA_BASE}/gmb/eta/route-stop/${encodeURIComponent(routeId)}/${routeSeq || 1}/${stopSeq}`,
+      { headers: { Accept: "application/json" } },
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const rows = Array.isArray(data?.data?.eta) ? data.data.eta : [];
+    const now = Date.now();
+    /** @type {Array<{ waitMins: number|null, clock: string, etaIso: string|null, dest: string, scheduled: boolean }>} */
+    const slots = [];
+    for (const row of rows) {
+      const ts = row.timestamp ? Date.parse(row.timestamp) : NaN;
+      let waitMins =
+        row.diff != null && Number.isFinite(Number(row.diff))
+          ? Number(row.diff)
+          : null;
+      if (waitMins == null && Number.isFinite(ts)) {
+        waitMins = Math.round((ts - now) / 60000);
+      }
+      const scheduled = /schedul|未開出|未开出/i.test(
+        String(row.remarks_en || row.remarks_tc || ""),
+      );
+      slots.push({
+        waitMins,
+        clock: Number.isFinite(ts)
+          ? new Date(ts).toLocaleTimeString("en-HK", {
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+              timeZone: "Asia/Hong_Kong",
+            })
+          : "",
+        etaIso: Number.isFinite(ts) ? new Date(ts).toISOString() : null,
+        dest: "",
+        scheduled,
+      });
+    }
+    slots.sort((a, b) => (a.waitMins ?? 99) - (b.waitMins ?? 99));
+    return packSlots(
+      {
+        operator: "gmb",
+        route,
+        stopId: stopId || String(data?.data?.stop_id || ""),
+        fetchedAt: now,
+      },
+      slots,
+    );
+  } catch (e) {
+    return {
+      operator: "gmb",
+      route,
+      stopId,
+      etas: [],
+      waitMins: null,
+      etaIso: null,
+      error: e instanceof Error ? e.message : "GMB ETA failed",
+    };
+  }
+}
+
+/**
  * MTR Bus (LRT Feeder) live schedule.
  * POST https://rt.data.gov.hk/v1/transport/mtr/bus/getSchedule
  * @param {object} opt
  * @param {object} board
  */
 async function fetchMtrBusEta(opt, board) {
-  const route = routeShort(opt);
-  const stopId = stripOperatorStopId(stopIdOf(board));
+  // routeName for getSchedule is short code (K12, 506, K51A) — not GTFS id
+  const route = String(routeShort(opt) || "")
+    .trim()
+    .toUpperCase()
+    .replace(/^LRTFEEDER[-_]?/i, "")
+    .replace(/^MTRBUS[-_]?/i, "")
+    .replace(/^MTR_BUS[-_]?/i, "");
+  let stopId = stripOperatorStopId(stopIdOf(board));
+  // Open-data STATION_ID is like K12-U010 / 506-D010
+  stopId = String(stopId || "").trim();
   if (!route) {
     return {
       operator: "mtr_bus",
@@ -1235,26 +1470,40 @@ async function fetchMtrBusEta(opt, board) {
     const now = Date.now();
     /** @type {object[]} */
     let busRows = [];
-    if (stopId) {
-      const hit = stops.find(
-        (s) =>
-          String(s.busStopId || "").toUpperCase() === stopId.toUpperCase() ||
+    /** @type {object | null} */
+    let matchedStop = null;
+    if (stopId && stops.length) {
+      const want = stopId.toUpperCase();
+      matchedStop =
+        stops.find(
+          (s) => String(s.busStopId || "").toUpperCase() === want,
+        ) ||
+        stops.find((s) =>
           String(s.busStopId || "")
             .toUpperCase()
-            .includes(stopId.toUpperCase()),
-      );
-      if (hit?.bus) busRows = hit.bus;
+            .includes(want),
+        ) ||
+        stops.find((s) =>
+          want.includes(String(s.busStopId || "").toUpperCase()),
+        ) ||
+        null;
+      if (matchedStop?.bus) busRows = matchedStop.bus;
     }
-    // Fallback: first stop with buses
+    // Fallback: first stop with buses (e.g. non-service at this stop)
     if (!busRows.length) {
       for (const s of stops) {
         if (Array.isArray(s.bus) && s.bus.length) {
           busRows = s.bus;
+          if (!matchedStop) matchedStop = s;
           break;
         }
       }
     }
     const slots = [];
+    // Destination from first bus lineRef / route remark — not "Non-service hours"
+    const statusTitle = String(data?.routeStatusRemarkTitle || "").trim();
+    const statusIsServiceMsg =
+      /non-?service|no service|暫停|非服務|服務時間/i.test(statusTitle);
     for (const b of busRows) {
       // Prefer real-time arrival; 108000+ is a sentinel “no arrival estimate”
       let sec = Number(b.arrivalTimeInSecond);
@@ -1284,21 +1533,45 @@ async function fetchMtrBusEta(opt, board) {
         waitMins > 40 &&
         (String(b.isScheduled || "") === "1" ||
           String(b.isScheduled || "").toLowerCase() === "true");
+      const destLabel =
+        (!statusIsServiceMsg && statusTitle) ||
+        String(data?.routeName || route);
       slots.push({
         waitMins,
         etaIso: new Date(now + waitMins * 60_000).toISOString(),
-        dest: data?.routeStatusRemarkTitle || data?.routeName || route,
+        dest: destLabel,
         remark: b.busId ? `Bus ${b.busId}` : "",
         scheduled: isSched,
       });
     }
     slots.sort((a, b) => (a.waitMins ?? 99) - (b.waitMins ?? 99));
+    // Empty during non-service hours — flag so we don't invent headways
+    if (!slots.length && statusIsServiceMsg) {
+      return outsideServiceEtaResult(
+        {
+          operator: "mtr_bus",
+          route,
+          stopId:
+            stopId ||
+            matchedStop?.busStopId ||
+            stops[0]?.busStopId ||
+            "",
+        },
+        statusTitle || "Outside service hours",
+      );
+    }
     return packSlots(
       {
         operator: "mtr_bus",
         route,
-        stopId: stopId || stops[0]?.busStopId || "",
+        stopId:
+          stopId ||
+          matchedStop?.busStopId ||
+          stops[0]?.busStopId ||
+          "",
         fetchedAt: now,
+        remark: statusIsServiceMsg ? statusTitle : "",
+        outsideService: !slots.length && statusIsServiceMsg,
       },
       slots,
     );
@@ -1340,6 +1613,7 @@ export async function fetchBoardEta(opt, alight) {
     if (op === "kmb") return await fetchKmbEta(opt, board);
     if (op === "ctb") return await fetchCtbEta(opt, board);
     if (op === "nlb") return await fetchNlbEta(opt, board);
+    if (op === "gmb") return await fetchGmbEta(opt, board);
     if (op === "mtr") return await fetchMtrEta(opt, board, alight || opt.to);
     if (op === "lrt") return await fetchLrtEta(opt, board);
     if (op === "mtr_bus") return await fetchMtrBusEta(opt, board);
@@ -1421,34 +1695,76 @@ export function hasAnyEtaSlots(result) {
 /**
  * Attach RAPTOR/GTFS timetable board when open-data ETA is fully N/A.
  * Keeps NLB/operator timetable rows (noGPS) — does not overwrite them.
+ *
+ * Policy:
+ *  1. Prefer real operator live / scheduled rows already in `result`
+ *  2. Prefer official plan/GTFS timetable (`start_time`) when present
+ *  3. Invent headway grid only inside typical service windows
+ *  4. Outside service + no real timetable → empty + outsideService
+ *
  * @param {LegEtaResult} result
  * @param {object} opt
- * @param {object} plan
- * @param {number} legIndex
+ * @param {object} [plan]
+ * @param {number} [legIndex]
  * @returns {LegEtaResult}
  */
-export function withScheduledFallback(result, opt, plan, legIndex) {
+export function withScheduledFallback(result, opt, plan = null, legIndex = 0) {
+  const now = new Date();
   const headway = defaultHeadwayMins(opt, result?.operator);
+  const routeCode = String(
+    routeShort(opt) || result?.route || opt?.route_short_name || "",
+  );
+  const inService = isTypicalServiceWindow(
+    {
+      operator: result?.operator || etaOperator(opt),
+      mode: opt?.mode,
+      route: routeCode,
+    },
+    now,
+  );
+
+  // Operator already flagged non-service (e.g. MTR Bus status title)
+  if (result?.outsideService && !hasAnyEtaSlots(result)) {
+    return {
+      ...outsideServiceEtaResult(result, result.remark || "Outside service hours"),
+      error: result.error || null,
+    };
+  }
+
   const raw = Array.isArray(result?.etas) ? result.etas : [];
   const live = raw.filter(
     (s) =>
       !s?.scheduled &&
       (s.waitMins != null || (s.etaIso && String(s.etaIso).length > 0)),
   );
+  /** Official scheduled rows from the operator API (not invented) */
   /** @type {EtaSlot[]} */
-  let sched = raw.filter((s) => s?.scheduled);
+  let officialSched = raw.filter(
+    (s) =>
+      s?.scheduled &&
+      (s.waitMins != null ||
+        (s.etaIso && String(s.etaIso).length > 0) ||
+        (s.clock && s.clock !== "—")),
+  );
 
-  // Build / expand timetable pool (always aim for 3 for filling)
-  if (!sched.length) {
-    sched = scheduledSlotsFromPlanLeg(opt, plan, legIndex, 3);
+  // Prefer official plan / GTFS board times when open-data is empty
+  /** @type {EtaSlot[]} */
+  let planSched = [];
+  if (plan) {
+    planSched = scheduledSlotsFromPlanLeg(opt, plan, legIndex, 3, now);
   }
-  if (sched.length === 1) {
+
+  /** @type {EtaSlot[]} */
+  let sched = officialSched.length ? officialSched.slice() : planSched.slice();
+
+  // Expand a real single/double timetable row with headway (still “official-based”)
+  if (sched.length === 1 && inService) {
     sched = expandTimetableSlots(sched[0], {
       count: 3,
       headwayMins: headway,
       dest: sched[0].dest,
     });
-  } else if (sched.length === 2) {
+  } else if (sched.length === 2 && inService) {
     const extra = expandTimetableSlots(sched[1], {
       count: 2,
       headwayMins: headway,
@@ -1457,12 +1773,18 @@ export function withScheduledFallback(result, opt, plan, legIndex) {
     sched = [...sched, ...extra];
   }
 
-  // Seed timetable from last live + headway when plan has no start_time
-  if (!sched.length && live.length) {
+  // Seed more departures from last live only inside service window
+  if (!sched.length && live.length && inService) {
     const last = live[live.length - 1];
+    const lastClock = resolveSlotClock(last);
+    const seedWait = (last.waitMins ?? 0) + headway;
     sched = expandTimetableSlots(
       {
-        waitMins: (last.waitMins ?? 0) + headway,
+        waitMins: seedWait,
+        clock:
+          (lastClock && addMinutesToClock(lastClock, headway)) ||
+          clockFromWaitMins(seedWait) ||
+          undefined,
         dest: last.dest || "",
         scheduled: true,
       },
@@ -1470,14 +1792,46 @@ export function withScheduledFallback(result, opt, plan, legIndex) {
     );
   }
 
+  // Invent pure headway grid only when no official data AND in service window
+  if (!sched.length && !live.length && inService) {
+    sched = headwayTimetableSlots(
+      {
+        dest:
+          opt?.headsign ||
+          opt?.to?.stop_name ||
+          "",
+        operator: result?.operator || etaOperator(opt),
+        mode: opt?.mode,
+        route: routeCode,
+        count: 3,
+        force: true, // already gated by inService
+      },
+      now,
+    );
+  }
+
+  // Ensure every scheduled slot has a wall-clock time
+  const stampSched = (slots) =>
+    (slots || []).map((s) => {
+      if (!s) return s;
+      const clock = resolveSlotClock(s);
+      return clock ? { ...s, clock } : s;
+    });
+
   if (live.length) {
-    const merged = mergeLiveWithTimetable(live, sched, 3);
-    while (merged.length < 3) {
+    const merged = mergeLiveWithTimetable(live, stampSched(sched), 3);
+    // Pad with headway only while still in service
+    while (merged.length < 3 && inService) {
       const last = merged[merged.length - 1];
       const w = (last?.waitMins ?? 0) + headway;
+      const lastClock = resolveSlotClock(last);
+      const clock =
+        (lastClock && addMinutesToClock(lastClock, headway)) ||
+        clockFromWaitMins(w) ||
+        undefined;
       merged.push({
         waitMins: w,
-        clock: last?.clock ? addMinutesToClock(last.clock, headway) || undefined : undefined,
+        clock,
         dest: last?.dest || "",
         scheduled: true,
         platform: null,
@@ -1485,26 +1839,82 @@ export function withScheduledFallback(result, opt, plan, legIndex) {
     }
     return {
       ...result,
-      etas: merged.slice(0, 3),
+      etas: stampSched(merged.slice(0, 3)),
       waitMins: merged[0]?.waitMins ?? result.waitMins,
       etaIso: merged.find((s) => !s.scheduled)?.etaIso ?? null,
       scheduled: merged.every((s) => s.scheduled),
+      outsideService: false,
       unsupported: false,
       fetchedAt: result?.fetchedAt ?? Date.now(),
     };
   }
 
-  if (!sched.length) return result;
+  if (sched.length) {
+    const stamped = stampSched(sched.slice(0, 3));
+    return {
+      ...result,
+      etas: stamped,
+      waitMins: stamped[0]?.waitMins ?? null,
+      etaIso: null,
+      scheduled: true,
+      outsideService: false,
+      unsupported: false,
+      error: result?.error || null,
+      fetchedAt: result?.fetchedAt ?? Date.now(),
+    };
+  }
+
+  // No live, no official timetable
+  if (!inService) {
+    return outsideServiceEtaResult(
+      {
+        operator: result?.operator || etaOperator(opt),
+        route: routeCode,
+        stopId: result?.stopId || "",
+      },
+      "Outside service hours",
+    );
+  }
+
+  // In service but still nothing (unsupported operator, bad stop id, …)
   return {
     ...result,
-    etas: sched.slice(0, 3),
-    waitMins: sched[0]?.waitMins ?? null,
+    etas: [],
+    waitMins: null,
     etaIso: null,
-    scheduled: true,
-    unsupported: false,
+    scheduled: false,
+    outsideService: false,
+    unsupported: !!result?.unsupported,
     error: result?.error || null,
     fetchedAt: result?.fetchedAt ?? Date.now(),
   };
+}
+
+/**
+ * Resolve ETA for ETA-browse / detail when there is no trip-plan context.
+ * Live → official scheduled → headway (in window) → outside service / N/A.
+ *
+ * @param {LegEtaResult | null | undefined} result from fetchBoardEta
+ * @param {object} opt
+ * @param {{ dest?: string, route?: string }} [meta]
+ * @returns {LegEtaResult}
+ */
+export function resolveBrowseEta(result, opt, meta = {}) {
+  const base = result || {
+    operator: etaOperator(opt),
+    route: routeShort(opt) || meta.route || "",
+    stopId: "",
+    etas: [],
+    waitMins: null,
+    etaIso: null,
+  };
+  // Inject dest into opt headsign for headway labels
+  const opt2 = {
+    ...opt,
+    headsign: opt?.headsign || meta.dest || "",
+    route_short_name: opt?.route_short_name || meta.route || routeShort(opt),
+  };
+  return withScheduledFallback(base, opt2, null, 0);
 }
 
 /**

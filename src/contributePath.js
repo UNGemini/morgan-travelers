@@ -2240,12 +2240,25 @@ export function createPathContributor(ctx) {
       maxLat = Math.max(maxLat, lat);
     }
     try {
+      // Centre path in the map visible beside the left panel (not absolute canvas centre)
+      const mapEl = map.getContainer?.();
+      const mapLeft = mapEl?.getBoundingClientRect?.().left || 0;
+      const tb = document.getElementById("main-toolbar");
+      const tr = tb?.getBoundingClientRect?.();
+      const leftPad =
+        tr && tr.width > 40
+          ? Math.max(48, Math.ceil(tr.right - mapLeft) + 16)
+          : 380;
       map.fitBounds(
         [
           [minLng, minLat],
           [maxLng, maxLat],
         ],
-        { padding: { top: 48, bottom: 48, left: 380, right: 48 }, maxZoom: 15, duration: 600 },
+        {
+          padding: { top: 48, bottom: 48, left: leftPad, right: 48 },
+          maxZoom: 15,
+          duration: 600,
+        },
       );
     } catch {
       /* ignore */

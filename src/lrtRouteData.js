@@ -7,7 +7,25 @@
 
 import { LRT_STOPS } from "./lrtStops.js";
 
-const CSV_URL = "/eta/mtr-open/data/light_rail_routes_and_stops.csv";
+/** Same-origin static bundle (COEP-safe, no proxy required) */
+function lrtCsvStaticUrl() {
+  try {
+    const base =
+      (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) || "./";
+    if (typeof window !== "undefined" && window.location?.href) {
+      return new URL(`${base}data/light_rail_routes_and_stops.csv`, window.location.href)
+        .href;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "/data/light_rail_routes_and_stops.csv";
+}
+/** Dev/prod proxy → opendata.mtr.com.hk */
+const CSV_PROXY = "/eta/mtr-open/data/light_rail_routes_and_stops.csv";
+/** Direct open data (only works without COEP require-corp) */
+const CSV_DIRECT =
+  "https://opendata.mtr.com.hk/data/light_rail_routes_and_stops.csv";
 
 /**
  * @typedef {{
@@ -21,10 +39,77 @@ const CSV_URL = "/eta/mtr-open/data/light_rail_routes_and_stops.csv";
  * }} LrtRouteStopRow
  */
 
+/** null = not loaded yet; array (possibly empty) = finished attempt */
 /** @type {LrtRouteStopRow[] | null} */
 let rowsCache = null;
 /** @type {Promise<void> | null} */
 let loadPromise = null;
+
+/**
+ * Peak-hour / short-working routes missing from MTR open-data CSV.
+ * 751P: Tin Shui Wai ↔ Tin Yat (subset of 751 TSW section).
+ * Sources: MTR schedule notes, stop order matches 751 seq 15–23.
+ * @type {LrtRouteStopRow[]}
+ */
+const LRT_ROUTE_OVERRIDES = (() => {
+  /** @type {Array<[string, string, string, string, string]>} code, stopId, zh, en */
+  const stops = [
+    ["TSL", "430", "天水圍", "Tin Shui Wai"],
+    ["TIT", "435", "天慈", "Tin Tsz"],
+    ["TWU", "450", "天湖", "Tin Wu"],
+    ["GIN", "455", "銀座", "Ginza"],
+    ["TWI", "500", "天榮", "Tin Wing"],
+    ["CHE", "490", "翠湖", "Chestwood"],
+    ["CHF", "468", "頌富", "Chung Fu"],
+    ["TFU", "480", "天富", "Tin Fu"],
+    ["TYA", "550", "天逸", "Tin Yat"],
+  ];
+  /** @type {LrtRouteStopRow[]} */
+  const rows = [];
+  // Dir 1 = O: Tin Shui Wai → Tin Yat
+  stops.forEach(([code, id, zh, en], i) => {
+    rows.push({
+      route: "751P",
+      direction: "1",
+      stopCode: code,
+      stopId: id,
+      nameZh: zh,
+      nameEn: en,
+      seq: i + 1,
+    });
+  });
+  // Dir 2 = I: Tin Yat → Tin Shui Wai
+  [...stops].reverse().forEach(([code, id, zh, en], i) => {
+    rows.push({
+      route: "751P",
+      direction: "2",
+      stopCode: code,
+      stopId: id,
+      nameZh: zh,
+      nameEn: en,
+      seq: i + 1,
+    });
+  });
+  return rows;
+})();
+
+/**
+ * Merge open-data rows with local overrides (overrides win for same route+dir+seq).
+ * @param {LrtRouteStopRow[]} rows
+ */
+function mergeLrtOverrides(rows) {
+  const has = new Set(rows.map((r) => r.route));
+  const out = rows.slice();
+  for (const o of LRT_ROUTE_OVERRIDES) {
+    if (!has.has(o.route)) {
+      // Whole route missing from open data — inject all override rows for that route once
+      const all = LRT_ROUTE_OVERRIDES.filter((x) => x.route === o.route);
+      out.push(...all);
+      has.add(o.route);
+    }
+  }
+  return out;
+}
 
 /**
  * @param {string} text
@@ -84,17 +169,48 @@ function parseCsv(text) {
   return rows;
 }
 
-export async function ensureLrtRouteData() {
-  if (rowsCache) return;
+/**
+ * Load Light Rail route–stop CSV once.
+ * @param {{ force?: boolean }} [opts] force — clear cache and reload
+ */
+export async function ensureLrtRouteData(opts = {}) {
+  if (opts.force) {
+    rowsCache = null;
+    loadPromise = null;
+  }
+  // null = not loaded / last load failed (retry allowed)
+  // array = successfully loaded
+  if (rowsCache !== null) return;
   if (loadPromise) return loadPromise;
+
   loadPromise = (async () => {
     try {
-      const res = await fetch(CSV_URL, {
-        headers: { Accept: "text/csv,text/plain,*/*" },
-        cache: "force-cache",
-      });
-      if (!res.ok) throw new Error(`LRT CSV ${res.status}`);
-      const text = await res.text();
+      // 1) Bundled static file (always same-origin / COEP-safe)
+      // 2) /eta/mtr-open proxy
+      // 3) Direct MTR open data (may fail under COEP)
+      let text = "";
+      let lastErr = null;
+      let used = "";
+      const staticUrl = lrtCsvStaticUrl();
+      for (const url of [staticUrl, CSV_PROXY, CSV_DIRECT]) {
+        try {
+          const res = await fetch(url, {
+            headers: { Accept: "text/csv,text/plain,*/*" },
+            cache: url === staticUrl || url.includes("/data/") ? "force-cache" : "default",
+          });
+          if (!res.ok) throw new Error(`LRT CSV ${res.status} @ ${url}`);
+          const body = await res.text();
+          if (body && /line\s*code|sequence/i.test(body) && body.length > 40) {
+            text = body;
+            used = url;
+            break;
+          }
+          throw new Error(`LRT CSV unusable @ ${url} (len=${body?.length || 0})`);
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      if (!text) throw lastErr || new Error("LRT CSV empty");
       const table = parseCsv(text);
       const head = (table[0] || []).map((h) =>
         String(h).trim().toLowerCase().replace(/\s+/g, " "),
@@ -105,7 +221,6 @@ export async function ensureLrtRouteData() {
           const i = head.indexOf(n);
           if (i >= 0) return i;
         }
-        // fallback: substring
         for (const n of names) {
           const i = head.findIndex((h) => h.includes(n));
           if (i >= 0) return i;
@@ -139,11 +254,31 @@ export async function ensureLrtRouteData() {
           seq: Number(cols[iSeq >= 0 ? iSeq : 6]) || 0,
         });
       }
-      rowsCache = rows;
-      console.info("[eta] LRT route-stops rows", rows.length);
+      if (!rows.length) {
+        throw new Error(`LRT CSV parsed 0 rows (from ${used || "?"})`);
+      }
+      rowsCache = mergeLrtOverrides(rows);
+      const extra = rowsCache.length - rows.length;
+      console.info(
+        "[eta] LRT route-stops rows",
+        rowsCache.length,
+        "via",
+        used,
+        extra > 0 ? `(+${extra} peak-route overrides)` : "",
+      );
     } catch (e) {
       console.warn("[eta] LRT route data", e);
-      rowsCache = rowsCache || [];
+      // Still ship overrides so 751P etc. work offline / after CSV failure
+      if (LRT_ROUTE_OVERRIDES.length) {
+        rowsCache = LRT_ROUTE_OVERRIDES.slice();
+        console.info(
+          "[eta] LRT using peak-route overrides only",
+          rowsCache.length,
+        );
+      } else {
+        // Leave null so a later open can retry (do not stick empty forever)
+        rowsCache = null;
+      }
     } finally {
       loadPromise = null;
     }
@@ -207,20 +342,33 @@ export function lrtRouteDirections(routeId) {
  * @param {LrtRouteStopRow} row
  */
 function resolveCoords(row) {
-  const byCode = LRT_STOPS.find(
-    (s) => s.code && String(s.code).toUpperCase() === row.stopCode,
-  );
+  const code = String(row.stopCode || "").toUpperCase();
+  const sid = String(row.stopId || "").trim();
+  const en = String(row.nameEn || "").trim().toLowerCase();
+  const byCode = code
+    ? LRT_STOPS.find((s) => s.code && String(s.code).toUpperCase() === code)
+    : null;
   if (byCode && Number.isFinite(byCode.lat)) return byCode;
-  const byId = LRT_STOPS.find(
-    (s) => s.stop_id && String(s.stop_id) === String(row.stopId),
-  );
+  const byId = sid
+    ? LRT_STOPS.find(
+        (s) => s.stop_id != null && String(s.stop_id).trim() === sid,
+      )
+    : null;
   if (byId && Number.isFinite(byId.lat)) return byId;
-  const byName = LRT_STOPS.find(
-    (s) =>
-      String(s.name_en || "").toLowerCase() ===
-      String(row.nameEn || "").toLowerCase(),
-  );
+  const byName = en
+    ? LRT_STOPS.find(
+        (s) => String(s.name_en || "").toLowerCase() === en,
+      )
+    : null;
   if (byName && Number.isFinite(byName.lat)) return byName;
+  // Partial EN (e.g. "Town Centre" vs "Tuen Mun Town Centre")
+  if (en && en.length >= 4) {
+    const soft = LRT_STOPS.find((s) => {
+      const n = String(s.name_en || "").toLowerCase();
+      return n === en || n.includes(en) || en.includes(n);
+    });
+    if (soft && Number.isFinite(soft.lat)) return soft;
+  }
   return null;
 }
 
@@ -251,23 +399,29 @@ export function lrtStopSequence(routeId, bound = "O") {
   }
   list = list.slice().sort((a, b2) => a.seq - b2.seq);
 
-  /** @type {Array<{ seq: number, name: string, nameEn: string, nameTc: string, stopId: string, lon: number, lat: number }>} */
+  /** @type {Array<{ seq: number, name: string, nameEn: string, nameTc: string, stopId: string, lon: number, lat: number, code?: string }>} */
   const out = [];
   for (const row of list) {
     const hit = resolveCoords(row);
-    if (!hit || !Number.isFinite(hit.lat) || !Number.isFinite(hit.lon)) continue;
     // Live ETA needs raw numeric Stop ID from open data
-    const sid = row.stopId || hit.stop_id || "";
+    const sid = row.stopId || hit?.stop_id || "";
+    const nameEn = row.nameEn || hit?.name_en || "";
+    const nameTc = row.nameZh || hit?.name_zh || "";
+    // Keep stops even without coords so the list / destination still show;
+    // map painting skips non-finite points.
+    const lat = hit && Number.isFinite(hit.lat) ? hit.lat : NaN;
+    const lon = hit && Number.isFinite(hit.lon) ? hit.lon : NaN;
     out.push({
       seq: row.seq || out.length + 1,
-      name: row.nameZh
-        ? `${row.nameZh} ${row.nameEn || hit.name_en || ""}`.trim()
-        : row.nameEn || hit.name_en || row.stopCode,
-      nameEn: row.nameEn || hit.name_en || "",
-      nameTc: row.nameZh || hit.name_zh || "",
+      name: nameTc
+        ? `${nameTc} ${nameEn}`.trim()
+        : nameEn || row.stopCode || sid,
+      nameEn,
+      nameTc,
       stopId: String(sid),
-      lon: hit.lon,
-      lat: hit.lat,
+      code: row.stopCode || hit?.code || "",
+      lon,
+      lat,
     });
   }
   return out;

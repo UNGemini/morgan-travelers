@@ -3,10 +3,31 @@
  * https://opendata.mtr.com.hk/data/mtr_bus_routes.csv
  * https://opendata.mtr.com.hk/data/mtr_bus_stops.csv
  * Live ETA: POST /eta/mtr/bus/getSchedule { language, routeName }
+ *
+ * Load order (same pattern as LRT):
+ *  1) Bundled public/data/*.csv (COEP-safe)
+ *  2) /eta/mtr-open proxy
+ *  3) Direct opendata.mtr.com.hk (may fail under COEP)
  */
 
-const ROUTES_URL = "/eta/mtr-open/data/mtr_bus_routes.csv";
-const STOPS_URL = "/eta/mtr-open/data/mtr_bus_stops.csv";
+/** Same-origin static bundle */
+function staticUrl(file) {
+  try {
+    const base =
+      (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) || "./";
+    if (typeof window !== "undefined" && window.location?.href) {
+      return new URL(`${base}data/${file}`, window.location.href).href;
+    }
+  } catch {
+    /* ignore */
+  }
+  return `/data/${file}`;
+}
+
+const ROUTES_PROXY = "/eta/mtr-open/data/mtr_bus_routes.csv";
+const STOPS_PROXY = "/eta/mtr-open/data/mtr_bus_stops.csv";
+const ROUTES_DIRECT = "https://opendata.mtr.com.hk/data/mtr_bus_routes.csv";
+const STOPS_DIRECT = "https://opendata.mtr.com.hk/data/mtr_bus_stops.csv";
 
 /**
  * @typedef {{
@@ -32,6 +53,7 @@ const STOPS_URL = "/eta/mtr-open/data/mtr_bus_stops.csv";
  * }} MtrBusStop
  */
 
+/** null = not loaded / failed (retry ok); array = loaded */
 /** @type {MtrBusRoute[] | null} */
 let routesCache = null;
 /** @type {MtrBusStop[] | null} */
@@ -40,7 +62,7 @@ let stopsCache = null;
 let loadPromise = null;
 
 /**
- * Minimal CSV parser (handles quoted fields).
+ * Minimal CSV parser (handles quoted fields + BOM).
  * @param {string} text
  * @returns {string[][]}
  */
@@ -50,7 +72,6 @@ function parseCsv(text) {
   let cell = "";
   let i = 0;
   let inQ = false;
-  // strip BOM
   const s = text.replace(/^\uFEFF/, "");
   while (i < s.length) {
     const c = s[i];
@@ -84,7 +105,7 @@ function parseCsv(text) {
       if (c === "\r" && s[i + 1] === "\n") i++;
       row.push(cell);
       cell = "";
-      if (row.some((x) => x.trim())) rows.push(row);
+      if (row.some((x) => String(x).trim())) rows.push(row);
       row = [];
       i++;
       continue;
@@ -94,58 +115,112 @@ function parseCsv(text) {
   }
   if (cell.length || row.length) {
     row.push(cell);
-    if (row.some((x) => x.trim())) rows.push(row);
+    if (row.some((x) => String(x).trim())) rows.push(row);
   }
   return rows;
 }
 
 /**
  * @param {string} url
- * @returns {Promise<string[][]>}
+ * @param {{ preferCache?: boolean }} [opts]
+ * @returns {Promise<string>}
  */
-async function fetchCsvRows(url) {
+async function fetchText(url, opts = {}) {
   const res = await fetch(url, {
     headers: { Accept: "text/csv,text/plain,*/*" },
-    cache: "force-cache",
+    cache: opts.preferCache ? "force-cache" : "default",
   });
-  if (!res.ok) throw new Error(`MTR bus CSV ${res.status} ${url}`);
+  if (!res.ok) throw new Error(`MTR bus CSV ${res.status} @ ${url}`);
   const text = await res.text();
-  return parseCsv(text);
+  if (!text || text.length < 40) {
+    throw new Error(`MTR bus CSV empty @ ${url}`);
+  }
+  return text;
 }
 
 /**
- * Load routes + stops once.
+ * @param {string} kind routes | stops
+ * @returns {Promise<{ text: string, via: string }>}
+ */
+async function loadCsvText(kind) {
+  const file =
+    kind === "routes" ? "mtr_bus_routes.csv" : "mtr_bus_stops.csv";
+  const staticU = staticUrl(file);
+  const proxy = kind === "routes" ? ROUTES_PROXY : STOPS_PROXY;
+  const direct = kind === "routes" ? ROUTES_DIRECT : STOPS_DIRECT;
+  let lastErr = null;
+  for (const [url, preferCache] of [
+    [staticU, true],
+    [proxy, false],
+    [direct, false],
+  ]) {
+    try {
+      const text = await fetchText(url, { preferCache });
+      // Sanity: must look like MTR bus headers
+      if (
+        /route_id/i.test(text) &&
+        (kind === "routes"
+          ? /route_name/i.test(text)
+          : /station_id|station_name/i.test(text))
+      ) {
+        return { text, via: url };
+      }
+      throw new Error(`unusable CSV @ ${url}`);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error(`MTR bus ${kind} CSV unavailable`);
+}
+
+/**
+ * @param {string[]} head
+ * @param {string[]} names
+ */
+function colIndex(head, names) {
+  for (const n of names) {
+    const i = head.indexOf(n);
+    if (i >= 0) return i;
+  }
+  for (const n of names) {
+    const i = head.findIndex((h) => h.includes(n));
+    if (i >= 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * Load routes + stops once (retry after failure).
+ * @param {{ force?: boolean }} [opts]
  * @returns {Promise<void>}
  */
-export async function ensureMtrBusData() {
-  if (routesCache && stopsCache) return;
+export async function ensureMtrBusData(opts = {}) {
+  if (opts.force) {
+    routesCache = null;
+    stopsCache = null;
+    loadPromise = null;
+  }
+  if (routesCache !== null && stopsCache !== null) return;
   if (loadPromise) return loadPromise;
+
   loadPromise = (async () => {
     try {
-      const [routeRows, stopRows] = await Promise.all([
-        fetchCsvRows(ROUTES_URL),
-        fetchCsvRows(STOPS_URL),
+      const [routesPack, stopsPack] = await Promise.all([
+        loadCsvText("routes"),
+        loadCsvText("stops"),
       ]);
+      const routeRows = parseCsv(routesPack.text);
+      const stopRows = parseCsv(stopsPack.text);
+
       const rHead = (routeRows[0] || []).map((h) =>
         String(h).trim().toUpperCase().replace(/\s+/g, "_"),
       );
       const sHead = (stopRows[0] || []).map((h) =>
         String(h).trim().toUpperCase().replace(/\s+/g, "_"),
       );
-      /** @param {string[]} head @param {string[]} names */
-      const col = (head, names) => {
-        for (const n of names) {
-          const i = head.indexOf(n);
-          if (i >= 0) return i;
-        }
-        for (const n of names) {
-          const i = head.findIndex((h) => h.includes(n));
-          if (i >= 0) return i;
-        }
-        return -1;
-      };
-      const ri = (...names) => col(rHead, names);
-      const si = (...names) => col(sHead, names);
+
+      const ri = (...names) => colIndex(rHead, names);
+      const si = (...names) => colIndex(sHead, names);
 
       const iRid = ri("ROUTE_ID");
       const iNameZh = ri("ROUTE_NAME_CHI", "ROUTE_NAME_ZH");
@@ -164,12 +239,12 @@ export async function ensureMtrBusData() {
         if (!id || id === "ROUTE_ID") continue;
         routes.push({
           id,
-          nameZh: String(row[iNameZh] || "").trim(),
-          nameEn: String(row[iNameEn] || "").trim(),
-          circular: String(row[iCirc] || "0") === "1",
-          lineUp: String(row[iUp] || "").trim(),
-          lineDown: String(row[iDown] || "").trim(),
-          refId: String(row[iRef] || id).trim(),
+          nameZh: String(row[iNameZh >= 0 ? iNameZh : 1] || "").trim(),
+          nameEn: String(row[iNameEn >= 0 ? iNameEn : 2] || "").trim(),
+          circular: String(row[iCirc >= 0 ? iCirc : 3] || "0") === "1",
+          lineUp: String(row[iUp >= 0 ? iUp : 4] || "").trim(),
+          lineDown: String(row[iDown >= 0 ? iDown : 5] || "").trim(),
+          refId: String(row[iRef >= 0 ? iRef : 6] || id).trim(),
         });
       }
 
@@ -193,7 +268,7 @@ export async function ensureMtrBusData() {
         if (!routeId || !stopId || routeId === "ROUTE_ID") continue;
         const lat = Number(row[iSLat >= 0 ? iSLat : 4]);
         const lon = Number(row[iSLon >= 0 ? iSLon : 5]);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        // Keep stops even without coords so names/dest still show
         stops.push({
           routeId,
           direction: String(row[iSDir >= 0 ? iSDir : 1] || "O")
@@ -201,12 +276,16 @@ export async function ensureMtrBusData() {
             .toUpperCase(),
           seq: Number(row[iSSeq >= 0 ? iSSeq : 2]) || 0,
           stopId,
-          lat,
-          lon,
+          lat: Number.isFinite(lat) ? lat : NaN,
+          lon: Number.isFinite(lon) ? lon : NaN,
           nameZh: String(row[iSZh >= 0 ? iSZh : 6] || "").trim(),
           nameEn: String(row[iSEn >= 0 ? iSEn : 7] || "").trim(),
           refId: String(row[iSRef >= 0 ? iSRef : 8] || routeId).trim(),
         });
+      }
+
+      if (!routes.length && !stops.length) {
+        throw new Error("MTR bus parsed 0 routes and 0 stops");
       }
 
       routesCache = routes;
@@ -217,11 +296,16 @@ export async function ensureMtrBusData() {
         "routes,",
         stops.length,
         "stops",
+        "via",
+        routesPack.via,
+        "+",
+        stopsPack.via,
       );
     } catch (e) {
       console.warn("[eta] MTR Bus data load failed", e);
-      routesCache = routesCache || [];
-      stopsCache = stopsCache || [];
+      // Leave null so a later open can retry (do not stick empty forever)
+      routesCache = null;
+      stopsCache = null;
     } finally {
       loadPromise = null;
     }
@@ -248,7 +332,6 @@ export function mtrBusRouteIds() {
   for (const r of routesCache || []) {
     if (r.id) ids.add(r.id);
   }
-  // Fallback: stops may list variants not in routes
   for (const s of stopsCache || []) {
     if (s.routeId) ids.add(s.routeId);
   }
@@ -258,22 +341,103 @@ export function mtrBusRouteIds() {
 }
 
 /**
- * OD-style directions from first/last stop names per bound.
+ * Prefer primary variant (REFERENCE_ID === ROUTE_ID) so 506-1 etc. don't mix.
+ * @param {string} routeId
+ * @returns {MtrBusStop[]}
+ */
+function stopsForRoute(routeId) {
+  const rid = String(routeId || "").toUpperCase();
+  if (!rid || !stopsCache?.length) return [];
+  const all = stopsCache.filter((s) => s.routeId === rid);
+  if (!all.length) {
+    // Match by reference id (e.g. catalog used 506-1)
+    return stopsCache.filter(
+      (s) => String(s.refId || "").toUpperCase() === rid,
+    );
+  }
+  const primary = all.filter(
+    (s) => String(s.refId || "").toUpperCase() === rid,
+  );
+  return primary.length ? primary : all;
+}
+
+/**
+ * Parse "A to B" / "A至B" route name into OD ends.
+ * @param {string} en
+ * @param {string} zh
+ * @returns {{ orig: string, dest: string, origZh?: string, destZh?: string } | null}
+ */
+function parseRouteNameOd(en, zh) {
+  const enM = /^(.+?)\s+to\s+(.+)$/i.exec(String(en || "").trim());
+  if (enM) {
+    const zhM = /^(.+?)至(.+)$/.exec(String(zh || "").trim());
+    return {
+      orig: enM[1].trim(),
+      dest: enM[2].trim(),
+      origZh: zhM ? zhM[1].trim() : "",
+      destZh: zhM ? zhM[2].trim() : "",
+    };
+  }
+  const zhM = /^(.+?)至(.+)$/.exec(String(zh || "").trim());
+  if (zhM) {
+    return {
+      orig: zhM[1].trim(),
+      dest: zhM[2].trim(),
+      origZh: zhM[1].trim(),
+      destZh: zhM[2].trim(),
+    };
+  }
+  return null;
+}
+
+/**
+ * OD-style directions from stop ends, else route name.
  * @param {string} routeId
  * @returns {Array<{ dest: string, destZh?: string, bound: string, orig?: string }>}
  */
 export function mtrBusRouteDirections(routeId) {
   const rid = String(routeId || "").toUpperCase();
-  const stops = (stopsCache || []).filter((s) => s.routeId === rid);
-  if (!stops.length) {
-    // Try REFERENCE_ID grouping (e.g. 506 vs 506-1)
-    const byRef = (stopsCache || []).filter(
-      (s) => String(s.refId || "").toUpperCase() === rid,
-    );
-    if (byRef.length) return directionsFromStops(byRef);
-    return [];
+  const stops = stopsForRoute(rid);
+  if (stops.length) {
+    const fromStops = directionsFromStops(stops);
+    if (fromStops.length) return fromStops;
   }
-  return directionsFromStops(stops);
+
+  // Fallback: parse official route name(s)
+  const metas = (routesCache || []).filter((r) => r.id === rid);
+  /** @type {Array<{ dest: string, destZh?: string, bound: string, orig?: string }>} */
+  const out = [];
+  // Prefer primary ref row
+  const ordered = [
+    ...metas.filter((r) => String(r.refId || "").toUpperCase() === rid),
+    ...metas,
+  ];
+  const seen = new Set();
+  for (const meta of ordered) {
+    const key = meta.refId || meta.nameEn;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const od = parseRouteNameOd(meta.nameEn, meta.nameZh);
+    if (!od) continue;
+    // Only emit first variant as O/I pair for the main catalog entry
+    if (!out.length) {
+      out.push({
+        bound: "O",
+        dest: od.dest,
+        destZh: od.destZh || "",
+        orig: od.orig,
+      });
+      if (!meta.circular) {
+        out.push({
+          bound: "I",
+          dest: od.orig,
+          destZh: od.origZh || "",
+          orig: od.dest,
+        });
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -315,32 +479,22 @@ function directionsFromStops(stops) {
 export function mtrBusStopSequence(routeId, bound = "O") {
   const rid = String(routeId || "").toUpperCase();
   const b = String(bound || "O").toUpperCase();
-  let list = (stopsCache || []).filter(
-    (s) => s.routeId === rid && s.direction === b,
-  );
+  let list = stopsForRoute(rid).filter((s) => s.direction === b);
   if (!list.length) {
-    // fall back to any direction / reference id
-    list = (stopsCache || []).filter((s) => s.routeId === rid);
-    if (!list.length) {
-      const byRef = (stopsCache || []).filter(
-        (s) => String(s.refId || "").toUpperCase() === rid,
-      );
-      const dirOnly = byRef.filter((s) => s.direction === b);
-      list = dirOnly.length ? dirOnly : byRef;
-    }
+    // Any direction for this route (one-way / circular)
+    list = stopsForRoute(rid);
   }
   list = list.slice().sort((a, b2) => a.seq - b2.seq);
-  return list
-    .filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lon))
-    .map((s) => ({
-      seq: s.seq,
-      name: s.nameZh || s.nameEn || s.stopId,
-      nameEn: s.nameEn || "",
-      nameTc: s.nameZh || "",
-      stopId: s.stopId,
-      lon: s.lon,
-      lat: s.lat,
-    }));
+  // Prefer rows with coords for map; still keep named stops for list
+  return list.map((s) => ({
+    seq: s.seq,
+    name: s.nameZh || s.nameEn || s.stopId,
+    nameEn: s.nameEn || "",
+    nameTc: s.nameZh || "",
+    stopId: s.stopId,
+    lon: s.lon,
+    lat: s.lat,
+  }));
 }
 
 /**
@@ -354,6 +508,11 @@ export function nearbyMtrBusStops(geo, radiusM = 500) {
   const out = [];
   for (const s of stopsCache) {
     if (!Number.isFinite(s.lat) || !Number.isFinite(s.lon)) continue;
+    // Prefer primary variant so nearby doesn't double-count 506-1
+    const ref = String(s.refId || "").toUpperCase();
+    if (ref && ref !== s.routeId && !ref.startsWith(s.routeId + "-")) {
+      /* keep all */
+    }
     const d = haversineM(geo.lat, geo.lon, s.lat, s.lon);
     if (d <= radiusM) out.push({ stop: s, distM: d });
   }

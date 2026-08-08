@@ -840,7 +840,11 @@ function applyJoyYouToParts(parts) {
   }
 }
 
-/** Normalize bus stop label for TD RSTOP name matching. */
+/**
+ * Normalize bus stop label for TD RSTOP name matching.
+ * Keeps STATION / TERMINUS tokens — stripping them collapsed distinct stops
+ * (e.g. “Tung Chung Station” vs “Tung Chung Crescent”) into the same key.
+ */
 function normBusStopName(s) {
   return String(s || "")
     .replace(/<br\s*\/?>/gi, " ")
@@ -848,7 +852,17 @@ function normBusStopName(s) {
     .toUpperCase()
     // TD embeds bilingual "EN / / Zh" or "EN / EN"
     .replace(/\s*\/+\s*/g, " ")
+    // Strip KMB-style public codes (TC450) — not whole parentheticals
+    .replace(/\(([A-Z]{1,4}\d{2,5}[A-Z]?)\)/gi, " ")
+    .replace(/\b[A-Z]{1,4}\d{2,5}[A-Z]?\b/g, " ")
     .replace(/[()[\],.\-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Softer form (secondary score only) — drops generic terminus words. */
+function normBusStopNameSoft(s) {
+  return normBusStopName(s)
     .replace(/\b(BUS\s*)?(TERMINUS|TERM|STATION|STN|STOP|BT)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -879,21 +893,43 @@ function busStopMatchScore(tdName, planName) {
   const b = normBusStopName(planName);
   if (!a || !b) return 0;
   if (a === b) return 1000;
-  if (a.startsWith(b) || b.startsWith(a)) return 800;
-  if (a.includes(b) || b.includes(a)) return 600;
-  // Token overlap
+  // Prefix only when the shorter is a clear head of the longer (not "TUNG CHUNG" ⊆ everything)
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length <= b.length ? b : a;
+  if (
+    longer.startsWith(shorter) &&
+    (longer.length === shorter.length ||
+      longer[shorter.length] === " " ||
+      longer[shorter.length] === ",")
+  ) {
+    // Penalize very short prefixes that match many stops on a route
+    if (shorter.split(" ").filter((t) => t.length > 1).length <= 1) return 350;
+    return 820 + Math.min(80, shorter.length);
+  }
+  if (a.includes(b) || b.includes(a)) {
+    if (shorter.split(" ").filter((t) => t.length > 1).length <= 1) return 300;
+    return 600;
+  }
+  // Token overlap (require ≥2 meaningful tokens when possible)
   const ta = new Set(a.split(" ").filter((t) => t.length > 2));
   const tb = b.split(" ").filter((t) => t.length > 2);
   if (!ta.size || !tb.length) return 0;
   let hit = 0;
   for (const t of tb) if (ta.has(t)) hit += 1;
   if (hit === 0) return 0;
-  return 200 + Math.round((400 * hit) / Math.max(ta.size, tb.length));
+  const ratio = hit / Math.max(ta.size, tb.length);
+  let sc = 200 + Math.round(500 * ratio);
+  if (hit >= 2) sc += 80;
+  // Soft secondary: same core without STATION/TERMINUS
+  const as = normBusStopNameSoft(tdName);
+  const bs = normBusStopNameSoft(planName);
+  if (as && bs && as === bs && as.length >= 6) sc = Math.max(sc, 780);
+  return sc;
 }
 
 /**
  * Candidate labels for a plan stop (EN preferred — TD pack is English).
- * @param {{ stop_name?: string, name?: string, name_en?: string, name_tc?: string, stop_name_en?: string } | null | undefined} planStop
+ * @param {{ stop_name?: string, name?: string, name_en?: string, name_tc?: string, stop_name_en?: string, nameEn?: string, nameTc?: string } | null | undefined} planStop
  * @returns {string[]}
  */
 function planStopLabelCandidates(planStop) {
@@ -901,10 +937,12 @@ function planStopLabelCandidates(planStop) {
   const out = [];
   for (const k of [
     planStop.name_en,
+    planStop.nameEn,
     planStop.stop_name_en,
     planStop.stop_name,
     planStop.name,
     planStop.name_tc,
+    planStop.nameTc,
   ]) {
     for (const part of expandStopLabelParts(k)) {
       if (!out.includes(part)) out.push(part);
@@ -917,6 +955,7 @@ function planStopLabelCandidates(planStop) {
  * Best 0-based index of plan stop in TD ordered stop list.
  * @param {string[]} tdStops
  * @param {{ stop_name?: string, name?: string, name_en?: string } | null | undefined} planStop
+ * @param {{ minIndex?: number, maxIndex?: number, preferredIndex?: number }} [opts]
  * @returns {{ index: number, score: number } | null}
  */
 function matchTdStopIndexScored(tdStops, planStop, opts = {}) {
@@ -926,6 +965,10 @@ function matchTdStopIndexScored(tdStops, planStop, opts = {}) {
   const minI = opts.minIndex != null ? opts.minIndex : 0;
   const maxI =
     opts.maxIndex != null ? opts.maxIndex : tdStops.length - 1;
+  const pref =
+    opts.preferredIndex != null && Number.isFinite(opts.preferredIndex)
+      ? opts.preferredIndex
+      : null;
   let best = null;
   let bestScore = 0;
   for (let i = Math.max(0, minI); i <= Math.min(tdStops.length - 1, maxI); i++) {
@@ -933,16 +976,27 @@ function matchTdStopIndexScored(tdStops, planStop, opts = {}) {
     const tdParts = expandStopLabelParts(tdStops[i]);
     for (const tdPart of tdParts.length ? tdParts : [tdStops[i]]) {
       for (const name of names) {
-        const sc = busStopMatchScore(tdPart, name);
-        if (sc > bestScore) {
+        let sc = busStopMatchScore(tdPart, name);
+        // Prefer sequential / same-index mapping when scores tie
+        if (pref != null && sc >= 400) {
+          const dist = Math.abs(i - pref);
+          sc += Math.max(0, 40 - dist * 4);
+        }
+        if (
+          sc > bestScore ||
+          (sc === bestScore &&
+            best != null &&
+            pref != null &&
+            Math.abs(i - pref) < Math.abs(best - pref))
+        ) {
           bestScore = sc;
           best = i;
         }
       }
     }
   }
-  // Slightly lower threshold: 400 was too strict for partial EN matches
-  return bestScore >= 400 && best != null ? { index: best, score: bestScore } : null;
+  // 400 was too strict for partial EN; 450 rejects weak 1-token hits
+  return bestScore >= 450 && best != null ? { index: best, score: bestScore } : null;
 }
 
 /**
@@ -988,16 +1042,55 @@ function alignPlanStopsToTd(planStops, tdStops) {
     return { tdIndex: [], anchors: 0, score: 0 };
   }
 
+  // Same length → try 1:1 index map first (operator seq often matches TD RSTOP).
+  // Avoids false “prefix” anchors that shift section steps (e.g. Station vs Crescent).
+  if (planN === tdN) {
+    let idHits = 0;
+    let idScore = 0;
+    /** @type {number[]} */
+    const identity = [];
+    for (let i = 0; i < planN; i++) {
+      const hit = matchTdStopIndexScored(tdStops, planStops[i], {
+        minIndex: i,
+        maxIndex: i,
+        preferredIndex: i,
+      });
+      // Also score i→i directly even if threshold fails (for count)
+      const names = planStopLabelCandidates(planStops[i]);
+      let local = hit?.score || 0;
+      if (!local && names.length) {
+        for (const n of names) {
+          local = Math.max(local, busStopMatchScore(tdStops[i], n));
+        }
+      }
+      identity.push(i);
+      if (local >= 450) {
+        idHits += 1;
+        idScore += local;
+      }
+    }
+    const need = Math.max(3, Math.ceil(planN * 0.45));
+    if (idHits >= need || idHits >= planN - 2) {
+      return { tdIndex: identity, anchors: idHits, score: idScore + 5000 };
+    }
+  }
+
   let anchorScore = 0;
   let anchors = 0;
   // Sequential forward match: each stop must map at/after the previous TD index
   let minI = 0;
   for (let i = 0; i < planN; i++) {
+    // Prefer index proportional to plan progress when lengths differ
+    const pref =
+      planN > 1 && tdN > 1
+        ? Math.round((i / (planN - 1)) * (tdN - 1))
+        : i;
     const hit = matchTdStopIndexScored(tdStops, planStops[i], {
       minIndex: minI,
       maxIndex: tdN - 1,
+      preferredIndex: Math.max(minI, pref),
     });
-    if (hit && hit.score >= 400) {
+    if (hit && hit.score >= 450) {
       raw[i] = hit.index;
       anchors += 1;
       anchorScore += hit.score;
@@ -2284,10 +2377,13 @@ export function estimateBusBoardFare(
   const pts = seq.map((s, i) => ({
     stop_id: s.stopId || s.stop_id || s.id || String(i),
     id: s.stopId || s.stop_id || s.id || String(i),
-    stop_name: s.name || s.stop_name || "",
-    name: s.name || s.stop_name || "",
+    // Prefer English for TD RSTOP match; keep zh as secondary
+    stop_name: s.nameEn || s.name_en || s.name || s.stop_name || "",
+    name: s.nameEn || s.name_en || s.name || s.stop_name || "",
     name_en: s.nameEn || s.name_en || s.stop_name_en || "",
-    name_tc: s.nameTc || s.name_tc || "",
+    nameEn: s.nameEn || s.name_en || s.stop_name_en || "",
+    name_tc: s.nameTc || s.name_tc || s.name || "",
+    nameTc: s.nameTc || s.name_tc || "",
     lon: s.lon,
     lat: s.lat,
     location: { lon: s.lon, lat: s.lat },

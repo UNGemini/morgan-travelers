@@ -19,7 +19,7 @@ export const MTR_LINE_ORDER = {
     "CEN", "ADM", "TST", "JOR", "YMT", "MOK", "PRE", "SSP", "CSW", "LCK",
     "MEF", "LAK", "KWF", "KWH", "TWH", "TSW",
   ],
-  // Spine + LO Wu / Lok Ma Chau (branch ends both listed at north end)
+  // Spine only (branch ends via MTR_LINE_VARIANTS) — kept for travel-dir heuristics
   EAL: [
     "ADM", "EXC", "HUH", "MKK", "KOT", "TAW", "SHT", "FOT", "RAC", "UNI",
     "TAP", "TWO", "FAN", "SHS", "LOW", "LMC",
@@ -30,7 +30,7 @@ export const MTR_LINE_ORDER = {
     "DIH", "KAT", "SUW", "TKW", "HOM", "HUH", "ETS", "AUS", "NAC", "MEF",
     "TWW", "KSR", "YUL", "LOP", "TIS", "SIH", "TUM",
   ],
-  // North Point → LOHAS Park / Tiu Keng Leng branch
+  // North Point → Tseung Kwan O (branch ends via variants: Po Lam / LOHAS)
   TKL: ["NOP", "QUB", "YAT", "TIK", "TKO", "HAH", "POA", "LHP"],
   SIL: ["ADM", "OCP", "WCH", "LET", "SOH"],
   KTL: [
@@ -152,27 +152,117 @@ export function mtrStationLabel(code) {
 }
 
 /**
- * Two travel bounds for a line (O ≈ API UP / toward order end, I ≈ DOWN).
+ * Branch variants (EAL Lo Wu / Lok Ma Chau, TKL Po Lam / LOHAS Park).
+ * Each is a full station sequence for one terminus.
+ * @type {Record<string, Record<string, string[]>>}
+ */
+export const MTR_LINE_VARIANTS = {
+  EAL: {
+    // Admiralty → Lo Wu (skip Lok Ma Chau)
+    LOW: [
+      "ADM", "EXC", "HUH", "MKK", "KOT", "TAW", "SHT", "FOT", "RAC", "UNI",
+      "TAP", "TWO", "FAN", "SHS", "LOW",
+    ],
+    // Admiralty → Lok Ma Chau (skip Lo Wu)
+    LMC: [
+      "ADM", "EXC", "HUH", "MKK", "KOT", "TAW", "SHT", "FOT", "RAC", "UNI",
+      "TAP", "TWO", "FAN", "SHS", "LMC",
+    ],
+  },
+  TKL: {
+    // North Point → Po Lam (via Hang Hau)
+    POA: ["NOP", "QUB", "YAT", "TIK", "TKO", "HAH", "POA"],
+    // North Point → LOHAS Park (branch after Tseung Kwan O)
+    LHP: ["NOP", "QUB", "YAT", "TIK", "TKO", "LHP"],
+  },
+};
+
+/**
+ * Travel directions for a line.
+ * Most lines: 2 bounds (O toward order end, I reverse).
+ * EAL / TKL: 3 directions — two branch termini + reverse to the city end.
+ *
  * @param {string} lineId
- * @returns {Array<{ dest: string, destZh?: string, bound: string, orig?: string, origZh?: string }>}
+ * @returns {Array<{ dest: string, destZh?: string, bound: string, branch?: string, orig?: string, origZh?: string }>}
  */
 export function mtrLineDirections(lineId) {
   const line = String(lineId || "").toUpperCase();
+  const variants = MTR_LINE_VARIANTS[line];
+
+  // ── Branched lines: third direction for the branch terminus ──
+  if (line === "EAL" && variants) {
+    const low = variants.LOW;
+    const lmc = variants.LMC;
+    const south = mtrStationLabel(low[0]); // Admiralty
+    const loWu = mtrStationLabel("LOW");
+    const lmcLab = mtrStationLabel("LMC");
+    return [
+      {
+        bound: "O",
+        branch: "LOW",
+        dest: loWu.en,
+        destZh: loWu.zh,
+        orig: south.en,
+        origZh: south.zh,
+      },
+      {
+        bound: "O",
+        branch: "LMC",
+        dest: lmcLab.en,
+        destZh: lmcLab.zh,
+        orig: south.en,
+        origZh: south.zh,
+      },
+      {
+        bound: "I",
+        branch: "LOW",
+        dest: south.en,
+        destZh: south.zh,
+        orig: loWu.en,
+        origZh: loWu.zh,
+      },
+    ];
+  }
+  if (line === "TKL" && variants) {
+    const poa = variants.POA;
+    const lhp = variants.LHP;
+    const city = mtrStationLabel(poa[0]); // North Point
+    const poLam = mtrStationLabel("POA");
+    const lohas = mtrStationLabel("LHP");
+    return [
+      {
+        bound: "O",
+        branch: "POA",
+        dest: poLam.en,
+        destZh: poLam.zh,
+        orig: city.en,
+        origZh: city.zh,
+      },
+      {
+        bound: "O",
+        branch: "LHP",
+        dest: lohas.en,
+        destZh: lohas.zh,
+        orig: city.en,
+        origZh: city.zh,
+      },
+      {
+        bound: "I",
+        branch: "POA",
+        dest: city.en,
+        destZh: city.zh,
+        orig: poLam.en,
+        origZh: poLam.zh,
+      },
+    ];
+  }
+
   const order = MTR_LINE_ORDER[line];
   if (!order?.length) {
     return [{ dest: line || "—", bound: "line" }];
   }
-  // Prefer meaningful termini (skip LMC as sole "end" when LOW is also listed)
-  let endCode = order[order.length - 1];
-  let startCode = order[0];
-  if (line === "EAL") {
-    // Show LO Wu as primary north terminus (Lok Ma Chau is alternate)
-    endCode = "LOW";
-  }
-  if (line === "TKL") {
-    // Main Po Lam vs LOHAS — Po Lam is classic main terminus
-    endCode = "POA";
-  }
+  const startCode = order[0];
+  const endCode = order[order.length - 1];
   const start = mtrStationLabel(startCode);
   const end = mtrStationLabel(endCode);
   return [
@@ -194,17 +284,56 @@ export function mtrLineDirections(lineId) {
 }
 
 /**
- * Ordered station codes for a line bound.
+ * Ordered station codes for a line bound (+ optional branch).
  * @param {string} lineId
  * @param {string} [bound] O|I|UP|DOWN|line
+ * @param {string | null} [branch] e.g. LOW | LMC | POA | LHP
  * @returns {string[]}
  */
-export function mtrLineCodesInOrder(lineId, bound = "O") {
+export function mtrLineCodesInOrder(lineId, bound = "O", branch = null) {
   const line = String(lineId || "").toUpperCase();
-  const order = MTR_LINE_ORDER[line];
-  if (!order?.length) return [];
   const b = String(bound || "O").toUpperCase();
   const reverse =
     b === "I" || b === "DOWN" || b === "INBOUND" || b === "2";
-  return reverse ? [...order].reverse() : [...order];
+  const br = branch ? String(branch).toUpperCase() : "";
+
+  const variants = MTR_LINE_VARIANTS[line];
+  if (variants) {
+    // Prefer explicit branch; else primary variant (LOW / POA)
+    const primary = line === "EAL" ? "LOW" : line === "TKL" ? "POA" : Object.keys(variants)[0];
+    const key =
+      br && variants[br] ? br : primary;
+    const order = variants[key] || variants[primary];
+    if (order?.length) {
+      return reverse ? [...order].reverse() : [...order];
+    }
+  }
+
+  const order = MTR_LINE_ORDER[line];
+  if (!order?.length) return [];
+  // EAL/TKL fallback: strip the alternate branch terminus
+  let seq = order;
+  if (line === "EAL") {
+    seq = order.filter((c) => c !== "LMC");
+  } else if (line === "TKL") {
+    seq = order.filter((c) => c !== "LHP");
+  }
+  return reverse ? [...seq].reverse() : [...seq];
+}
+
+/**
+ * Resolve which branch path to use when flipping to I from a branch terminus.
+ * @param {string} lineId
+ * @param {string} [fromBranch]
+ * @param {string} [bound]
+ */
+export function mtrResolveBranch(lineId, fromBranch = "", bound = "O") {
+  const line = String(lineId || "").toUpperCase();
+  const variants = MTR_LINE_VARIANTS[line];
+  if (!variants) return null;
+  const br = String(fromBranch || "").toUpperCase();
+  if (br && variants[br]) return br;
+  if (line === "EAL") return "LOW";
+  if (line === "TKL") return "POA";
+  return Object.keys(variants)[0] || null;
 }

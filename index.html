@@ -4,14 +4,24 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0"
     />
-    <meta name="theme-color" content="#000000" />
+    <!-- Edge-to-edge on iOS: map under status/Dynamic Island, sheet under home bar -->
+    <meta name="theme-color" content="#0a0c10" />
+    <meta name="theme-color" content="#0a0c10" media="(prefers-color-scheme: dark)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="MTravelers" />
     <meta
       name="description"
       content="MORGAN Travelers — Hong Kong transit map, GTFS data, and live routing foundation."
     />
     <link rel="icon" href="/siteicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -29,6 +39,16 @@
       <!-- Full-bleed map -->
       <div id="map-stage" class="map-stage">
         <main id="map" role="application" aria-label="Hong Kong map"></main>
+        <!-- Wheels-style route number on map (route detail only) -->
+        <div
+          id="map-route-badge"
+          class="map-route-badge"
+          hidden
+          aria-hidden="true"
+        >
+          <span class="map-route-badge-co" id="map-route-badge-co"></span>
+          <span class="map-route-badge-id" id="map-route-badge-id"></span>
+        </div>
         <div
           id="map-route-loading"
           class="map-route-loading"
@@ -453,61 +473,61 @@
 
       <!-- Panel / drawer: desktop left · mobile bottom sheet -->
       <div id="main-toolbar" class="main-toolbar" data-acrylic>
+        <!-- Grabber + title always first (on top when closed) -->
+        <div class="sheet-chrome" id="sheet-chrome">
+          <button
+            type="button"
+            class="sheet-grabber"
+            id="sheet-grabber"
+            aria-label="Expand or collapse panel"
+            title="Expand or collapse"
+          >
+            <span class="sheet-grabber-bar" aria-hidden="true"></span>
+          </button>
+          <div class="sheet-title-row" id="sheet-title-row">
+            <h2 class="sheet-title">
+              <span id="detail-title">Nearby</span>
+            </h2>
+            <div class="panel-profile" id="map-profile">
+              <button
+                type="button"
+                id="btn-profile"
+                class="panel-profile-btn"
+                data-acrylic
+                title="Profile"
+                aria-label="Profile menu"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                aria-controls="profile-menu"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">person</span>
+              </button>
+              <div
+                id="profile-menu"
+                class="profile-menu"
+                role="menu"
+                hidden
+                aria-label="Profile"
+              >
+                <button type="button" class="profile-menu-item" role="menuitem" id="btn-settings" data-acrylic>
+                  <span class="material-symbols-outlined" aria-hidden="true">settings</span>
+                  Settings
+                </button>
+                <button type="button" class="profile-menu-item" role="menuitem" id="btn-info" data-acrylic>
+                  <span class="material-symbols-outlined" aria-hidden="true">info</span>
+                  About Travelers
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <aside
           id="side-panel"
           class="detail-sidebar"
           aria-label="Travelers panel"
           aria-hidden="false"
         >
-          <!-- Find My–style grabber + title; profile top-right of panel -->
-          <div class="sheet-chrome" id="sheet-chrome">
-            <button
-              type="button"
-              class="sheet-grabber"
-              id="sheet-grabber"
-              aria-label="Expand or collapse panel"
-              title="Expand or collapse"
-            >
-              <span class="sheet-grabber-bar" aria-hidden="true"></span>
-            </button>
-            <div class="sheet-title-row" id="sheet-title-row">
-              <h2 class="sheet-title">
-                <span id="detail-title">Nearby</span>
-              </h2>
-              <div class="panel-profile" id="map-profile">
-                <button
-                  type="button"
-                  id="btn-profile"
-                  class="panel-profile-btn"
-                  data-acrylic
-                  title="Profile"
-                  aria-label="Profile menu"
-                  aria-haspopup="menu"
-                  aria-expanded="false"
-                  aria-controls="profile-menu"
-                >
-                  <span class="material-symbols-outlined" aria-hidden="true">person</span>
-                </button>
-                <div
-                  id="profile-menu"
-                  class="profile-menu"
-                  role="menu"
-                  hidden
-                  aria-label="Profile"
-                >
-                  <button type="button" class="profile-menu-item" role="menuitem" id="btn-settings" data-acrylic>
-                    <span class="material-symbols-outlined" aria-hidden="true">settings</span>
-                    Settings
-                  </button>
-                  <button type="button" class="profile-menu-item" role="menuitem" id="btn-info" data-acrylic>
-                    <span class="material-symbols-outlined" aria-hidden="true">info</span>
-                    About Travelers
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
           <div class="detail-sidebar-body">
             <!-- Page: search + plan list -->
             <div id="sidebar-page-search" class="sidebar-page">
@@ -519,8 +539,6 @@
               hidden
               aria-label="ETA route browser"
             >
-              <p id="eta-route-hint-sidebar" class="eta-route-hint-sidebar" hidden></p>
-
               <div class="eta-route-list-wrap">
                 <ul
                   id="eta-route-list-sidebar"
@@ -1036,58 +1054,63 @@
             </div>
           </div>
         </aside>
+      </div><!-- /#main-toolbar — content sheet only (grabber + list) -->
 
-        <!-- Unified bottom stack: method pills + nav share one liquid gradient -->
-        <div class="panel-bottom-stack" id="panel-bottom-stack">
-          <!-- Method filter pills (none selected = All) — only Nearby list -->
-          <div class="eta-sidebar-bottom-chrome" id="eta-sidebar-bottom-chrome">
-            <div
-              class="eta-method-pills"
-              role="group"
-              aria-label="Traffic methods. None selected shows all."
+      <!--
+        Fixed bottom dock (sibling of content sheet):
+        pills + nav. Outside main-toolbar so transform/backdrop-filter on the
+        sheet never capture position:fixed — nav stays put while the list drags.
+      -->
+      <div class="panel-bottom-stack" id="panel-bottom-stack">
+        <!-- Method filter pills (none selected = All) — only Nearby list -->
+        <div class="eta-sidebar-bottom-chrome" id="eta-sidebar-bottom-chrome">
+          <div
+            class="eta-method-pills"
+            role="group"
+            aria-label="Traffic methods. None selected shows all."
+          >
+            <button
+              type="button"
+              class="eta-method-pill"
+              data-eta-mode="bus"
+              aria-pressed="false"
+              title="Bus"
             >
-              <button
-                type="button"
-                class="eta-method-pill"
-                data-eta-mode="bus"
-                aria-pressed="false"
-                title="Bus"
-              >
-                <span class="material-symbols-outlined" aria-hidden="true">directions_bus</span>
-                <span class="eta-method-pill-label">Bus</span>
-              </button>
-              <button
-                type="button"
-                class="eta-method-pill"
-                data-eta-mode="mtr"
-                aria-pressed="false"
-                title="MTR"
-              >
-                <span class="material-symbols-outlined" aria-hidden="true">subway</span>
-                <span class="eta-method-pill-label">MTR</span>
-              </button>
-              <button
-                type="button"
-                class="eta-method-pill"
-                data-eta-mode="gmb"
-                aria-pressed="false"
-                title="GMB"
-              >
-                <span class="material-symbols-outlined" aria-hidden="true">airport_shuttle</span>
-                <span class="eta-method-pill-label">GMB</span>
-              </button>
-              <button
-                type="button"
-                class="eta-method-pill"
-                data-eta-mode="lrt"
-                aria-pressed="false"
-                title="LRT"
-              >
-                <span class="material-symbols-outlined" aria-hidden="true">tram</span>
-                <span class="eta-method-pill-label">LRT</span>
-              </button>
-            </div>
+              <span class="material-symbols-outlined" aria-hidden="true">directions_bus</span>
+              <span class="eta-method-pill-label">Bus</span>
+            </button>
+            <button
+              type="button"
+              class="eta-method-pill"
+              data-eta-mode="mtr"
+              aria-pressed="false"
+              title="MTR"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">subway</span>
+              <span class="eta-method-pill-label">MTR</span>
+            </button>
+            <button
+              type="button"
+              class="eta-method-pill"
+              data-eta-mode="gmb"
+              aria-pressed="false"
+              title="GMB"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">airport_shuttle</span>
+              <span class="eta-method-pill-label">GMB</span>
+            </button>
+            <button
+              type="button"
+              class="eta-method-pill"
+              data-eta-mode="lrt"
+              aria-pressed="false"
+              title="LRT"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">tram</span>
+              <span class="eta-method-pill-label">LRT</span>
+            </button>
           </div>
+        </div>
 
         <!-- Route detail: Back + Pin replaces app nav -->
         <div
@@ -1196,8 +1219,7 @@
             </div>
           </div>
         </nav>
-        </div><!-- /.panel-bottom-stack -->
-      </div>
+      </div><!-- /.panel-bottom-stack -->
 
       <!-- Legacy IDs kept for JS wiring (hidden) -->
       <button type="button" id="btn-panel-toggle" hidden aria-hidden="true"></button>

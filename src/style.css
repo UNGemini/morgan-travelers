@@ -41,8 +41,14 @@
     100dvh - var(--dock-pad) - var(--safe-top) - var(--dock-pad) - var(--safe-bottom) -
       var(--toolbar-h) - var(--sheet-chrome-h)
   );
-  --sheet-open-h: min(60dvh, calc(100dvh - var(--safe-top) - 80px));
-  --sheet-closed-h: calc(var(--sheet-chrome-h) + var(--toolbar-h) + 8px);
+  /* Content sheet heights (above fixed nav dock on mobile) */
+  --sheet-open-h: min(58dvh, calc(100dvh - var(--safe-top) - 80px));
+  --sheet-closed-h: var(--sheet-chrome-h);
+  --sheet-full-h: 100dvh;
+  /* Fixed bottom dock: nav (+ pills when open). JS may refine. */
+  --nav-dock-h: calc(var(--toolbar-h) + var(--safe-bottom) + 12px);
+  /* Live content height above dock */
+  --sheet-h: var(--sheet-open-h);
   --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
   --glass: rgba(18, 22, 28, 0.78);
   --glass-border: rgba(255, 255, 255, 0.12);
@@ -64,10 +70,17 @@
   padding: 0;
 }
 
-html,
-body {
-  height: 100%;
+/*
+ * Edge-to-edge (Safari Dynamic Island + home indicator):
+ * viewport-fit=cover + fill the visual viewport so black letterbox bars
+ * don’t show above/below the map/drawer.
+ */
+html {
   width: 100%;
+  height: 100%;
+  height: 100dvh;
+  height: -webkit-fill-available;
+  background: #0a0c10;
 }
 
 body {
@@ -75,10 +88,23 @@ body {
   font-size: 16px;
   font-weight: 400;
   color: var(--text-primary);
-  background: var(--bg-root);
+  /* Match map basemap so any residual chrome blends */
+  background: #0a0c10;
   -webkit-font-smoothing: antialiased;
   line-height: 1.6;
   overflow: hidden;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  min-height: 100dvh;
+  min-height: -webkit-fill-available;
+  /* Don’t inset the whole page — map/sheet paint under system UI */
+  padding: 0;
+  margin: 0;
+  position: fixed;
+  inset: 0;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .material-symbols-outlined {
@@ -176,13 +202,18 @@ body.mobile-ui [data-acrylic]::before {
 
 /* ── App shell ──────────────────────────────────────────────── */
 #app {
-  position: relative;
+  position: absolute;
+  inset: 0;
   z-index: 1;
   width: 100%;
   height: 100%;
+  /* Paint under status bar / home indicator; children pad for controls */
+  min-height: 100dvh;
+  min-height: -webkit-fill-available;
+  overflow: hidden;
 }
 
-/* Map + route-draw loading veil */
+/* Map + route-draw loading veil — full bleed under Dynamic Island */
 .map-stage {
   position: absolute;
   inset: 0;
@@ -196,7 +227,8 @@ body.mobile-ui [data-acrylic]::before {
   inset: 0;
   width: 100%;
   height: 100%;
-  background: #050505;
+  /* Slightly lifted near-black so it reads as map, not empty chrome */
+  background: #0a0c10;
   transition: filter 0.45s cubic-bezier(0.22, 1, 0.36, 1);
   will-change: filter;
 }
@@ -299,43 +331,34 @@ body.mobile-ui [data-acrylic]::before {
   }
 }
 
-/* ── MapLibre: tools + © BR (fixed vs dock expand) · scale top-centre ── */
+/* ── MapLibre: tools + © grouped bottom-right · scale top-centre ── */
 
-/* Tools sit above panel; © lives bottom-left so it never falls off-screen */
+/*
+ * Single BR stack: geolocate / zoom / compass, then attribution under them.
+ * MapLibre mounts all bottom-right controls in this container (column flex).
+ */
 .maplibregl-ctrl-bottom-right {
   bottom: var(--map-tools-bottom) !important;
   right: 12px !important;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 10px;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-end !important;
+  gap: 8px !important;
   position: absolute;
+  z-index: 3;
 }
 
 .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group {
   position: relative;
   z-index: 1;
+  margin: 0 !important;
 }
 
-/* OSM / Protomaps © — Wheels-style: tiny, stroked text, no chip */
-.maplibregl-ctrl-bottom-left {
-  bottom: calc(8px + var(--safe-bottom)) !important;
-  left: 8px !important;
-  max-width: min(55vw, 280px);
-  z-index: 2;
-  pointer-events: none;
-}
-@media (min-width: 641px) {
-  .maplibregl-ctrl-bottom-left {
-    left: calc(var(--dock-pad) + min(480px, 34vw) + 12px) !important;
-    bottom: calc(10px + var(--safe-bottom)) !important;
-  }
-}
-.maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib {
+/* Attribution in the same BR group — compact stroked text under tools */
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib {
   position: static !important;
-  max-width: 100%;
-  white-space: normal !important;
-  display: block !important;
+  order: 99; /* after nav/geolocate groups */
+  max-width: min(46vw, 200px);
   margin: 0 !important;
   padding: 0 !important;
   border: none !important;
@@ -347,8 +370,9 @@ body.mobile-ui [data-acrylic]::before {
   font-size: 9px !important;
   line-height: 1.25 !important;
   font-weight: 500 !important;
+  text-align: right !important;
+  white-space: normal !important;
   color: rgba(255, 255, 255, 0.88) !important;
-  /* Soft dark stroke / halo like Wheels map labels */
   text-shadow:
     0 0 2px rgba(0, 0, 0, 0.95),
     0 0 4px rgba(0, 0, 0, 0.75),
@@ -358,23 +382,104 @@ body.mobile-ui [data-acrylic]::before {
     0 -1px 1px rgba(0, 0, 0, 0.7);
   pointer-events: none;
 }
-.maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib a {
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib a {
   color: inherit !important;
   text-decoration: none !important;
   text-shadow: inherit;
+  white-space: normal !important;
 }
-.maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib.maplibregl-compact,
-.maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib.maplibregl-compact-show {
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib * {
+  white-space: normal !important;
+}
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib.maplibregl-compact,
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib.maplibregl-compact-show {
   min-height: 0 !important;
   padding: 0 !important;
 }
-.maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-button {
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-button {
   display: none !important;
 }
-.maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-inner {
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-inner {
   display: inline !important;
   white-space: normal !important;
   font-size: inherit !important;
+}
+
+/* Legacy BL slot empty — keep collapsed if anything still mounts there */
+.maplibregl-ctrl-bottom-left:empty {
+  display: none !important;
+}
+.maplibregl-ctrl-bottom-left {
+  display: none !important;
+}
+
+/*
+ * Wheels-style route number on the map (not in the panel).
+ * Bottom edge matches map tools / OSM © (same --map-tools-bottom).
+ */
+.map-route-badge {
+  position: absolute;
+  z-index: 4;
+  left: 12px;
+  /* Same baseline as .maplibregl-ctrl-bottom-right (© + tools) */
+  bottom: var(--map-tools-bottom, 100px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 0;
+  pointer-events: none;
+  max-width: min(70vw, 320px);
+  line-height: 1;
+}
+.map-route-badge[hidden] {
+  display: none !important;
+}
+.map-route-badge-co {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow:
+    0 0 3px rgba(0, 0, 0, 0.95),
+    0 1px 4px rgba(0, 0, 0, 0.85),
+    0 0 12px rgba(0, 0, 0, 0.5);
+}
+.map-route-badge-id {
+  font-size: clamp(2.6rem, 12vw, 3.6rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 0.92;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  text-shadow:
+    0 0 4px rgba(0, 0, 0, 0.95),
+    0 2px 8px rgba(0, 0, 0, 0.75),
+    0 0 20px rgba(0, 0, 0, 0.45);
+}
+@media (max-width: 640px) {
+  .map-route-badge {
+    left: 14px;
+    /*
+     * Full shell = content (--sheet-h) + dock (--nav-dock-h).
+     * --map-tools-bottom already includes both (set per data-sheet).
+     * Do NOT use sheet-h alone — that buries the number under the panel.
+     */
+    bottom: var(--map-tools-bottom) !important;
+  }
+  .map-route-badge-id {
+    font-size: clamp(2.4rem, 14vw, 3.4rem);
+  }
+}
+@media (min-width: 641px) {
+  .map-route-badge {
+    /*
+     * Beside left panel (same clamp as .main-toolbar desktop width).
+     * Mobile left/bottom untouched — this block is desktop-only.
+     */
+    left: calc(var(--dock-pad) + min(440px, max(300px, 34vw)) + 12px);
+    bottom: calc(14px + var(--safe-bottom));
+  }
 }
 
 /* Scale host — top centre; faded until zoom updates it */
@@ -581,6 +686,13 @@ body.mobile-ui [data-acrylic]::before {
   pointer-events: none;
 }
 
+/* Dock is a sibling of the panel — hide with the panel */
+.app-shell[data-toolbar="closed"] .panel-bottom-stack {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
 /* Legacy chrome row — replaced by .app-bottom-nav */
 .toolbar-inner {
   display: none !important;
@@ -755,8 +867,14 @@ body.mobile-ui [data-acrylic]::before {
 
 /* ETA sidebar panel (visible when data-ui-mode=eta) — Wheels-inspired cards */
 .eta-sidebar-panel {
-  /* List fades under unified bottom stack (pills + nav) */
-  --eta-list-fade-h: calc(var(--toolbar-h, 58px) + 56px);
+  /*
+   * Bottom stack floats over the list. Scroll padding = full chrome height.
+   * List mask: solid through pills, fully gone between pills and nav.
+   */
+  --eta-pills-h: 44px;
+  --eta-bottom-chrome-h: calc(var(--toolbar-h, 58px) + var(--eta-pills-h));
+  /* Cards fully transparent from this offset (top of nav / between pills & nav) */
+  --eta-list-gone-h: calc(var(--toolbar-h, 58px) + 2px);
 
   position: relative;
   display: flex;
@@ -773,8 +891,9 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 /*
- * Panel bottom stack: method pills + app nav in one flex column.
- * One liquid gradient covers both — pills no longer “fly” above the nav.
+ * Bottom dock (pills + nav). Sibling of #main-toolbar so mobile
+ * position:fixed is never captured by the content sheet's transform/filter.
+ * Desktop: absolute over the left panel foot (matches panel geometry).
  */
 .panel-bottom-stack {
   --lg-fill: rgba(40, 42, 48, 0.55);
@@ -782,21 +901,35 @@ body.mobile-ui [data-acrylic]::before {
   --lg-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.18);
   --lg-shadow: 0 8px 28px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
 
-  /* Must be after .detail-sidebar (order:1) — default 0 put nav at the top */
-  order: 2;
-  flex: 0 0 auto;
+  position: absolute;
+  /* Desktop default: align with left panel */
+  left: var(--dock-pad);
+  right: auto;
+  bottom: calc(var(--dock-pad) + var(--safe-bottom));
+  width: clamp(300px, 34vw, 440px);
+  min-width: min(300px, calc(100vw - 2 * var(--dock-pad)));
+  max-width: min(480px, calc(100vw - 2 * var(--dock-pad)));
+  z-index: 6;
+  flex: none;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  position: relative;
-  z-index: 5;
   isolation: isolate;
-  /* Soft top bleed into the list */
-  padding-top: 16px;
+  padding-top: 0;
   margin-top: 0;
+  pointer-events: none;
+  box-sizing: border-box;
+  border-radius: 0 0 var(--panel-radius, 28px) var(--panel-radius, 28px);
+  overflow: hidden;
+}
+.panel-bottom-stack > * {
+  pointer-events: auto;
 }
 
-/* Single gradient behind pills + nav (matches panel glass) */
+/*
+ * Liquid glass: dense over the nav, eases through the pills, soft clear above.
+ * Extra stops keep the ramp smooth (no hard edge).
+ */
 .panel-bottom-stack::before {
   content: "";
   position: absolute;
@@ -808,25 +941,32 @@ body.mobile-ui [data-acrylic]::before {
   pointer-events: none;
   background: linear-gradient(
     to top,
-    rgba(var(--glass-rgb), 0.96) 0%,
-    rgba(var(--glass-rgb), 0.88) 42%,
-    rgba(var(--glass-rgb), 0.45) 72%,
+    rgba(var(--glass-rgb), 0.97) 0%,
+    rgba(var(--glass-rgb), 0.94) 36%,
+    rgba(var(--glass-rgb), 0.82) 52%,
+    rgba(var(--glass-rgb), 0.58) 68%,
+    rgba(var(--glass-rgb), 0.32) 82%,
+    rgba(var(--glass-rgb), 0.12) 92%,
     rgba(var(--glass-rgb), 0) 100%
   );
-  -webkit-backdrop-filter: blur(40px) saturate(1.75);
-  backdrop-filter: blur(40px) saturate(1.75);
+  -webkit-backdrop-filter: blur(28px) saturate(1.55);
+  backdrop-filter: blur(28px) saturate(1.55);
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.35) 22%,
-    #000 55%,
+    rgba(0, 0, 0, 0.15) 14%,
+    rgba(0, 0, 0, 0.45) 32%,
+    rgba(0, 0, 0, 0.8) 52%,
+    #000 70%,
     #000 100%
   );
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.35) 22%,
-    #000 55%,
+    rgba(0, 0, 0, 0.15) 14%,
+    rgba(0, 0, 0, 0.45) 32%,
+    rgba(0, 0, 0, 0.8) 52%,
+    #000 70%,
     #000 100%
   );
 }
@@ -1287,7 +1427,8 @@ body.mobile-ui [data-acrylic]::before {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 4px 12px 16px;
+  /* Clear floating nav (pills hidden on pinned) */
+  padding: 4px 12px calc(var(--toolbar-h, 58px) + 16px);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1386,7 +1527,9 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 .app-shell[data-ui-mode="eta"] .detail-sidebar-body {
-  overflow: hidden; /* ETA list scrolls inside */
+  overflow: hidden; /* ETA list scrolls inside under floating stack */
+  /* List provides its own bottom padding for pills + nav */
+  padding-bottom: 0;
 }
 
 .app-shell[data-ui-mode="route"] .detail-sidebar-body {
@@ -1453,19 +1596,6 @@ body.mobile-ui [data-acrylic]::before {
   border-color: rgba(211, 168, 9, 0.5);
 }
 
-.eta-route-hint-sidebar {
-  margin: 0;
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  letter-spacing: 0.01em;
-  line-height: 1.35;
-}
-
-.eta-route-hint-sidebar[hidden] {
-  display: none !important;
-}
-
 /* Scrollable route cards — fill panel (including under floating toolbar) */
 .eta-route-list-wrap {
   position: relative;
@@ -1480,8 +1610,8 @@ body.mobile-ui [data-acrylic]::before {
 .eta-route-list-sidebar {
   list-style: none;
   margin: 0;
-  /* Scroll under pills + app nav liquid zone */
-  padding: 4px 8px var(--eta-list-fade-h, 140px);
+  /* Scroll under floating pills + nav; last cards clear the solid nav band */
+  padding: 4px 8px var(--eta-bottom-chrome-h, 102px);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1490,24 +1620,27 @@ body.mobile-ui [data-acrylic]::before {
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
-  /* Boundless dissolve into bottom liquid glass (no hard cut) */
+  /*
+   * Long soft dissolve: still solid above the pills, eases through the pills
+   * band, fully gone between pills and nav (no hard cut).
+   */
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - var(--eta-list-fade-h, 140px)),
-    rgba(0, 0, 0, 0.85) calc(100% - var(--eta-list-fade-h, 140px) + 24px),
-    rgba(0, 0, 0, 0.45) calc(100% - 48px),
-    rgba(0, 0, 0, 0.12) calc(100% - 16px),
-    transparent 100%
+    #000 calc(100% - var(--eta-bottom-chrome-h, 102px) - 20px),
+    rgba(0, 0, 0, 0.88) calc(100% - var(--eta-bottom-chrome-h, 102px) + 4px),
+    rgba(0, 0, 0, 0.55) calc(100% - var(--eta-list-gone-h, 60px) - 18px),
+    rgba(0, 0, 0, 0.22) calc(100% - var(--eta-list-gone-h, 60px) - 4px),
+    transparent calc(100% - var(--eta-list-gone-h, 60px) + 4px)
   );
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - var(--eta-list-fade-h, 140px)),
-    rgba(0, 0, 0, 0.85) calc(100% - var(--eta-list-fade-h, 140px) + 24px),
-    rgba(0, 0, 0, 0.45) calc(100% - 48px),
-    rgba(0, 0, 0, 0.12) calc(100% - 16px),
-    transparent 100%
+    #000 calc(100% - var(--eta-bottom-chrome-h, 102px) - 20px),
+    rgba(0, 0, 0, 0.88) calc(100% - var(--eta-bottom-chrome-h, 102px) + 4px),
+    rgba(0, 0, 0, 0.55) calc(100% - var(--eta-list-gone-h, 60px) - 18px),
+    rgba(0, 0, 0, 0.22) calc(100% - var(--eta-list-gone-h, 60px) - 4px),
+    transparent calc(100% - var(--eta-list-gone-h, 60px) + 4px)
   );
 }
 
@@ -1595,6 +1728,9 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 /* ── Wheels-style route detail page ── */
+#sidebar-page-eta-route .trip-detail-head:empty {
+  display: none;
+}
 #sidebar-page-eta-route .trip-detail-head {
   flex-shrink: 0;
   border-bottom: none;
@@ -1737,18 +1873,24 @@ body.mobile-ui [data-acrylic]::before {
 
 .wheels-eta-slots {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  justify-content: center;
+  align-items: flex-start;
   gap: 8px 28px;
   margin-top: 18px;
   padding-top: 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .wheels-eta-slot {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
+  text-align: center;
   gap: 2px;
-  min-width: 4.2rem;
+  min-width: 3.6rem;
+  flex: 0 0 auto;
   position: relative;
 }
 
@@ -1773,12 +1915,25 @@ body.mobile-ui [data-acrylic]::before {
   font-size: 1.6rem;
 }
 
+.wheels-eta-slot.is-outside-service .wheels-eta-wait {
+  opacity: 0.55;
+}
+
+.wheels-eta-slot.is-outside-service .wheels-eta-clock {
+  opacity: 0.75;
+  font-size: 0.68rem;
+  white-space: normal;
+  text-align: center;
+  max-width: 7.5rem;
+}
+
 .wheels-eta-clock {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.82);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
 /*
@@ -1950,15 +2105,20 @@ body.mobile-ui [data-acrylic]::before {
   background: rgba(255, 255, 255, 0.88);
 }
 
-/* Full route expand + stop timeline */
+/*
+ * “Full route” row:
+ *  · Mobile: tappable toggle — collapses big ETA so half-sheet can show stops
+ *  · Desktop: always visible section label (arrow hidden; not a control)
+ */
 .wheels-full-route-toggle {
   appearance: none;
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
-  margin: 4px 0 0;
-  padding: 8px 6px;
+  margin: 2px 0 0;
+  padding: 12px 6px;
+  min-height: 44px; /* keep tappable after larger ETA margins */
   border: none;
   background: transparent;
   color: var(--text-secondary);
@@ -1967,6 +2127,9 @@ body.mobile-ui [data-acrylic]::before {
   font-weight: 650;
   cursor: pointer;
   text-align: left;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
 }
 
 .wheels-full-route-toggle:hover {
@@ -1984,19 +2147,108 @@ body.mobile-ui [data-acrylic]::before {
   color: var(--text-muted);
 }
 
+/* Hide big ETA card when “full route” mode is on (stops stay visible).
+ * Keep Opposite so users can flip direction while browsing the full list. */
+.wheels-route-detail.is-eta-collapsed .wheels-eta-card {
+  display: none !important;
+}
+.wheels-route-detail.is-eta-collapsed .wheels-dir-switch {
+  display: inline-flex !important;
+}
+
 .wheels-stop-panel {
   flex: 1 1 auto;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 0 2px 16px;
+  /* Clear floating Back + Pin chrome */
+  padding: 0 2px calc(var(--toolbar-h, 58px) + 16px);
   overscroll-behavior: contain;
 }
 
-.wheels-stop-panel.is-collapsed,
-.wheels-route-detail.is-stops-collapsed .wheels-stop-panel {
-  display: none;
+/* Mobile route detail */
+@media (max-width: 640px) {
+  #sidebar-page-eta-route {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+  }
+
+  .wheels-full-route-toggle {
+    display: flex;
+  }
+
+  #sidebar-page-eta-route .trip-detail-head {
+    padding: 0 12px 2px;
+  }
+
+  /* Larger ETA card again (half sheet still usable via Full route toggle) */
+  .wheels-eta-card {
+    padding: 16px 16px 16px;
+    border-radius: 18px;
+    margin-bottom: 4px;
+  }
+
+  .wheels-eta-dest {
+    font-size: 1.02rem;
+  }
+
+  .wheels-eta-board {
+    margin-top: 6px;
+    font-size: 0.8rem;
+  }
+
+  .wheels-eta-slots {
+    margin-top: 16px;
+    gap: 8px 20px;
+  }
+
+  .wheels-eta-wait {
+    font-size: 1.95rem;
+  }
+
+  .wheels-eta-clock {
+    font-size: 0.7rem;
+  }
+
+  .wheels-route-detail-fixed {
+    gap: 8px;
+    padding-bottom: 2px;
+    flex-shrink: 0;
+  }
+
+  .wheels-stop-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /* When ETA is collapsed, list fills half drawer */
+  .wheels-route-detail.is-eta-collapsed .wheels-stop-panel {
+    min-height: min(36dvh, 260px);
+  }
+}
+
+@media (min-width: 641px) {
+  /* Desktop: “Full route” + stop count as a static section label — no expand arrow */
+  .wheels-full-route-toggle {
+    display: flex !important;
+    pointer-events: none !important;
+    cursor: default;
+    min-height: 0;
+    padding: 8px 6px 6px;
+    color: var(--text-secondary);
+  }
+  .wheels-full-route-toggle:hover {
+    color: var(--text-secondary);
+  }
+  .wheels-full-route-toggle .material-symbols-outlined {
+    display: none !important;
+  }
+  /* Desktop never collapses ETA via this control */
+  .wheels-route-detail.is-eta-collapsed .wheels-eta-card {
+    display: block !important;
+  }
 }
 
 /* Full-route list reuses trip-detail .plan-timeline.plan-route-line */
@@ -2304,6 +2556,17 @@ body.mobile-ui [data-acrylic]::before {
   color: rgba(192, 174, 252, 0.85);
 }
 
+.eta-card-eta.is-outside-service {
+  position: relative;
+  padding-bottom: 14px;
+  min-width: 3.6rem;
+}
+
+.eta-card-eta-badge.is-outside {
+  color: rgba(255, 255, 255, 0.45);
+  letter-spacing: 0.04em;
+}
+
 
 
 /* Legacy small dots (pinned page still uses .eta-dir-dot) */
@@ -2506,7 +2769,8 @@ body.mobile-ui [data-acrylic]::before {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 4px 0 12px;
+  /* Clear floating app nav (stack is absolute over the panel) */
+  padding: 4px 0 calc(var(--toolbar-h, 58px) + 12px);
   -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
@@ -4857,6 +5121,20 @@ body.contrib-submitting .bg-orb {
   margin: 0;
 }
 
+/* Circular multi-visit (e.g. S64 airport loop): 1/2, 2/2 */
+.rt-stop-visit {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.1);
+  vertical-align: middle;
+}
+
 .rt-stop-name.rt-stop-passby {
   font-weight: 450;
   color: var(--text-secondary);
@@ -5074,6 +5352,7 @@ body.contrib-submitting .bg-orb {
   touch-action: none;
   cursor: grab;
 }
+/* Desktop overrides in min-width:641px (no grabber / tighter top) */
 .sheet-grabber {
   display: flex;
   justify-content: center;
@@ -5476,6 +5755,19 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     border-radius: var(--panel-radius, 28px);
   }
 
+  /* Sibling dock: same footprint as panel foot (overlays list) */
+  .panel-bottom-stack {
+    position: absolute;
+    left: var(--dock-pad);
+    right: auto;
+    bottom: calc(var(--dock-pad) + var(--safe-bottom));
+    width: clamp(300px, 34vw, 440px);
+    min-width: min(300px, calc(100vw - 2 * var(--dock-pad)));
+    max-width: min(480px, calc(100vw - 2 * var(--dock-pad)));
+    z-index: 6;
+    border-radius: 0 0 var(--panel-radius, 28px) var(--panel-radius, 28px);
+  }
+
   .app-shell[data-detail="open"] .main-toolbar,
   .app-shell[data-sheet="open"] .main-toolbar,
   .app-shell[data-sheet="closed"] .main-toolbar {
@@ -5505,66 +5797,173 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     overflow: auto;
   }
 
+  /* Desktop: no grabber; tighter top chrome so title isn’t double-padded */
   .sheet-grabber {
-    display: none; /* desktop: no collapse snap */
+    display: none !important;
+  }
+  .sheet-chrome {
+    padding: 12px 16px 8px !important;
+    touch-action: auto;
+    cursor: default;
+  }
+  .sheet-title-row {
+    min-height: 32px;
+    padding: 0 2px 0 !important;
+  }
+  .sheet-title {
+    font-size: 1.1rem;
   }
 
   .maplibregl-ctrl-bottom-right {
     right: 12px !important;
-    bottom: calc(12px + var(--safe-bottom)) !important;
+    bottom: calc(14px + var(--safe-bottom)) !important;
   }
 }
 
-/* ── Mobile: bottom drawer, binary snap ─────────────────────── */
+/*
+ * Mobile drawer model (one continuous glass shell):
+ *  · Sheet pins to viewport bottom and grows upward (height = content + dock)
+ *  · padding-bottom reserves the dock band so list never sits under nav
+ *  · Fixed dock is a transparent control layer over that band — no second card
+ *  · Finger drag only changes content height; nav stays put at the bottom
+ *  · --nav-dock-h / --sheet-h set in px by JS from real measurements
+ */
 @media (max-width: 640px) {
   :root {
     --dock-pad: 0px;
-    --map-tools-bottom: calc(var(--sheet-closed-h) + var(--safe-bottom) + 16px);
+    /* Fallbacks until JS measures (nav includes safe-area padding already) */
+    --nav-dock-h: calc(var(--toolbar-h) + env(safe-area-inset-bottom, 0px) + 8px);
+    --sheet-h: var(--sheet-chrome-h);
+    --map-tools-bottom: calc(var(--nav-dock-h) + var(--sheet-chrome-h) + 12px);
   }
 
+  /*
+   * One boundless shell: bottom edge is always the home indicator.
+   * Height = content (--sheet-h) + dock band. No gap, no second panel.
+   */
   .main-toolbar {
-    left: 0;
-    right: 0;
+    left: 0 !important;
+    right: 0 !important;
     width: 100% !important;
     min-width: 100% !important;
     max-width: 100% !important;
-    /* Phone sheet: rounded top, square bottom edge to home indicator */
     border-radius: var(--panel-radius, 28px) var(--panel-radius, 28px) 0 0;
-    bottom: 0;
-    top: auto;
-    max-height: none;
-    transition: height 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+    top: auto !important;
+    bottom: 0 !important;
+    height: calc(var(--sheet-h) + var(--nav-dock-h));
+    max-height: calc(var(--sheet-h) + var(--nav-dock-h));
+    padding-bottom: var(--nav-dock-h);
+    display: flex;
+    flex-direction: column;
+    transform: none !important;
+    will-change: height;
+    overflow: hidden;
+    /* Shared glass with the dock overlay — one surface */
+    background: rgba(var(--glass-rgb), 0.94);
+    border: none;
+    border-bottom: none;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    transition: height 0.32s cubic-bezier(0.32, 0.72, 0, 1);
     box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.45);
   }
+  .main-toolbar.is-sheet-dragging {
+    transition: none !important;
+    /* --sheet-drag-h is content-only; shell still includes dock band */
+    height: calc(var(--sheet-drag-h) + var(--nav-dock-h)) !important;
+    max-height: calc(var(--sheet-drag-h) + var(--nav-dock-h)) !important;
+  }
 
-  /* Open ≈ 60vh */
+  .app-shell[data-detail="open"] .main-toolbar,
+  .app-shell[data-detail="closed"] .main-toolbar,
   .app-shell[data-sheet="open"] .main-toolbar,
-  .app-shell[data-detail="open"] .main-toolbar {
-    height: var(--sheet-open-h);
-    max-height: var(--sheet-open-h);
-  }
-
-  /* Closed = grabber + title + nav only */
   .app-shell[data-sheet="closed"] .main-toolbar,
-  .app-shell[data-detail="closed"] .main-toolbar {
-    height: calc(var(--sheet-closed-h) + var(--safe-bottom));
-    max-height: calc(var(--sheet-closed-h) + var(--safe-bottom));
+  .app-shell[data-sheet="full"] .main-toolbar {
+    top: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    height: calc(var(--sheet-h) + var(--nav-dock-h));
+    max-height: calc(var(--sheet-h) + var(--nav-dock-h));
+    padding-bottom: var(--nav-dock-h);
+    transform: none !important;
   }
 
-  .app-shell[data-sheet="closed"] .detail-sidebar-body,
-  .app-shell[data-detail="closed"] .detail-sidebar-body {
-    display: none;
+  /* Content height snaps (chrome+list only). Fallbacks; JS sets px. */
+  .app-shell[data-sheet="closed"] {
+    --sheet-h: var(--sheet-chrome-h);
+  }
+  .app-shell[data-sheet="open"] {
+    --sheet-h: max(120px, calc(var(--sheet-open-h) - var(--nav-dock-h)));
+  }
+  .app-shell[data-sheet="full"] {
+    --sheet-h: calc(100dvh - var(--nav-dock-h));
   }
 
-  .app-shell[data-sheet="open"] .detail-sidebar-body,
-  .app-shell[data-detail="open"] .detail-sidebar-body {
-    display: flex;
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow: auto;
+  /* Grabber / title — drag handle for content sheet */
+  .sheet-chrome {
+    order: 0;
+    flex: 0 0 auto;
+    z-index: 4;
+    display: flex !important;
+    position: relative;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    cursor: grab;
+    /* Keep profile clear of list / dock below */
+    padding: 6px 16px 12px;
+  }
+  .sheet-chrome:active {
+    cursor: grabbing;
+  }
+  .sheet-grabber,
+  .sheet-title-row {
+    touch-action: none;
+  }
+  .sheet-grabber-bar {
+    background: rgba(255, 255, 255, 0.38);
+  }
+  .sheet-title-row {
+    min-height: 40px;
+    padding: 2px 2px 6px 0;
+    gap: 12px;
+  }
+  /* Profile sits in title row; give it room vs search on the right stack */
+  .panel-profile {
+    margin-left: auto;
+    margin-right: 2px;
+    align-self: center;
+  }
+  .panel-profile-btn {
+    width: 38px;
+    height: 38px;
+  }
+
+  /*
+   * Closed peeka-boo: profile was stacked almost on top of nav search.
+   * Extra chrome padding + taller closed snap (JS also measures real chrome).
+   */
+  .app-shell[data-sheet="closed"] .sheet-chrome,
+  .app-shell[data-detail="closed"] .sheet-chrome {
+    padding: 8px 16px 18px;
+  }
+  .app-shell[data-sheet="closed"] .sheet-title-row,
+  .app-shell[data-detail="closed"] .sheet-title-row {
+    min-height: 42px;
+    padding-bottom: 8px;
+  }
+  .app-shell[data-sheet="closed"] .panel-profile,
+  .app-shell[data-detail="closed"] .panel-profile {
+    margin-bottom: 2px;
+  }
+  .app-shell[data-sheet="closed"] {
+    --sheet-chrome-h: 72px;
+    --sheet-h: 72px;
   }
 
   .detail-sidebar {
+    order: 1;
     flex: 1 1 auto;
     min-height: 0;
     display: flex !important;
@@ -5574,11 +5973,183 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     pointer-events: auto !important;
   }
 
-  .app-shell[data-sheet="open"] {
-    --map-tools-bottom: calc(var(--sheet-open-h) + 12px);
+  /*
+   * Fixed dock: transparent control layer over the sheet’s bottom band.
+   * Not a second card — no solid fill, no own radius/shadow.
+   */
+  .panel-bottom-stack {
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    top: auto !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+    z-index: 8;
+    margin: 0;
+    border-radius: 0 !important;
+    overflow: visible;
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
-  .app-shell[data-sheet="closed"] {
-    --map-tools-bottom: calc(var(--sheet-closed-h) + var(--safe-bottom) + 16px);
+  /* Soft liquid dissolve only — no opaque slab that reads as a 2nd panel */
+  .panel-bottom-stack::before {
+    opacity: 1;
+    background: linear-gradient(
+      to top,
+      rgba(var(--glass-rgb), 0.55) 0%,
+      rgba(var(--glass-rgb), 0.28) 42%,
+      rgba(var(--glass-rgb), 0.08) 72%,
+      rgba(var(--glass-rgb), 0) 100%
+    );
+    -webkit-backdrop-filter: blur(18px) saturate(1.4);
+    backdrop-filter: blur(18px) saturate(1.4);
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgba(0, 0, 0, 0.35) 28%,
+      #000 70%,
+      #000 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgba(0, 0, 0, 0.35) 28%,
+      #000 70%,
+      #000 100%
+    );
+  }
+
+  /*
+   * Soft list clip under the dock (keeps fixed-nav / boundless shell behaviour):
+   *  · Open/full: no sheet padding — list scrolls under pills + nav
+   *  · List padding + mask dissolve into the dock band (no hard cut)
+   *  · Closed: keep padding-bottom so chrome + nav stay one peeka-boo shell
+   */
+  .app-shell[data-sheet="open"] .main-toolbar,
+  .app-shell[data-sheet="full"] .main-toolbar,
+  .app-shell[data-detail="open"] .main-toolbar {
+    padding-bottom: 0;
+  }
+  .app-shell[data-sheet="closed"] .main-toolbar,
+  .app-shell[data-detail="closed"] .main-toolbar {
+    padding-bottom: var(--nav-dock-h);
+  }
+
+  .eta-sidebar-panel {
+    /* Full measured dock (pills when visible + nav + safe-area) */
+    --eta-pills-h: 44px;
+    --eta-bottom-chrome-h: var(--nav-dock-h);
+    /* Solid fade-out through the nav band */
+    --eta-list-gone-h: max(
+      52px,
+      calc(var(--toolbar-h, 58px) + env(safe-area-inset-bottom, 0px) * 0.55)
+    );
+  }
+
+  .eta-route-list,
+  #eta-route-list-sidebar {
+    /* Clearance so last card can scroll past the solid nav */
+    padding-bottom: calc(var(--nav-dock-h) + 12px) !important;
+    /*
+     * Long soft dissolve: solid above the dock, eases through pills,
+     * fully gone into the nav band (same language as desktop overlay list).
+     */
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      #000 0%,
+      #000 calc(100% - var(--eta-bottom-chrome-h, var(--nav-dock-h)) - 28px),
+      rgba(0, 0, 0, 0.92) calc(100% - var(--eta-bottom-chrome-h, var(--nav-dock-h)) - 8px),
+      rgba(0, 0, 0, 0.62) calc(100% - var(--eta-list-gone-h, 60px) - 22px),
+      rgba(0, 0, 0, 0.28) calc(100% - var(--eta-list-gone-h, 60px) - 6px),
+      transparent calc(100% - var(--eta-list-gone-h, 60px) + 6px)
+    ) !important;
+    mask-image: linear-gradient(
+      to bottom,
+      #000 0%,
+      #000 calc(100% - var(--eta-bottom-chrome-h, var(--nav-dock-h)) - 28px),
+      rgba(0, 0, 0, 0.92) calc(100% - var(--eta-bottom-chrome-h, var(--nav-dock-h)) - 8px),
+      rgba(0, 0, 0, 0.62) calc(100% - var(--eta-list-gone-h, 60px) - 22px),
+      rgba(0, 0, 0, 0.28) calc(100% - var(--eta-list-gone-h, 60px) - 6px),
+      transparent calc(100% - var(--eta-list-gone-h, 60px) + 6px)
+    ) !important;
+  }
+
+  /* Route-detail stop list: soft clip under Back / Pin dock */
+  .wheels-stop-panel {
+    padding-bottom: calc(var(--nav-dock-h) + 10px) !important;
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      #000 0%,
+      #000 calc(100% - var(--nav-dock-h) - 24px),
+      rgba(0, 0, 0, 0.75) calc(100% - var(--nav-dock-h) + 2px),
+      rgba(0, 0, 0, 0.3) calc(100% - 28px),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      #000 0%,
+      #000 calc(100% - var(--nav-dock-h) - 24px),
+      rgba(0, 0, 0, 0.75) calc(100% - var(--nav-dock-h) + 2px),
+      rgba(0, 0, 0, 0.3) calc(100% - 28px),
+      transparent 100%
+    );
+  }
+
+  /* Closed: only grabber + title in content; hide list + filters */
+  .app-shell[data-sheet="closed"] .detail-sidebar-body,
+  .app-shell[data-detail="closed"] .detail-sidebar-body {
+    display: none !important;
+  }
+
+  .app-shell[data-sheet="closed"] #eta-sidebar-bottom-chrome,
+  .app-shell[data-detail="closed"] #eta-sidebar-bottom-chrome {
+    display: none !important;
+  }
+
+  .app-shell[data-sheet="closed"] .detail-sidebar,
+  .app-shell[data-detail="closed"] .detail-sidebar {
+    flex: 0 0 auto;
+    min-height: 0;
+  }
+
+  /* Open + full: list fills content sheet */
+  .app-shell[data-sheet="open"] .detail-sidebar-body,
+  .app-shell[data-sheet="full"] .detail-sidebar-body,
+  .app-shell[data-detail="open"] .detail-sidebar-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .app-shell[data-sheet="full"] .main-toolbar:not(.is-sheet-dragging) {
+    border-radius: 16px 16px 0 0;
+  }
+  .app-shell[data-sheet="full"] .sheet-chrome {
+    padding-top: max(6px, var(--safe-top));
+  }
+
+  /* Map tools just above whole shell (content + dock) */
+  .app-shell[data-sheet="open"] {
+    --map-tools-bottom: calc(var(--nav-dock-h) + var(--sheet-h) + 10px);
+  }
+  .app-shell[data-sheet="full"] {
+    --map-tools-bottom: calc(var(--nav-dock-h) + 72px);
+  }
+  .app-shell[data-sheet="closed"],
+  .app-shell[data-detail="closed"] {
+    --map-tools-bottom: calc(var(--nav-dock-h) + var(--sheet-chrome-h) + 10px);
+  }
+
+  /* Stable nav padding always (safe-area once — included in measured dock h) */
+  .app-bottom-nav {
+    padding: 4px 10px calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+    background: transparent !important;
   }
 
   .maplibregl-ctrl-bottom-right {

@@ -4,8 +4,9 @@
   "description": "Hong Kong transit trip planner and live bus tracking PWA",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#000000",
-  "theme_color": "#000000",
+  "display_override": ["standalone", "fullscreen", "browser"],
+  "background_color": "#0a0c10",
+  "theme_color": "#0a0c10",
   "lang": "en",
   "orientation": "any",
   "icons": [
