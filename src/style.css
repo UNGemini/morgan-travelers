@@ -1015,7 +1015,8 @@ body.mobile-ui [data-acrylic]::before {
   gap: 10px;
   width: 100%;
   box-sizing: border-box;
-  padding: 4px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+  /* Only system home-bar inset — no extra 8px that floats controls too high */
+  padding: 6px 10px max(4px, env(safe-area-inset-bottom, 0px));
   margin: 0;
   border: none;
   background: transparent;
@@ -5402,7 +5403,8 @@ body.contrib-submitting .bg-orb {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 4px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+  /* Safe-area only — glass paints under home bar; extra padding lifted controls */
+  padding: 6px 10px max(4px, env(safe-area-inset-bottom, 0px));
   border-top: none;
   background: transparent;
   min-height: 0;
@@ -6030,8 +6032,8 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   }
 
   /*
-   * Home-indicator underlay (Safari/PWA only paints inset on real devices).
-   * Sits under the dock so any short sheet measure never shows bare #000.
+   * Home-indicator underlay — only the system inset (no +12px buffer that
+   * made the foot feel taller than the controls).
    */
   .app-shell::after {
     content: "";
@@ -6039,7 +6041,7 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     left: 0;
     right: 0;
     bottom: 0;
-    height: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    height: env(safe-area-inset-bottom, 0px);
     background: rgb(var(--glass-rgb));
     z-index: 6;
     pointer-events: none;
@@ -6048,6 +6050,14 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   /* Sheet glass always reaches the physical bottom of the screen */
   .main-toolbar {
     background: rgba(var(--glass-rgb), 0.96) !important;
+  }
+
+  /* Match tighter home-bar padding on mobile (override base if needed) */
+  .app-bottom-nav {
+    padding: 6px 10px max(4px, env(safe-area-inset-bottom, 0px)) !important;
+  }
+  #eta-route-detail-chrome {
+    padding: 6px 10px max(4px, env(safe-area-inset-bottom, 0px)) !important;
   }
 
   /*
@@ -6172,9 +6182,9 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     --map-tools-bottom: calc(var(--nav-dock-h) + var(--sheet-chrome-h) + 10px);
   }
 
-  /* Stable nav padding always (safe-area once — included in measured dock h) */
+  /* Nav / Back+Pin: system home-bar inset only (no extra 8px lift) */
   .app-bottom-nav {
-    padding: 4px 10px calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+    padding: 6px 10px max(4px, env(safe-area-inset-bottom, 0px)) !important;
     background: transparent !important;
   }
 
