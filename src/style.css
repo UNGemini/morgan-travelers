@@ -37,6 +37,15 @@
   --dock-pad: 12px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /*
+   * Home-indicator band for *controls* (not glass fill).
+   * Full env(safe-area) as padding lifts tabs too high vs native apps;
+   * keep a small air gap above the pill, glass still paints to the edge.
+   */
+  --safe-bottom-content: max(
+    2px,
+    calc(env(safe-area-inset-bottom, 0px) - 20px)
+  );
   --detail-max-h: calc(
     100dvh - var(--dock-pad) - var(--safe-top) - var(--dock-pad) - var(--safe-bottom) -
       var(--toolbar-h) - var(--sheet-chrome-h)
@@ -46,7 +55,7 @@
   --sheet-closed-h: var(--sheet-chrome-h);
   --sheet-full-h: 100dvh;
   /* Fixed bottom dock: nav (+ pills when open). JS may refine. */
-  --nav-dock-h: calc(var(--toolbar-h) + var(--safe-bottom) + 12px);
+  --nav-dock-h: calc(var(--toolbar-h) + var(--safe-bottom-content) + 8px);
   /* Live content height above dock */
   --sheet-h: var(--sheet-open-h);
   --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
@@ -1031,8 +1040,8 @@ body.mobile-ui [data-acrylic]::before {
   gap: 10px;
   width: 100%;
   box-sizing: border-box;
-  /* Only system home-bar inset — no extra 8px that floats controls too high */
-  padding: 6px 10px max(4px, env(safe-area-inset-bottom, 0px));
+  /* Sit low in home-bar band; glass stack fills the rest */
+  padding: 4px 10px var(--safe-bottom-content);
   margin: 0;
   border: none;
   background: transparent;
@@ -5419,8 +5428,8 @@ body.contrib-submitting .bg-orb {
   display: flex;
   align-items: center;
   gap: 10px;
-  /* Safe-area only — glass paints under home bar; extra padding lifted controls */
-  padding: 6px 10px max(4px, env(safe-area-inset-bottom, 0px));
+  /* Low in the home-bar band (not full safe-area — that floats tabs) */
+  padding: 4px 10px var(--safe-bottom-content);
   border-top: none;
   background: transparent;
   min-height: 0;
@@ -5852,8 +5861,8 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
 @media (max-width: 640px) {
   :root {
     --dock-pad: 0px;
-    /* Fallbacks until JS measures (nav includes safe-area padding already) */
-    --nav-dock-h: calc(var(--toolbar-h) + env(safe-area-inset-bottom, 0px) + 8px);
+    /* Fallbacks until JS measures (nav includes reduced content inset) */
+    --nav-dock-h: calc(var(--toolbar-h) + var(--safe-bottom-content) + 6px);
     --sheet-h: var(--sheet-chrome-h);
     --map-tools-bottom: calc(var(--nav-dock-h) + var(--sheet-chrome-h) + 12px);
   }
@@ -6069,14 +6078,14 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     background: rgba(var(--glass-rgb), 0.96) !important;
   }
 
-  /* Match tighter home-bar padding on mobile (override base if needed) */
+  /* Controls sit low; full safe-area is glass only (stack + ::after) */
   .app-bottom-nav {
-    padding: 6px 10px max(4px, constant(safe-area-inset-bottom)) !important;
-    padding: 6px 10px max(4px, env(safe-area-inset-bottom, 0px)) !important;
+    padding: 4px 10px max(2px, calc(constant(safe-area-inset-bottom) - 20px)) !important;
+    padding: 4px 10px var(--safe-bottom-content) !important;
   }
   #eta-route-detail-chrome {
-    padding: 6px 10px max(4px, constant(safe-area-inset-bottom)) !important;
-    padding: 6px 10px max(4px, env(safe-area-inset-bottom, 0px)) !important;
+    padding: 4px 10px max(2px, calc(constant(safe-area-inset-bottom) - 20px)) !important;
+    padding: 4px 10px var(--safe-bottom-content) !important;
   }
 
   /*
@@ -6201,10 +6210,10 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     --map-tools-bottom: calc(var(--nav-dock-h) + var(--sheet-chrome-h) + 10px);
   }
 
-  /* Nav / Back+Pin: system home-bar inset only (no extra 8px lift) */
+  /* Nav / Back+Pin: reduced home-bar content inset (native-app sit height) */
   .app-bottom-nav {
-    padding: 6px 10px max(4px, constant(safe-area-inset-bottom)) !important;
-    padding: 6px 10px max(4px, env(safe-area-inset-bottom, 0px)) !important;
+    padding: 4px 10px max(2px, calc(constant(safe-area-inset-bottom) - 20px)) !important;
+    padding: 4px 10px var(--safe-bottom-content) !important;
     background: transparent !important;
   }
 
@@ -6241,11 +6250,12 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
 
   html.pwa .app-bottom-nav,
   html.pwa #eta-route-detail-chrome {
-    padding-top: 6px !important;
+    padding-top: 4px !important;
     padding-left: 10px !important;
     padding-right: 10px !important;
-    padding-bottom: max(6px, constant(safe-area-inset-bottom)) !important;
-    padding-bottom: max(6px, env(safe-area-inset-bottom, 0px)) !important;
+    /* Same reduced inset as Safari — full safe-area was floating the tabs */
+    padding-bottom: max(2px, calc(constant(safe-area-inset-bottom) - 20px)) !important;
+    padding-bottom: var(--safe-bottom-content) !important;
   }
 
   html.pwa .app-shell::after {
