@@ -12145,8 +12145,49 @@ loadManifest().catch((err) => {
 // Dev + COEP require-corp: a SW can break large graph fetches.
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {
-      /* optional */
+    const swUrl = `${import.meta.env.BASE_URL}sw.js`;
+    navigator.serviceWorker
+      .register(swUrl)
+      .then((reg) => {
+        // Check for updates on each launch (standalone often stays warm)
+        try {
+          reg.update();
+        } catch {
+          /* ignore */
+        }
+        // New worker installed while an old one controls the page
+        reg.addEventListener("updatefound", () => {
+          const nw = reg.installing;
+          if (!nw) return;
+          nw.addEventListener("statechange", () => {
+            if (
+              nw.state === "installed" &&
+              navigator.serviceWorker.controller
+            ) {
+              // Activate immediately — skipWaiting is in sw.js install
+              try {
+                reg.waiting?.postMessage?.({ type: "SKIP_WAITING" });
+              } catch {
+                /* ignore */
+              }
+            }
+          });
+        });
+      })
+      .catch(() => {
+        /* optional */
+      });
+
+    // When a new SW takes control, reload once so HTML/CSS/JS match
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        window.location.reload();
+      } catch {
+        /* ignore */
+      }
     });
   });
 } else if ("serviceWorker" in navigator) {
