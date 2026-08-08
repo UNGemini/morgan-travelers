@@ -111,28 +111,19 @@ body {
 }
 
 /*
- * Installed PWA / home-screen (iOS): 100dvh often overshoots the visual frame.
- * Prefer -webkit-fill-available; JS sets --vv-h after layout for pixel-perfect fit.
+ * Installed PWA / home-screen (iOS):
+ * Do NOT lock html/body/#app to visualViewport height. Body is already
+ * position:fixed; inset:0 — that is the full layout frame used by fixed
+ * dock chrome. Shrinking the shell to --vv-h left a gap under the map while
+ * the dock stayed at true bottom (Safari-in-tab never hit this — no .pwa).
+ * Sheet full-height still uses --vv-h / innerHeight from JS only.
  */
 html.pwa,
-html.pwa body {
-  height: 100%;
-  min-height: 100%;
-  min-height: -webkit-fill-available;
-}
-html.pwa.vv-ready,
-html.pwa.vv-ready body {
-  height: var(--vv-h);
-  min-height: var(--vv-h);
-}
+html.pwa body,
 html.pwa #app {
   height: 100%;
   min-height: 100%;
   min-height: -webkit-fill-available;
-}
-html.pwa.vv-ready #app {
-  height: var(--vv-h);
-  min-height: var(--vv-h);
 }
 
 .material-symbols-outlined {
@@ -6066,6 +6057,7 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     left: 0;
     right: 0;
     bottom: 0;
+    height: constant(safe-area-inset-bottom);
     height: env(safe-area-inset-bottom, 0px);
     background: rgb(var(--glass-rgb));
     z-index: 6;
@@ -6079,9 +6071,11 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
 
   /* Match tighter home-bar padding on mobile (override base if needed) */
   .app-bottom-nav {
+    padding: 6px 10px max(4px, constant(safe-area-inset-bottom)) !important;
     padding: 6px 10px max(4px, env(safe-area-inset-bottom, 0px)) !important;
   }
   #eta-route-detail-chrome {
+    padding: 6px 10px max(4px, constant(safe-area-inset-bottom)) !important;
     padding: 6px 10px max(4px, env(safe-area-inset-bottom, 0px)) !important;
   }
 
@@ -6209,6 +6203,7 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
 
   /* Nav / Back+Pin: system home-bar inset only (no extra 8px lift) */
   .app-bottom-nav {
+    padding: 6px 10px max(4px, constant(safe-area-inset-bottom)) !important;
     padding: 6px 10px max(4px, env(safe-area-inset-bottom, 0px)) !important;
     background: transparent !important;
   }
@@ -6229,12 +6224,19 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
 }
 
 /*
- * Standalone PWA only — Safari-in-tab already looks correct.
- * iOS home-screen: real safe-area; 100dvh overshoot fixed via --vv-h.
+ * Standalone PWA — same dock model as Safari-in-tab (safe-area once on nav).
+ * Full-sheet fallback if JS hasn’t published --sheet-h yet.
+ * Older iOS: constant() before env().
  */
 @media (max-width: 640px) {
   html.pwa.vv-ready .app-shell[data-sheet="full"] {
     --sheet-h: calc(var(--vv-h) - var(--nav-dock-h));
+  }
+
+  /* Safe-area on dock stack, not double-padded on children */
+  html.pwa .panel-bottom-stack {
+    min-height: 0;
+    padding-bottom: 0;
   }
 
   html.pwa .app-bottom-nav,
@@ -6242,7 +6244,6 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     padding-top: 6px !important;
     padding-left: 10px !important;
     padding-right: 10px !important;
-    /* older iOS first, then env() wins on modern */
     padding-bottom: max(6px, constant(safe-area-inset-bottom)) !important;
     padding-bottom: max(6px, env(safe-area-inset-bottom, 0px)) !important;
   }
@@ -6251,10 +6252,6 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     height: constant(safe-area-inset-bottom);
     height: env(safe-area-inset-bottom, 0px);
     background: rgb(var(--glass-rgb));
-  }
-
-  html.pwa .panel-bottom-stack {
-    min-height: 0;
   }
 
   html.pwa .app-shell[data-sheet="full"] .sheet-chrome {

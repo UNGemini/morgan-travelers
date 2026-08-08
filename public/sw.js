@@ -8,7 +8,7 @@
  *
  * Bump CACHE when install/activate logic changes so old shells are dropped.
  */
-const CACHE = "mtravelers-shell-v3";
+const CACHE = "mtravelers-shell-v4";
 const PRECACHE = ["./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
@@ -31,6 +31,13 @@ self.addEventListener("activate", (event) => {
       )
       .then(() => self.clients.claim()),
   );
+});
+
+// Allow page to force-activate a waiting worker (see main.js updatefound)
+self.addEventListener("message", (event) => {
+  if (event?.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 /**

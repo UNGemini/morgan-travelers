@@ -6433,17 +6433,26 @@ function measureDockChromeNatural() {
 }
 
 /**
- * Visual viewport height (iOS PWA/Safari often disagree with 100dvh).
+ * Layout height for sheet snaps / full drawer.
+ * Prefer window.innerHeight — it matches the fixed-position containing block
+ * on iOS. visualViewport can be a few px shorter in standalone and must not
+ * be used to shrink the app shell (that left a gap under the map while the
+ * dock stayed at the true bottom).
  * @returns {number}
  */
 function viewportHeightPx() {
+  const ih = Math.round(window.innerHeight || 700);
   try {
     const vv = window.visualViewport?.height;
-    if (vv && vv > 100) return Math.round(vv);
+    if (vv && vv > 100) {
+      const r = Math.round(vv);
+      // Only trust VV when it agrees with layout height (keyboard closed).
+      if (Math.abs(ih - r) <= 2) return r;
+    }
   } catch {
     /* ignore */
   }
-  return Math.round(window.innerHeight || 700);
+  return ih > 100 ? ih : 700;
 }
 
 /**
@@ -6497,13 +6506,21 @@ function schedulePwaDockRemeasure() {
           setSheetState(cur);
         }
       }
+      try {
+        map?.resize?.();
+      } catch {
+        /* ignore */
+      }
     } catch {
       /* ignore */
     }
   };
   requestAnimationFrame(run);
-  setTimeout(run, 120);
-  setTimeout(run, 480);
+  setTimeout(run, 50);
+  setTimeout(run, 200);
+  setTimeout(run, 600);
+  // Late safe-area / status-bar settle on cold home-screen launch
+  setTimeout(run, 1200);
 }
 
 /**
