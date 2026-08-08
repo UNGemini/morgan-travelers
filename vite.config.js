@@ -771,7 +771,8 @@ function crossOriginIsolation() {
 }
 
 export default defineConfig({
-  base: "./",
+  // Absolute base so PWA / mobile never resolve ./assets to a bad path
+  base: "/",
   plugins: [crossOriginIsolation()],
   server: {
     port: 5173,

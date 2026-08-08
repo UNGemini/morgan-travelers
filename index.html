@@ -31,6 +31,42 @@
       rel="stylesheet"
       crossorigin="anonymous"
     />
+    <!-- Critical shell: never show bare browser chrome if main CSS is delayed -->
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #12161c;
+        color: #fff;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      }
+      #app.app-shell {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+      }
+      .map-stage, #map {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        background: #0a0c10;
+      }
+      .map-status.is-visually-hidden {
+        position: absolute !important;
+        width: 1px !important;
+        height: 1px !important;
+        padding: 0 !important;
+        margin: -1px !important;
+        overflow: hidden !important;
+        clip: rect(0, 0, 0, 0) !important;
+        border: 0 !important;
+      }
+      [hidden] { display: none !important; }
+    </style>
     <title>MORGAN Travelers</title>
   </head>
   <body>
@@ -538,7 +574,6 @@
             <section
               id="eta-sidebar-panel"
               class="panel-section eta-sidebar-panel"
-              hidden
               aria-label="ETA route browser"
             >
               <div class="eta-route-list-wrap">
@@ -578,8 +613,12 @@
 
             </section>
 
-            <!-- Trip Plan mode: origin / destination / prefs -->
-            <section class="panel-section trip-plan-sidebar-panel" id="trip-plan-sidebar-panel">
+            <!-- Trip Plan mode: origin / destination / prefs (hidden until Trip Plan tab) -->
+            <section
+              class="panel-section trip-plan-sidebar-panel"
+              id="trip-plan-sidebar-panel"
+              hidden
+            >
               <div class="loc-field" data-field="origin">
                 <label class="loc-label" for="input-origin">
                   <span class="material-symbols-outlined" aria-hidden="true">trip_origin</span>
