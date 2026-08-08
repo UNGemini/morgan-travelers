@@ -7362,13 +7362,77 @@ function etaHasRealOpposite(dirs) {
 }
 
 /**
- * Next direction index when cycling Opposite (supports 2 or 3+ dirs).
+ * Opposite = reverse bound only (O↔I), never cycle branches.
+ * E.g. “To Tsuen Wan” → “To Central”. Branches use Switch branch.
+ * @param {number} di
+ * @param {Array<{ bound?: string, branch?: string }>} dirs
+ */
+function etaOppositeDirIndex(di, dirs) {
+  if (!dirs?.length) return 0;
+  const from = Math.min(Math.max(0, di), dirs.length - 1);
+  const cur = dirs[from];
+  const curB = String(cur?.bound || "").toUpperCase();
+  const curBr = String(cur?.branch || "").toUpperCase();
+  const wantB =
+    curB === "O" || curB === "UP" || curB === "1"
+      ? "I"
+      : curB === "I" || curB === "DOWN" || curB === "2"
+        ? "O"
+        : "";
+  if (!wantB) {
+    // No O/I labels — fall back to next distinct dest
+    return (from + 1) % dirs.length;
+  }
+  // Prefer reverse with same branch (EAL LOW O ↔ LOW I)
+  let hit = dirs.findIndex(
+    (d, i) =>
+      i !== from &&
+      String(d.bound || "").toUpperCase() === wantB &&
+      String(d.branch || "").toUpperCase() === curBr,
+  );
+  if (hit >= 0) return hit;
+  hit = dirs.findIndex(
+    (d, i) => i !== from && String(d.bound || "").toUpperCase() === wantB,
+  );
+  return hit >= 0 ? hit : from;
+}
+
+/** @deprecated use etaOppositeDirIndex — kept for call sites that cycle all dirs */
+function etaNextDirIndex(di, dirs) {
+  return etaOppositeDirIndex(di, dirs);
+}
+
+/**
+ * Indices of sibling branch directions sharing the same bound.
+ * @param {Array<{ bound?: string, branch?: string, dest?: string }>} dirs
+ * @param {number} di
+ */
+function etaBranchSiblingIndices(dirs, di) {
+  if (!dirs?.length) return [];
+  const from = Math.min(Math.max(0, di), dirs.length - 1);
+  const b = String(dirs[from]?.bound || "").toUpperCase();
+  if (!b) return [];
+  return dirs
+    .map((d, i) => ({ d, i }))
+    .filter(
+      (x) =>
+        String(x.d.bound || "").toUpperCase() === b &&
+        String(x.d.branch || "") !== "",
+    )
+    .map((x) => x.i);
+}
+
+/**
+ * Next branch index (same bound, other terminus path). EAL LOW↔LMC, TKL POA↔LHP.
  * @param {number} di
  * @param {Array} dirs
  */
-function etaNextDirIndex(di, dirs) {
-  if (!dirs?.length) return 0;
-  return (Math.max(0, di) + 1) % dirs.length;
+function etaNextBranchIndex(di, dirs) {
+  const sibs = etaBranchSiblingIndices(dirs, di);
+  if (sibs.length < 2) return di;
+  const pos = sibs.indexOf(di);
+  if (pos < 0) return sibs[0];
+  return sibs[(pos + 1) % sibs.length];
 }
 
 /**
@@ -7380,7 +7444,7 @@ function etaNextDirIndex(di, dirs) {
  */
 function etaOppositeDirIndexForTerminus(lineId, dirs, fromDi, terminusCode) {
   const code = String(terminusCode || "").toUpperCase();
-  if (!code || !dirs?.length) return etaNextDirIndex(fromDi, dirs);
+  if (!code || !dirs?.length) return etaOppositeDirIndex(fromDi, dirs);
   for (let i = 0; i < dirs.length; i++) {
     if (i === fromDi) continue;
     const d = dirs[i];
@@ -7391,23 +7455,50 @@ function etaOppositeDirIndexForTerminus(lineId, dirs, fromDi, terminusCode) {
     );
     if (codes[0] === code) return i;
   }
-  // Prefer O↔I flip keeping branch when possible
-  const cur = dirs[fromDi];
-  const curB = String(cur?.bound || "").toUpperCase();
-  const curBr = String(cur?.branch || "").toUpperCase();
-  const wantB = curB === "O" || curB === "UP" ? "I" : "O";
-  let hit = dirs.findIndex(
-    (d, i) =>
-      i !== fromDi &&
-      String(d.bound || "").toUpperCase() === wantB &&
-      String(d.branch || "").toUpperCase() === curBr,
+  return etaOppositeDirIndex(fromDi, dirs);
+}
+
+/**
+ * Resolve board index on a direction’s ordered station list.
+ * @param {string} lineId
+ * @param {{ bound?: string, branch?: string }} dir
+ * @param {string} boardLabel
+ * @param {{ stationCode?: string, code?: string, name?: string } | null} [boardStop]
+ * @returns {{ isFirst: boolean, isLast: boolean, index: number, codes: string[] }}
+ */
+function etaMtrBoardPosition(lineId, dir, boardLabel, boardStop = null) {
+  const codes = mtrLineCodesInOrder(
+    lineId,
+    dir?.bound || "O",
+    dir?.branch || null,
   );
-  if (hit >= 0) return hit;
-  hit = dirs.findIndex(
-    (d, i) => i !== fromDi && String(d.bound || "").toUpperCase() === wantB,
-  );
-  if (hit >= 0) return hit;
-  return etaNextDirIndex(fromDi, dirs);
+  if (!codes.length) {
+    return { isFirst: false, isLast: false, index: -1, codes };
+  }
+  let idx = -1;
+  const code = String(
+    boardStop?.stationCode || boardStop?.code || "",
+  ).toUpperCase();
+  if (code) idx = codes.indexOf(code);
+  if (idx < 0 && boardLabel) {
+    for (let i = 0; i < codes.length; i++) {
+      const lab = mtrStationLabel(codes[i]);
+      if (
+        etaStationsMatch(boardLabel, lab.en) ||
+        etaStationsMatch(boardLabel, lab.zh) ||
+        etaStationsMatch(boardLabel, `${lab.zh} ${lab.en}`)
+      ) {
+        idx = i;
+        break;
+      }
+    }
+  }
+  return {
+    isFirst: idx === 0,
+    isLast: idx === codes.length - 1,
+    index: idx,
+    codes,
+  };
 }
 
 /**
@@ -9284,23 +9375,27 @@ function etaRouteCardInnerHtml(r, dir, eta = {}) {
 }
 
 /**
- * Opposite control on Nearby/search list cards (when 2+ real directions).
+ * Opposite on list cards — reverse bound only (not branch cycle).
+ * Hidden for MTR when board is first station (auto-suggest away already).
  * @param {EtaRouteEntry} r
  * @param {Array} dirs
  * @param {number} activeDir
+ * @param {{ hideOpposite?: boolean }} [opts]
  */
-function etaCardDotsHtml(r, dirs, activeDir) {
+function etaCardDotsHtml(r, dirs, activeDir, opts = {}) {
+  if (opts.hideOpposite) return "";
   if (!etaHasRealOpposite(dirs)) return "";
   const di = Math.min(Math.max(0, activeDir), Math.max(0, dirs.length - 1));
-  const dots = dirs
-    .map(
-      (_, i) => `<i class="${di === i ? "is-on" : ""}"></i>`,
-    )
-    .join("");
+  const opp = etaOppositeDirIndex(di, dirs);
+  if (opp === di) return "";
+  // Two dots: current vs reverse (not one per branch)
   return `<button type="button" class="wheels-dir-switch eta-card-dir-switch" data-route-key="${escapeHtml(etaRouteKey(r))}" aria-label="Switch direction">
     <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
     <span>Opposite</span>
-    <span class="wheels-dir-dots" aria-hidden="true">${dots}</span>
+    <span class="wheels-dir-dots" aria-hidden="true">
+      <i class="is-on"></i>
+      <i></i>
+    </span>
   </button>`;
 }
 
@@ -9323,7 +9418,50 @@ function etaRouteCardLiHtml(r, i) {
   }
 
   let di = resolveCardDirIndex(r, dirs);
-  if (isRail) {
+  let hideOpposite = false;
+
+  // MTR: auto-suggest direction away from board; hide Opposite at first station
+  if (isRail && r.kind === "mtr" && boardLabel && dirs.length >= 1) {
+    const boardStop = {
+      stationCode: live?.stopId || "",
+      code: live?.stopId || "",
+      name: boardLabel,
+    };
+    // Prefer a direction where board is first (departing terminus) or middle
+    let bestDi = di;
+    let bestScore = -1;
+    for (let j = 0; j < dirs.length; j++) {
+      const pos = etaMtrBoardPosition(r.id, dirs[j], boardLabel, boardStop);
+      if (pos.index < 0) continue;
+      // Last station → wrong way (arriving only); first/middle preferred
+      let score = pos.isLast ? 0 : pos.isFirst ? 3 : 2;
+      // Prefer user’s stored dir when score ties
+      if (j === di) score += 0.5;
+      if (score > bestScore) {
+        bestScore = score;
+        bestDi = j;
+      }
+    }
+    if (bestScore >= 0 && bestDi !== di) {
+      di = bestDi;
+      setCardDir(r, di);
+    }
+    const pos = etaMtrBoardPosition(r.id, dirs[di], boardLabel, boardStop);
+    // At first station of this direction: auto-away already chosen — no Opposite
+    // At last station: also hide (should have flipped); intermediate: show
+    if (pos.isFirst || pos.isLast || pos.index < 0) {
+      hideOpposite = true;
+    }
+    // If stuck on last (arriving), flip to opposite so we suggest away
+    if (pos.isLast && dirs.length >= 2) {
+      const opp = etaOppositeDirIndex(di, dirs);
+      if (opp !== di) {
+        di = opp;
+        setCardDir(r, di);
+        hideOpposite = true;
+      }
+    }
+  } else if (isRail) {
     const cur = dirs[di];
     if (
       cur &&
@@ -9404,7 +9542,7 @@ function etaRouteCardLiHtml(r, i) {
         outsideService: liveForDir ? !!live?.outsideService : false,
       })}
     </div>
-    ${etaCardDotsHtml(r, dirs, di)}
+    ${etaCardDotsHtml(r, dirs, di, { hideOpposite })}
   </li>`;
 }
 
@@ -9558,18 +9696,12 @@ function bindEtaRouteCardEvents(li) {
     if (dirs.length < 2 || !etaHasRealOpposite(dirs)) return;
 
     const cur = resolveCardDirIndex(r, dirs);
-    const next = etaNextDirIndex(cur, dirs);
+    // Opposite = reverse only (To Tsuen Wan → To Central), not branch cycle
+    const next = etaOppositeDirIndex(cur, dirs);
     if (next === cur) return;
 
-    const from = dirs[cur];
     const to = dirs[next];
-    if (
-      r.kind === "mtr" &&
-      from?.branch &&
-      String(to?.bound || "").toUpperCase() === "I"
-    ) {
-      etaDetailMtrBranchOverride = String(from.branch).toUpperCase();
-    } else if (r.kind === "mtr" && to?.branch) {
+    if (r.kind === "mtr" && to?.branch) {
       etaDetailMtrBranchOverride = String(to.branch).toUpperCase();
     } else if (r.kind === "mtr") {
       etaDetailMtrBranchOverride = null;
@@ -10050,17 +10182,44 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
   }
 
   if (opts.fit && coords.length >= 2) {
-    let minLon = Infinity;
-    let minLat = Infinity;
-    let maxLon = -Infinity;
-    let maxLat = -Infinity;
-    for (const [lon, lat] of coords) {
-      if (lon < minLon) minLon = lon;
-      if (lat < minLat) minLat = lat;
-      if (lon > maxLon) maxLon = lon;
-      if (lat > maxLat) maxLat = lat;
-    }
+    fitMapToRouteCoords(coords);
+  }
+}
+
+/**
+ * Animate camera to route path, padded for the visible map (sheet/dock).
+ * @param {number[][]} coords [lon,lat][]
+ * @param {{ duration?: number, maxZoom?: number }} [opts]
+ */
+function fitMapToRouteCoords(coords, opts = {}) {
+  if (!map || !coords?.length) return;
+  let minLon = Infinity;
+  let minLat = Infinity;
+  let maxLon = -Infinity;
+  let maxLat = -Infinity;
+  for (const c of coords) {
+    const lon = Number(c[0]);
+    const lat = Number(c[1]);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+    if (lon < minLon) minLon = lon;
+    if (lat < minLat) minLat = lat;
+    if (lon > maxLon) maxLon = lon;
+    if (lat > maxLat) maxLat = lat;
+  }
+  if (!Number.isFinite(minLon) || minLon === Infinity) return;
+  // Pad degenerate single-point bounds slightly so fitBounds always animates
+  if (minLon === maxLon) {
+    minLon -= 0.008;
+    maxLon += 0.008;
+  }
+  if (minLat === maxLat) {
+    minLat -= 0.008;
+    maxLat += 0.008;
+  }
+  const run = () => {
     try {
+      if (!map?.getStyle?.()) return;
+      map.resize?.();
       map.fitBounds(
         [
           [minLon, minLat],
@@ -10068,19 +10227,38 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
         ],
         {
           padding: mapVisiblePadding({
-            top: 20,
-            right: 12,
-            bottom: 16,
-            left: 12,
+            top: 28,
+            right: 16,
+            bottom: 20,
+            left: 16,
           }),
-          maxZoom: 14.5,
-          duration: 800,
+          maxZoom: opts.maxZoom ?? 15,
+          duration: opts.duration ?? 1000,
+          essential: true,
+          linear: false,
         },
       );
     } catch {
       /* ignore */
     }
+  };
+  // Wait for style + sheet layout so padding = true visual centre
+  const schedule = () => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setTimeout(run, 40);
+      });
+    });
+  };
+  try {
+    if (map.loaded?.() === false) {
+      map.once?.("load", schedule);
+      return;
+    }
+  } catch {
+    /* ignore */
   }
+  schedule();
 }
 
 /**
@@ -11135,20 +11313,32 @@ async function renderEtaRouteDetailBody(route, ctx) {
     ? etaStopReachMinutes(named, boardIndex, slots[0]?.waitMins, route.kind)
     : [];
 
-  const dirSwitchHtml = etaHasRealOpposite(dirs)
-    ? `<button type="button" class="wheels-dir-switch" id="btn-eta-detail-dir" aria-label="Switch direction">
+  const oppDi = etaOppositeDirIndex(di, dirs);
+  const canOpposite = etaHasRealOpposite(dirs) && oppDi !== di;
+  const branchSibs = etaBranchSiblingIndices(dirs, di);
+  const canBranch = branchSibs.length >= 2;
+  const nextBr = canBranch ? dirs[etaNextBranchIndex(di, dirs)] : null;
+  const branchLabel = nextBr
+    ? nextBr.destZh || nextBr.dest || "Branch"
+    : "Branch";
+
+  const dirSwitchHtml = [
+    canOpposite
+      ? `<button type="button" class="wheels-dir-switch" id="btn-eta-detail-dir" aria-label="Switch direction">
           <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
           <span>Opposite</span>
-          <span class="wheels-dir-dots" aria-hidden="true">
-            ${dirs
-              .map(
-                (_, i) =>
-                  `<i class="${di === i ? "is-on" : ""}"></i>`,
-              )
-              .join("")}
-          </span>
         </button>`
-    : "";
+      : "",
+    canBranch
+      ? `<button type="button" class="wheels-dir-switch wheels-branch-switch" id="btn-eta-detail-branch" aria-label="Switch branch" title="Switch branch to ${escapeHtml(String(branchLabel))}">
+          <span class="material-symbols-outlined" aria-hidden="true">alt_route</span>
+          <span>Branch</span>
+          <span class="wheels-branch-dest">${escapeHtml(String(branchLabel))}</span>
+        </button>`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("");
 
   let stopsHtml = "";
   if (!named.length && etaSelectedStops.length) {
@@ -11282,25 +11472,71 @@ async function renderEtaRouteDetailBody(route, ctx) {
       e.preventDefault();
       e.stopPropagation();
       if (!dirs || dirs.length < 2) return;
-      const next = etaNextDirIndex(di, dirs);
+      // Opposite = reverse only (To Tsuen Wan → To Central)
+      const next = etaOppositeDirIndex(di, dirs);
       if (next === di) return;
-      // Keep branch when cycling onto I so reverse path matches last northbound
-      const from = dirs[di];
       const to = dirs[next];
-      if (
-        route.kind === "mtr" &&
-        from?.branch &&
-        String(to?.bound || "").toUpperCase() === "I"
-      ) {
-        etaDetailMtrBranchOverride = String(from.branch).toUpperCase();
-      } else if (route.kind === "mtr" && to?.branch) {
+      if (route.kind === "mtr" && to?.branch) {
         etaDetailMtrBranchOverride = String(to.branch).toUpperCase();
       } else if (route.kind === "mtr") {
         etaDetailMtrBranchOverride = null;
       }
       setCardDir(route, next);
       syncDirChoiceToLive(route, next, dirs);
+      // If on first station of current dir → board first of opposite
+      // (first of reverse = previous terminus). Otherwise match same stop.
+      if (selectedIndex === 0) {
+        etaDetailStopIndex = 0;
+      } else {
+        // Keep physical station if present on reverse list after reload
+        const curStop = named[selectedIndex];
+        const code = String(
+          curStop?.stationCode || curStop?.code || "",
+        ).toUpperCase();
+        etaDetailStopIndex = 0;
+        if (code && route.kind === "mtr") {
+          // loadEtaRouteStops will rebuild; mark preferred board via live meta
+          const live = etaLiveByKey.get(etaRouteKey(route)) || {};
+          etaLiveByKey.set(etaRouteKey(route), {
+            ...live,
+            stopId: code,
+            stopLabel: curStop?.name || live.stopLabel || "",
+            bound: to?.bound || live.bound,
+          });
+        }
+      }
+      void showEtaRouteDetailsPanel();
+    });
+
+  els.etaRouteDetailBody
+    .querySelector("#btn-eta-detail-branch")
+    ?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!dirs || dirs.length < 2) return;
+      const next = etaNextBranchIndex(di, dirs);
+      if (next === di) return;
+      const to = dirs[next];
+      if (route.kind === "mtr" && to?.branch) {
+        etaDetailMtrBranchOverride = String(to.branch).toUpperCase();
+      }
+      setCardDir(route, next);
+      syncDirChoiceToLive(route, next, dirs);
+      // Stay at same physical board when possible (shared trunk stations)
+      const curStop = named[selectedIndex];
+      const code = String(
+        curStop?.stationCode || curStop?.code || "",
+      ).toUpperCase();
       etaDetailStopIndex = 0;
+      if (code) {
+        const live = etaLiveByKey.get(etaRouteKey(route)) || {};
+        etaLiveByKey.set(etaRouteKey(route), {
+          ...live,
+          stopId: code,
+          stopLabel: curStop?.name || live.stopLabel || "",
+          bound: to?.bound || live.bound,
+        });
+      }
       void showEtaRouteDetailsPanel();
     });
 

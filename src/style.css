@@ -2070,6 +2070,20 @@ body.mobile-ui [data-acrylic]::before {
   font-size: 20px !important;
 }
 
+/* Detail: Opposite + Branch row */
+.wheels-route-detail-fixed .wheels-dir-switch + .wheels-dir-switch {
+  margin-top: 8px;
+}
+.wheels-branch-switch .wheels-branch-dest {
+  font-size: 0.72rem;
+  font-weight: 550;
+  opacity: 0.75;
+  max-width: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /*
  * Search list Opposite — true pill + nested match:
  *   button radius = height / 2  (pill)
