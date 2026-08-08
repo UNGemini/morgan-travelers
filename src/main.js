@@ -12162,17 +12162,44 @@ loadManifest().catch((err) => {
 // Dev + COEP require-corp: a SW can break large graph fetches.
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
-    const swUrl = `${import.meta.env.BASE_URL}sw.js`;
+    // Query-bust so browsers re-fetch sw.js even when an old cache-first SW is live
+    const swUrl = `${import.meta.env.BASE_URL}sw.js?v=7`;
+    let refreshing = false;
+    const reloadOnce = () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        window.location.reload();
+      } catch {
+        /* ignore */
+      }
+    };
+
+    navigator.serviceWorker.addEventListener("controllerchange", reloadOnce);
+    navigator.serviceWorker.addEventListener("message", (ev) => {
+      if (ev?.data?.type === "SW_ACTIVATED") reloadOnce();
+    });
+
     navigator.serviceWorker
       .register(swUrl)
       .then((reg) => {
-        // Check for updates on each launch (standalone often stays warm)
-        try {
-          reg.update();
-        } catch {
-          /* ignore */
-        }
-        // New worker installed while an old one controls the page
+        const kick = () => {
+          try {
+            reg.update();
+          } catch {
+            /* ignore */
+          }
+          try {
+            reg.waiting?.postMessage?.({ type: "SKIP_WAITING" });
+          } catch {
+            /* ignore */
+          }
+        };
+        kick();
+        // Standalone often stays warm — re-check when returning to the app
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") kick();
+        });
         reg.addEventListener("updatefound", () => {
           const nw = reg.installing;
           if (!nw) return;
@@ -12181,7 +12208,6 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
               nw.state === "installed" &&
               navigator.serviceWorker.controller
             ) {
-              // Activate immediately — skipWaiting is in sw.js install
               try {
                 reg.waiting?.postMessage?.({ type: "SKIP_WAITING" });
               } catch {
@@ -12194,18 +12220,6 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
       .catch(() => {
         /* optional */
       });
-
-    // When a new SW takes control, reload once so HTML/CSS/JS match
-    let refreshing = false;
-    navigator.serviceWorker.addEventListener("controllerchange", () => {
-      if (refreshing) return;
-      refreshing = true;
-      try {
-        window.location.reload();
-      } catch {
-        /* ignore */
-      }
-    });
   });
 } else if ("serviceWorker" in navigator) {
   // Clear any previous SW that may block local graph loads

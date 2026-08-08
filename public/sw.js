@@ -1,14 +1,15 @@
 /* MORGAN Travelers PWA service worker
  *
  * Strategy:
- *  · Navigations / index.html → network-first (always pick up new deploys)
- *  · Hashed /assets/* → cache-first (content-hash changes with every build)
+ *  · Navigations / HTML → always network (no stale shell)
+ *  · CSS/JS entry → network-first (hashed URLs still change per build)
+ *  · Other hashed /assets/* → stale-while-revalidate
  *  · APIs / fares / overrides → never cache
- *  · Other same-origin GETs → network-first with offline fallback
  *
- * Bump CACHE when install/activate logic changes so old shells are dropped.
+ * Bump CACHE on every deploy that must drop stuck clients.
+ * Old v1 was cache-first for index.html — clients kept “too high” dock CSS forever.
  */
-const CACHE = "mtravelers-shell-v6";
+const CACHE = "mtravelers-shell-v7";
 const PRECACHE = ["./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
@@ -25,18 +26,29 @@ self.addEventListener("activate", (event) => {
     caches
       .keys()
       .then((keys) =>
-        Promise.all(
-          keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)),
-        ),
+        // Drop every previous shell (v1–v6 cache-first HTML was sticky)
+        Promise.all(keys.map((k) => caches.delete(k))),
       )
-      .then(() => self.clients.claim()),
+      .then(() => caches.open(CACHE).then((c) => c.addAll(PRECACHE)))
+      .then(() => self.clients.claim())
+      .then(() =>
+        self.clients.matchAll({ type: "window" }).then((clients) => {
+          for (const client of clients) {
+            client.postMessage({ type: "SW_ACTIVATED", cache: CACHE });
+          }
+        }),
+      ),
   );
 });
 
-// Allow page to force-activate a waiting worker (see main.js updatefound)
 self.addEventListener("message", (event) => {
   if (event?.data?.type === "SKIP_WAITING") {
     self.skipWaiting();
+  }
+  if (event?.data?.type === "CLEAR_CACHES") {
+    event.waitUntil(
+      caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))),
+    );
   }
 });
 
@@ -46,6 +58,20 @@ self.addEventListener("message", (event) => {
  */
 function putInCache(request, response) {
   if (!response || !response.ok) return;
+  // Never persist navigations / HTML — always take network on next open
+  try {
+    const dest = request.destination;
+    if (
+      request.mode === "navigate" ||
+      dest === "document" ||
+      dest === "style" ||
+      dest === "script"
+    ) {
+      return;
+    }
+  } catch {
+    /* ignore */
+  }
   const copy = response.clone();
   caches.open(CACHE).then((cache) => cache.put(request, copy)).catch(() => {});
 }
@@ -56,18 +82,15 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
 
-  // Never intercept cross-origin data edge
   if (url.hostname === "hk-gtfsdata.morgandev.cc") {
     return;
   }
 
-  // API / auth — always network
   if (url.pathname.startsWith("/api/")) {
     event.respondWith(fetch(request));
     return;
   }
 
-  // Live data — always network
   if (
     url.pathname.includes("/fares/") ||
     url.pathname.includes("/overrides/") ||
@@ -79,8 +102,13 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Same-origin only for caching strategies below
   if (url.origin !== self.location.origin) {
+    return;
+  }
+
+  // Never intercept the service worker script itself
+  if (url.pathname.endsWith("/sw.js") || url.pathname.endsWith("sw.js")) {
+    event.respondWith(fetch(request));
     return;
   }
 
@@ -92,13 +120,12 @@ self.addEventListener("fetch", (event) => {
     url.pathname.endsWith("/index.html") ||
     url.pathname.endsWith("index.html");
 
-  // HTML shell: network-first so deploys show up in the PWA without reinstall
+  // HTML: network only (offline fallback to last cached index if any)
   if (isNavigate) {
     event.respondWith(
-      fetch(request)
+      fetch(request, { cache: "no-store" })
         .then((response) => {
-          putInCache(request, response);
-          // Also keep a copy under ./index.html for offline boot
+          // Keep one offline copy only
           if (response.ok) {
             const copy = response.clone();
             caches
@@ -108,33 +135,46 @@ self.addEventListener("fetch", (event) => {
           }
           return response;
         })
-        .catch(() =>
-          caches
-            .match(request)
-            .then((c) => c || caches.match("./index.html")),
-        ),
+        .catch(() => caches.match("./index.html")),
     );
     return;
   }
 
-  // Hashed build assets: cache-first (URL changes when content changes)
-  if (
-    url.pathname.includes("/assets/") ||
-    /\.[a-f0-9]{8,}\.(js|css|wasm)$/i.test(url.pathname)
-  ) {
+  // CSS / main JS: network-first so dock layout deploys are not sticky
+  const isShellAsset =
+    request.destination === "style" ||
+    request.destination === "script" ||
+    /\.(css|js)$/i.test(url.pathname);
+
+  if (isShellAsset) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          // Hashed assets can be cached; next build has new URL
+          if (url.pathname.includes("/assets/") && response.ok) {
+            putInCache(request, response);
+          }
+          return response;
+        })
+        .catch(() => caches.match(request)),
+    );
+    return;
+  }
+
+  // Other same-origin (fonts, icons, wasm, data): cache then network
+  if (url.pathname.includes("/assets/") || url.pathname.includes("/data/")) {
     event.respondWith(
       caches.match(request).then((cached) => {
-        if (cached) return cached;
-        return fetch(request).then((response) => {
+        const network = fetch(request).then((response) => {
           putInCache(request, response);
           return response;
         });
+        return cached || network;
       }),
     );
     return;
   }
 
-  // Everything else same-origin: network-first
   event.respondWith(
     fetch(request)
       .then((response) => {

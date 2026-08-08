@@ -38,12 +38,11 @@
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   /*
-   * Space under tab capsule (not full safe-area).
-   * Apple Music sits tabs ~flush with the home-indicator band; using
-   * env(safe-area) as padding left a large empty glass strip. Fixed
-   * small inset; stack glass + ::after still paint to the physical edge.
+   * Default: desktop / no home-indicator — normal panel foot.
+   * Mobile overrides below. (Do not use a global 6px — that sank Chrome
+   * desktop while stuck PWAs still showed old full-safe-area CSS.)
    */
-  --safe-bottom-content: 6px;
+  --safe-bottom-content: 10px;
   --detail-max-h: calc(
     100dvh - var(--dock-pad) - var(--safe-top) - var(--dock-pad) - var(--safe-bottom) -
       var(--toolbar-h) - var(--sheet-chrome-h)
@@ -1038,8 +1037,8 @@ body.mobile-ui [data-acrylic]::before {
   gap: 10px;
   width: 100%;
   box-sizing: border-box;
-  /* Sit low like native tab bars; glass stack fills the rest */
-  padding: 2px 10px var(--safe-bottom-content);
+  /* Desktop panel foot; mobile media overrides */
+  padding: 8px 10px var(--safe-bottom-content);
   margin: 0;
   border: none;
   background: transparent;
@@ -5426,8 +5425,8 @@ body.contrib-submitting .bg-orb {
   display: flex;
   align-items: center;
   gap: 10px;
-  /* Native-app sit: small fixed foot, not full safe-area */
-  padding: 2px 10px var(--safe-bottom-content);
+  /* Desktop default; mobile sets safe-area-aware padding */
+  padding: 8px 10px var(--safe-bottom-content);
   border-top: none;
   background: transparent;
   min-height: 0;
@@ -5859,7 +5858,16 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
 @media (max-width: 640px) {
   :root {
     --dock-pad: 0px;
-    /* Fallbacks until JS measures (nav includes reduced content inset) */
+    /*
+     * Tab content inset: slightly less than full safe-area so capsule sits
+     * nearer the home indicator (Music-like), without a hard 6px that
+     * clips on Chrome. ~safe − 12px on notch phones; min 8px when inset is 0.
+     */
+    --safe-bottom-content: max(
+      8px,
+      calc(env(safe-area-inset-bottom, 0px) - 12px)
+    );
+    /* Fallbacks until JS measures (nav includes content inset) */
     --nav-dock-h: calc(var(--toolbar-h) + var(--safe-bottom-content) + 6px);
     --sheet-h: var(--sheet-chrome-h);
     --map-tools-bottom: calc(var(--nav-dock-h) + var(--sheet-chrome-h) + 12px);
@@ -6076,12 +6084,12 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     background: rgba(var(--glass-rgb), 0.96) !important;
   }
 
-  /* Controls sit low like Apple Music; glass stack + ::after fill home bar */
+  /* Mobile tab foot — uses --safe-bottom-content from :root above */
   .app-bottom-nav {
-    padding: 2px 10px var(--safe-bottom-content) !important;
+    padding: 4px 10px var(--safe-bottom-content) !important;
   }
   #eta-route-detail-chrome {
-    padding: 2px 10px var(--safe-bottom-content) !important;
+    padding: 4px 10px var(--safe-bottom-content) !important;
   }
 
   /*
@@ -6206,9 +6214,9 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     --map-tools-bottom: calc(var(--nav-dock-h) + var(--sheet-chrome-h) + 10px);
   }
 
-  /* Nav / Back+Pin: native tab-bar sit height */
+  /* Nav / Back+Pin */
   .app-bottom-nav {
-    padding: 2px 10px var(--safe-bottom-content) !important;
+    padding: 4px 10px var(--safe-bottom-content) !important;
     background: transparent !important;
   }
 
@@ -6242,9 +6250,19 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     padding-bottom: 0 !important;
   }
 
+  /*
+   * Standalone: same formula as mobile Safari. Prefer a hair lower so it
+   * matches Music; glass ::after still fills the home-indicator band.
+   */
+  html.pwa {
+    --safe-bottom-content: max(
+      6px,
+      calc(env(safe-area-inset-bottom, 0px) - 16px)
+    );
+  }
   html.pwa .app-bottom-nav,
   html.pwa #eta-route-detail-chrome {
-    padding-top: 2px !important;
+    padding-top: 4px !important;
     padding-left: 10px !important;
     padding-right: 10px !important;
     padding-bottom: var(--safe-bottom-content) !important;
