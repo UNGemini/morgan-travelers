@@ -2043,7 +2043,7 @@ body.mobile-ui [data-acrylic]::before {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin: 2px 0 0;
+  margin: 0;
   padding: 10px 16px;
   min-height: 40px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -2071,8 +2071,12 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 /* Detail: Opposite + Branch row */
-.wheels-route-detail-fixed .wheels-dir-switch + .wheels-dir-switch {
-  margin-top: 8px;
+.wheels-dir-switch-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 .wheels-branch-switch .wheels-branch-dest {
   font-size: 0.72rem;
@@ -2090,11 +2094,19 @@ body.mobile-ui [data-acrylic]::before {
  *   card outer    = button radius + pad
  * no backdrop-filter so the list mask fade still applies.
  */
+.eta-card-dir-switches {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin-top: 8px;
+}
+
 .eta-route-card .eta-card-dir-switch,
 .eta-route-card .wheels-dir-switch.eta-card-dir-switch {
   align-self: stretch;
   width: 100%;
-  margin: 0; /* spacing via card gap */
+  margin: 0;
   height: var(--eta-btn-h, 44px);
   min-height: var(--eta-btn-h, 44px);
   box-sizing: border-box;
@@ -2107,6 +2119,8 @@ body.mobile-ui [data-acrylic]::before {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   color: rgba(255, 255, 255, 0.92);
+  justify-content: center;
+  text-align: center;
   transition:
     background 0.12s ease,
     border-color 0.12s ease,
@@ -2131,6 +2145,7 @@ body.mobile-ui [data-acrylic]::before {
   display: inline-flex;
   gap: 6px;
   align-items: center;
+  justify-content: center;
 }
 
 .wheels-dir-dots i {
