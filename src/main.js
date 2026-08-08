@@ -9244,13 +9244,24 @@ function etaRouteCardInnerHtml(r, dir, eta = {}) {
 }
 
 /**
- * List cards: no Opposite control (direction only on route detail).
- * @param {EtaRouteEntry} _r
- * @param {Array} _dirs
- * @param {number} _activeDir
+ * Opposite control on Nearby/search list cards (when 2+ real directions).
+ * @param {EtaRouteEntry} r
+ * @param {Array} dirs
+ * @param {number} activeDir
  */
-function etaCardDotsHtml(_r, _dirs, _activeDir) {
-  return "";
+function etaCardDotsHtml(r, dirs, activeDir) {
+  if (!etaHasRealOpposite(dirs)) return "";
+  const di = Math.min(Math.max(0, activeDir), Math.max(0, dirs.length - 1));
+  const dots = dirs
+    .map(
+      (_, i) => `<i class="${di === i ? "is-on" : ""}"></i>`,
+    )
+    .join("");
+  return `<button type="button" class="wheels-dir-switch eta-card-dir-switch" data-route-key="${escapeHtml(etaRouteKey(r))}" aria-label="Switch direction">
+    <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
+    <span>Opposite</span>
+    <span class="wheels-dir-dots" aria-hidden="true">${dots}</span>
+  </button>`;
 }
 
 /**
@@ -9353,6 +9364,7 @@ function etaRouteCardLiHtml(r, i) {
         outsideService: liveForDir ? !!live?.outsideService : false,
       })}
     </div>
+    ${etaCardDotsHtml(r, dirs, di)}
   </li>`;
 }
 
@@ -9477,12 +9489,80 @@ function patchEtaRouteCardAt(idx) {
  */
 function bindEtaRouteCardEvents(li) {
   if (!(li instanceof HTMLElement)) return;
-  li.addEventListener("click", () => {
+  li.addEventListener("click", (e) => {
+    // Opposite handled on its own button
+    if (e.target.closest?.(".eta-card-dir-switch, .wheels-dir-switch")) return;
     const idx = Number(li.getAttribute("data-idx"));
     etaRouteActive = idx;
     selectEtaRoute(etaRouteHits[idx], idx);
   });
-  // Opposite is detail-page only — not on list cards
+
+  const dirBtn = li.querySelector(".eta-card-dir-switch");
+  dirBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const idx = Number(li.getAttribute("data-idx"));
+    const r = etaRouteHits[idx];
+    if (!r) return;
+
+    // Same dir set as the card render (rail filters same-station dests)
+    const boardLabel = etaBoardLabelClean(
+      etaLiveByKey.get(etaRouteKey(r))?.stopLabel || r.nearbyHint || "",
+    );
+    const isRail = r.kind === "mtr" || r.kind === "lrt";
+    let dirs = etaRouteDirections(r, { full: true });
+    if (isRail) {
+      const filtered = etaFilterSameStationDirs(dirs, boardLabel, r);
+      if (filtered.length) dirs = filtered;
+    }
+    if (dirs.length < 2 || !etaHasRealOpposite(dirs)) return;
+
+    const cur = resolveCardDirIndex(r, dirs);
+    const next = etaNextDirIndex(cur, dirs);
+    if (next === cur) return;
+
+    const from = dirs[cur];
+    const to = dirs[next];
+    if (
+      r.kind === "mtr" &&
+      from?.branch &&
+      String(to?.bound || "").toUpperCase() === "I"
+    ) {
+      etaDetailMtrBranchOverride = String(from.branch).toUpperCase();
+    } else if (r.kind === "mtr" && to?.branch) {
+      etaDetailMtrBranchOverride = String(to.branch).toUpperCase();
+    } else if (r.kind === "mtr") {
+      etaDetailMtrBranchOverride = null;
+    }
+
+    setCardDir(r, next);
+    syncDirChoiceToLive(r, next, dirs);
+    etaRouteActive = idx;
+    // Instant UI (dest + dots); live minutes refresh after
+    patchEtaRouteCardAt(idx);
+    syncEtaActive();
+
+    void refreshCardLiveEta(r, { silent: true, force: true }).then(() => {
+      if (
+        etaRouteHits[idx] !== r &&
+        etaRouteKey(etaRouteHits[idx] || {}) !== etaRouteKey(r)
+      ) {
+        return;
+      }
+      applyNearbyDirLive(r);
+      patchEtaRouteCardAt(idx);
+      syncEtaActive();
+    });
+
+    if (
+      etaSelectedForDetails &&
+      etaRouteKey(etaSelectedForDetails) === etaRouteKey(r) &&
+      sidebarPage === "eta-route"
+    ) {
+      etaSelectedForDetails = r;
+      void showEtaRouteDetailsPanel();
+    }
+  });
 }
 
 /**
