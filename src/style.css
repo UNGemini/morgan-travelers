@@ -5538,14 +5538,69 @@ body.contrib-submitting .bg-orb {
 .app-nav-search-wrap.is-open {
   flex: 1 1 auto;
   width: auto;
-  min-width: min(160px, 36vw);
-  max-width: min(280px, 52vw);
+  min-width: min(160px, 40vw);
+  max-width: none;
 }
-/* When search open, tabs yield space */
+/*
+ * Search open (Apple Music Classical style):
+ *  · Only the active tab remains — as a circular icon
+ *  · Search field takes the rest of the bar
+ *  · Tapping the icon closes search (handled in JS)
+ */
+.app-bottom-nav.is-search-open .app-nav-tabs,
 .app-bottom-nav:has(.app-nav-search-wrap.is-open) .app-nav-tabs {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
+  width: auto;
   min-width: 0;
-  transition: flex var(--nav-morph-dur) var(--nav-morph-ease);
+  max-width: none;
+  gap: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transition:
+    flex var(--nav-morph-dur) var(--nav-morph-ease),
+    width var(--nav-morph-dur) var(--nav-morph-ease);
+}
+.app-bottom-nav.is-search-open .app-nav-tab:not(.is-active),
+.app-bottom-nav:has(.app-nav-search-wrap.is-open) .app-nav-tab:not(.is-active) {
+  display: none !important;
+}
+.app-bottom-nav.is-search-open .app-nav-tab.is-active,
+.app-bottom-nav:has(.app-nav-search-wrap.is-open) .app-nav-tab.is-active {
+  flex: 0 0 48px;
+  width: 48px;
+  min-width: 48px;
+  max-width: 48px;
+  min-height: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--lg-border);
+  background: var(--lg-fill);
+  box-shadow: var(--lg-highlight), var(--lg-shadow);
+  -webkit-backdrop-filter: blur(32px) saturate(1.7);
+  backdrop-filter: blur(32px) saturate(1.7);
+  color: #fff;
+}
+.app-bottom-nav.is-search-open .app-nav-tab.is-active .app-nav-tab-label,
+.app-bottom-nav:has(.app-nav-search-wrap.is-open) .app-nav-tab.is-active .app-nav-tab-label {
+  display: none !important;
+}
+.app-bottom-nav.is-search-open .app-nav-tab.is-active .material-symbols-outlined,
+.app-bottom-nav:has(.app-nav-search-wrap.is-open) .app-nav-tab.is-active .material-symbols-outlined {
+  font-size: 22px !important;
+  color: #fff;
+  font-variation-settings: "FILL" 1, "wght" 500, "GRAD" 0, "opsz" 24;
+}
+.app-bottom-nav.is-search-open .app-nav-search-wrap,
+.app-bottom-nav:has(.app-nav-search-wrap.is-open) .app-nav-search-wrap.is-open {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: none;
 }
 .app-nav-search-btn {
   position: absolute;

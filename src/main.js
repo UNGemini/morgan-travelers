@@ -1057,11 +1057,14 @@ function etaRouteKey(r) {
 
 function getCardDir(r) {
   const k = etaRouteKey(r);
-  return etaCardDirIndex.get(k) || 0;
+  const v = etaCardDirIndex.get(k);
+  return Number.isFinite(v) ? Number(v) : 0;
 }
 
 function setCardDir(r, i) {
-  etaCardDirIndex.set(etaRouteKey(r), i <= 0 ? 0 : 1);
+  // Store full index (EAL/TKL have 3 directions) — never clamp to 0|1 only
+  const n = Math.max(0, Math.floor(Number(i) || 0));
+  etaCardDirIndex.set(etaRouteKey(r), n);
 }
 
 /**
@@ -2025,6 +2028,12 @@ const geolocateControl = new GeolocateControl({
   positionOptions: { enableHighAccuracy: true },
   trackUserLocation: true,
   showUserHeading: true,
+  // Updated whenever locate runs — see syncGeolocateFitPadding()
+  fitBoundsOptions: {
+    maxZoom: 15.8,
+    duration: 850,
+    padding: { top: 48, bottom: 280, left: 16, right: 56 },
+  },
 });
 map.addControl(geolocateControl, "bottom-right");
 // Same corner as tools so © stacks under the button group
@@ -2133,6 +2142,21 @@ function mapVisiblePadding(extra = {}) {
     bottom: Math.max(0, bottom + (Number(extra.bottom) || 0)),
     left: Math.max(0, left + (Number(extra.left) || 0)),
   };
+}
+
+/** Keep MapLibre locate control centred on the *visible* map, not under the sheet. */
+function syncGeolocateFitPadding() {
+  try {
+    const pad = mapVisiblePadding();
+    geolocateControl.options.fitBoundsOptions = {
+      ...(geolocateControl.options.fitBoundsOptions || {}),
+      maxZoom: 15.8,
+      duration: 850,
+      padding: pad,
+    };
+  } catch {
+    /* ignore */
+  }
 }
 
 // Scale — top-centre; shown while zooming, fades after scale settles
@@ -8572,8 +8596,22 @@ geolocateControl.on?.("geolocate", (ev) => {
   const c = ev?.coords;
   if (!c || !Number.isFinite(c.latitude) || !Number.isFinite(c.longitude)) return;
   etaUserGeo = { lat: c.latitude, lon: c.longitude, at: Date.now() };
+
+  // Control’s first frame may ignore current sheet height — re-centre with
+  // visual padding so the blue dot sits in the open map, not under the panel.
+  syncGeolocateFitPadding();
+  try {
+    map.easeTo({
+      center: [c.longitude, c.latitude],
+      zoom: Math.min(Math.max(map.getZoom(), 14.2), 15.8),
+      duration: 480,
+      padding: mapVisiblePadding(),
+    });
+  } catch {
+    /* ignore */
+  }
+
   if (getUiMode() === "eta") {
-    // Don't double-fly; control already moved the camera
     try {
       if (!nearbyBrowseMarker) {
         const el = document.createElement("div");
@@ -8593,6 +8631,19 @@ geolocateControl.on?.("geolocate", (ev) => {
     void refreshEtaRouteSuggest();
   }
 });
+
+// Also re-pad when user re-taps locate (track mode focus) without a new geolocate event
+try {
+  const _geoTrigger = geolocateControl.trigger?.bind(geolocateControl);
+  if (_geoTrigger) {
+    geolocateControl.trigger = () => {
+      syncGeolocateFitPadding();
+      return _geoTrigger();
+    };
+  }
+} catch {
+  /* ignore */
+}
 
 /**
  * Empty query browse list.
@@ -11112,6 +11163,7 @@ async function renderEtaRouteDetailBody(route, ctx) {
       e.stopPropagation();
       if (!dirs || dirs.length < 2) return;
       const next = etaNextDirIndex(di, dirs);
+      if (next === di) return;
       // Keep branch when cycling onto I so reverse path matches last northbound
       const from = dirs[di];
       const to = dirs[next];
@@ -11121,6 +11173,10 @@ async function renderEtaRouteDetailBody(route, ctx) {
         String(to?.bound || "").toUpperCase() === "I"
       ) {
         etaDetailMtrBranchOverride = String(from.branch).toUpperCase();
+      } else if (route.kind === "mtr" && to?.branch) {
+        etaDetailMtrBranchOverride = String(to.branch).toUpperCase();
+      } else if (route.kind === "mtr") {
+        etaDetailMtrBranchOverride = null;
       }
       setCardDir(route, next);
       syncDirChoiceToLive(route, next, dirs);
@@ -11519,6 +11575,10 @@ function setEtaSearchOpen(open) {
   if (els.appNavSearchWrap) {
     els.appNavSearchWrap.classList.toggle("is-open", want);
   }
+  // Apple Music–style: only current tab icon stays visible while search is open
+  if (els.appBottomNav) {
+    els.appBottomNav.classList.toggle("is-search-open", want);
+  }
   if (els.appNavSearchField) {
     // Never use [hidden] — it fights the expand animation
     els.appNavSearchField.hidden = false;
@@ -11537,6 +11597,7 @@ function setEtaSearchOpen(open) {
     if (getUiMode() === "route") {
       // Plan mode: search focuses origin field instead
       els.appNavSearchWrap?.classList.remove("is-open");
+      els.appBottomNav?.classList.remove("is-search-open");
       if (els.btnNavSearch) {
         els.btnNavSearch.tabIndex = 0;
         els.btnNavSearch.setAttribute("aria-expanded", "false");
@@ -11766,9 +11827,42 @@ document.addEventListener("visibilitychange", () => {
 });
 
 // Mode switch (app nav Nearby / Trip Plan)
+// Search open (Music-style): only current tab icon shows — tap it to close search.
 els.modeButtons().forEach((btn) => {
-  btn.addEventListener("click", () => setUiMode(btn.dataset.uiMode || "eta"));
+  btn.addEventListener("click", (e) => {
+    if (els.appNavSearchWrap?.classList.contains("is-open")) {
+      e.preventDefault();
+      e.stopPropagation();
+      setEtaSearchOpen(false);
+      collapseEtaSearchIfEmpty();
+      // Clear empty query collapse already handled; blur search
+      try {
+        els.inputEtaRoute?.blur?.();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    setUiMode(btn.dataset.uiMode || "eta");
+  });
 });
+// Pinned tab: same close-search behaviour when search is expanded
+els.btnEtaPinned?.addEventListener(
+  "click",
+  (e) => {
+    if (els.appNavSearchWrap?.classList.contains("is-open")) {
+      e.preventDefault();
+      e.stopPropagation();
+      setEtaSearchOpen(false);
+      try {
+        els.inputEtaRoute?.blur?.();
+      } catch {
+        /* ignore */
+      }
+    }
+  },
+  true,
+);
 setUiMode(getUiMode());
 setDetailOpen(true);
 
@@ -12163,7 +12257,7 @@ loadManifest().catch((err) => {
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
     // Query-bust so browsers re-fetch sw.js even when an old cache-first SW is live
-    const swUrl = `${import.meta.env.BASE_URL}sw.js?v=8`;
+    const swUrl = `${import.meta.env.BASE_URL}sw.js?v=9`;
     let refreshing = false;
     const reloadOnce = () => {
       if (refreshing) return;

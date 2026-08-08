@@ -9,7 +9,7 @@
  * Bump CACHE on every deploy that must drop stuck clients.
  * Old v1 was cache-first for index.html — clients kept “too high” dock CSS forever.
  */
-const CACHE = "mtravelers-shell-v8";
+const CACHE = "mtravelers-shell-v9";
 const PRECACHE = ["./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
