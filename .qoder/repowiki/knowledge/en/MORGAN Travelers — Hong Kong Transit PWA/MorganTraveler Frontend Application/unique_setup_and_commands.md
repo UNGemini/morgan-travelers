@@ -1,0 +1,1 @@
+App bootstrap sequence in src/main.js: initAcrylic → loadStaticOverrides → setWorkerUrl(maplibre-gl-worker.mjs via public/maplibre/) → initRouter → ensure domain data (ensureMtrGeo, ensureLrtRouteData, ensureGmbRouteDirections, ensureMtrBusData) → render side panel / bottom dock. In dev mode DATA_BASE switches to a local /edge proxy instead of hk-gtfsdata.morgandev.cc.

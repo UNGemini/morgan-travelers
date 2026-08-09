@@ -1,0 +1,1 @@
+Runtime requires fetching the `hk.wheelsrouter` graph file before any plan call; `initRouter()` retries multiple URLs (local gz → custom URL → default CDN URL) and throws only after exhausting all candidates. A single global `WasmRouter` instance is reused across calls.

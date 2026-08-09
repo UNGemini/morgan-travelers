@@ -1,0 +1,1 @@
+Bootstraps the MorganTraveler single-page app: initializes MapLibre, loads static overrides and routing data, wires the side panel / bottom dock UI, and drives the acrylic cursor-lighting effect.

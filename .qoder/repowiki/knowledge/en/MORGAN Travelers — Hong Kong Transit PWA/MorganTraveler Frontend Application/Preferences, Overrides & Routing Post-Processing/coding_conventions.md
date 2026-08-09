@@ -1,0 +1,6 @@
+- Each preference category is modelled as a typed enum array (e.g. `BUS_COMPANIES`, `TRAFFIC_METHODS`) paired with an `isXxx(v)` validator and `loadXxx`/`saveXxx` localStorage helpers that fall back to defaults on parse errors.
+- Geographic coordinates are handled via a shared Haversine helper and validated with `Number.isFinite(lat/lon)` before any distance or projection computation.
+- External data sources are fetched with a retry/priority chain (env → same-origin API → remote URL → bundled fallback) and cached in a module-level promise or Map with TTL timestamps.
+- Operator-specific logic is dispatched by normalising the agency string to uppercase and switching on known codes (KMB/LWB, CTB/NWFB, NLB, GMB, AEL, MTR, LRT) rather than regex matching at call sites.
+- Plan transformations return a new object with mutated legs and set a feature flag property (e.g. `name_matched_alight`, `shuttle_injected`, `dual_access_stitched`) so callers can detect which post-processing was applied.
+- UI strings are derived from lookup tables (`PREF_LABELS`, `BUS_COMPANY_LABELS`, `SERVICE_DAY_LABELS`) keyed by id, never hard-coded at the call site.

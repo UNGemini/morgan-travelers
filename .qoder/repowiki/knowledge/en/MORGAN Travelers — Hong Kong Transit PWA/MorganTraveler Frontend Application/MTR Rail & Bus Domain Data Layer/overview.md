@@ -1,0 +1,1 @@
+Provides MTR heavy-rail, Light Rail and bus domain data — station directories, platform GeoJSON layers, line colors, interchange rules, line orders, and bus route/stop datasets used by routing and map rendering.

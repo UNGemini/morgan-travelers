@@ -1,0 +1,1 @@
+Cloudflare Pages Functions (ESM modules exporting `onRequest`), native `fetch`/`Response` Web APIs, GitHub REST API v3 with Bearer tokens, optional Cloudflare KV + R2 storage, and environment-driven configuration (`GITHUB_OAUTH_*`, `OVERRIDES_REPO`, `OVERRIDES_GITHUB_TOKEN`, `CONTRIBUTE_WEBHOOK_URL`).

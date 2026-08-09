@@ -967,11 +967,11 @@ body.mobile-ui [data-acrylic]::before {
   background: linear-gradient(
     to top,
     rgba(var(--glass-rgb), 0.97) 0%,
-    rgba(var(--glass-rgb), 0.94) 36%,
-    rgba(var(--glass-rgb), 0.82) 52%,
-    rgba(var(--glass-rgb), 0.58) 68%,
-    rgba(var(--glass-rgb), 0.32) 82%,
-    rgba(var(--glass-rgb), 0.12) 92%,
+    rgba(var(--glass-rgb), 0.94) 34%,
+    rgba(var(--glass-rgb), 0.82) 50%,
+    rgba(var(--glass-rgb), 0.6) 66%,
+    rgba(var(--glass-rgb), 0.34) 80%,
+    rgba(var(--glass-rgb), 0.1) 92%,
     rgba(var(--glass-rgb), 0) 100%
   );
   -webkit-backdrop-filter: blur(28px) saturate(1.55);
@@ -979,19 +979,19 @@ body.mobile-ui [data-acrylic]::before {
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.15) 14%,
-    rgba(0, 0, 0, 0.45) 32%,
-    rgba(0, 0, 0, 0.8) 52%,
-    #000 70%,
+    rgba(0, 0, 0, 0.12) 18%,
+    rgba(0, 0, 0, 0.38) 36%,
+    rgba(0, 0, 0, 0.72) 56%,
+    #000 76%,
     #000 100%
   );
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.15) 14%,
-    rgba(0, 0, 0, 0.45) 32%,
-    rgba(0, 0, 0, 0.8) 52%,
-    #000 70%,
+    rgba(0, 0, 0, 0.12) 18%,
+    rgba(0, 0, 0, 0.38) 36%,
+    rgba(0, 0, 0, 0.72) 56%,
+    #000 76%,
     #000 100%
   );
 }
@@ -1015,6 +1015,55 @@ body.mobile-ui [data-acrylic]::before {
   pointer-events: auto;
 }
 
+/* Trip Plan: Plan Trip CTA floats above the app nav (same chrome as method pills) */
+.route-plan-cta-chrome {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 10px 6px;
+  margin: 0;
+  border: none;
+  background: transparent;
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+.route-plan-cta-chrome > * {
+  pointer-events: auto;
+}
+
+/* Plan Trip CTA only on the Trip Plan form/results — never other modes/pages */
+.app-shell:not([data-ui-mode="route"]) #route-plan-cta-chrome,
+.app-shell[data-ui-mode="route"]:has(#sidebar-page-trip:not([hidden])) #route-plan-cta-chrome,
+.app-shell[data-ui-mode="route"]:has(#sidebar-page-pinned:not([hidden])) #route-plan-cta-chrome,
+.app-shell[data-ui-mode="route"]:has(#sidebar-page-eta-route:not([hidden])) #route-plan-cta-chrome,
+.app-shell[data-ui-mode="route"]:has(#sidebar-page-settings:not([hidden])) #route-plan-cta-chrome,
+.app-shell[data-ui-mode="route"]:has(#sidebar-page-about:not([hidden])) #route-plan-cta-chrome {
+  display: none !important;
+}
+
+#btn-plan-cta {
+  width: 100%;
+  margin: 0;
+  min-height: 48px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #000;
+  border-color: transparent;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+#btn-plan-cta:not(:disabled):hover {
+  box-shadow:
+    0 0 24px var(--accent-glow, rgba(192, 174, 252, 0.45)),
+    0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
 /* Method pills only on Nearby list (not route detail / other pages) */
 .app-shell:not([data-ui-mode="eta"]) #eta-sidebar-bottom-chrome,
 .app-shell[data-ui-mode="eta"]:has(#sidebar-page-eta-route:not([hidden])) #eta-sidebar-bottom-chrome,
@@ -1025,10 +1074,9 @@ body.mobile-ui [data-acrylic]::before {
   display: none !important;
 }
 
-/*
- * Route detail: Back + Pin live in panel-bottom-stack and replace app nav.
- */
-#eta-route-detail-chrome {
+/* Route detail: Back + Pin live in panel-bottom-stack and replace app nav. */
+#eta-route-detail-chrome,
+#subpage-detail-chrome {
   display: none;
   flex: 0 0 auto;
   flex-direction: row;
@@ -1046,11 +1094,13 @@ body.mobile-ui [data-acrylic]::before {
   position: relative;
   z-index: 1;
 }
-#eta-route-detail-chrome:not([hidden]) {
+#eta-route-detail-chrome:not([hidden]),
+#subpage-detail-chrome:not([hidden]) {
   display: flex !important;
 }
 /* When detail chrome is shown, hide main app nav */
-.panel-bottom-stack:has(#eta-route-detail-chrome:not([hidden])) #app-bottom-nav {
+.panel-bottom-stack:has(#eta-route-detail-chrome:not([hidden])) #app-bottom-nav,
+.panel-bottom-stack:has(#subpage-detail-chrome:not([hidden])) #app-bottom-nav {
   display: none !important;
 }
 
@@ -1454,7 +1504,7 @@ body.mobile-ui [data-acrylic]::before {
   min-height: 0;
   overflow: auto;
   /* Clear floating nav (pills hidden on pinned) */
-  padding: 4px 12px calc(var(--toolbar-h, 58px) + 16px);
+  padding: 4px 8px calc(var(--toolbar-h, 58px) + 16px);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1486,27 +1536,13 @@ body.mobile-ui [data-acrylic]::before {
   font-variation-settings: "FILL" 1, "wght" 500, "GRAD" 0, "opsz" 20;
 }
 
-.pinned-dest-row {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin: 4px 0 2px;
-  font-size: 0.95rem;
-  color: var(--text-primary);
-}
-
-.pinned-dest-row .eta-card-arrow {
-  color: var(--text-muted);
-}
-
-.pinned-board-stop {
-  margin: 0 0 6px;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
 .pinned-dir-dots {
   margin: 6px 0 0;
+}
+
+/* Wheels-style ETA panel inside pinned cards */
+.pinned-eta-card {
+  margin-top: 10px;
 }
 
 .pinned-actions {
@@ -1514,6 +1550,34 @@ body.mobile-ui [data-acrylic]::before {
   flex-direction: column;
   gap: 8px;
   margin-top: 12px;
+}
+
+/* Pinned card actions — same glass pill as the ETA cards’ opposite-direction
+ * button, incl. the thickened top outline (glass texture) */
+.pinned-actions .eta-route-details-btn,
+.pinned-actions .eta-route-pin-btn {
+  min-height: 40px;
+  padding: 10px 16px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+.pinned-actions .eta-route-details-btn:hover,
+.pinned-actions .eta-route-pin-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.pinned-actions .eta-route-pin-btn.is-pinned {
+  background: rgba(192, 174, 252, 0.14);
+  border-color: rgba(192, 174, 252, 0.35);
+  color: #ddd6fe;
 }
 
 .pinned-foot {
@@ -1870,7 +1934,7 @@ body.mobile-ui [data-acrylic]::before {
 
 .wheels-eta-dest {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   font-size: 1.05rem;
   font-weight: 700;
@@ -1879,13 +1943,26 @@ body.mobile-ui [data-acrylic]::before {
 
 .wheels-eta-dest-icon {
   flex-shrink: 0;
-  margin-top: 1px;
   font-size: 20px !important;
   opacity: 0.95;
 }
 
 .wheels-eta-dest-text {
   min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* Last-update chip — top-right corner of the panel (ticks every second) */
+.wheels-eta-updated {
+  flex-shrink: 0;
+  margin-left: auto;
+  align-self: center;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.72);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .wheels-eta-board {
@@ -1959,6 +2036,17 @@ body.mobile-ui [data-acrylic]::before {
   color: rgba(255, 255, 255, 0.82);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* Per-departure destination line (peak-hour specials show their own dest) */
+.wheels-eta-slotdest {
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.62);
+  max-width: 7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -2086,6 +2174,21 @@ body.mobile-ui [data-acrylic]::before {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Dual-label branch pill: active branch bright, sibling dimmed */
+.wheels-branch-switch .wheels-branch-dest.is-current,
+.eta-card-branch-switch .wheels-branch-dest.is-current {
+  opacity: 1;
+  font-weight: 700;
+}
+.wheels-branch-switch .wheels-branch-dest.is-other,
+.eta-card-branch-switch .wheels-branch-dest.is-other {
+  opacity: 0.5;
+}
+.wheels-branch-sep {
+  font-size: 0.68rem;
+  opacity: 0.45;
+  margin: 0 -2px;
 }
 
 /*
@@ -2683,7 +2786,9 @@ body.mobile-ui [data-acrylic]::before {
 .eta-route-details-btn,
 .eta-route-pin-btn {
   width: 100%;
+  min-height: 44px;
   justify-content: center;
+  border-radius: 999px;
 }
 
 .eta-route-details-btn {
@@ -2829,6 +2934,11 @@ body.mobile-ui [data-acrylic]::before {
   -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
+}
+
+/* Route mode: the dock (Plan Trip CTA + nav) overlays the panel foot — clear it */
+.app-shell[data-ui-mode="route"] .detail-sidebar-body {
+  padding-bottom: calc(var(--nav-dock-h, 80px) + 16px);
 }
 
 /* Sheets (settings / info) */
@@ -4222,11 +4332,11 @@ body.contrib-submitting .bg-orb {
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-primary);
-  background: rgba(0, 0, 0, 0.4)
+  background: rgba(255, 255, 255, 0.06)
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23999' d='M1 1l5 5 5-5'/%3E%3C/svg%3E")
     no-repeat right 12px center;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
   padding: 10px 36px 10px 12px;
   outline: none;
   cursor: pointer;
@@ -4305,25 +4415,25 @@ body.contrib-submitting .bg-orb {
   color: var(--accent);
 }
 
-#btn-plan {
-  width: 100%;
-  margin-top: 4px;
-  align-items: center;
-}
-
 .plan-results {
   margin-top: 12px;
   display: grid;
   gap: 8px;
+  /* Side padding matches the ETA list; the scroll container clears the dock */
+  padding: 0 8px;
 }
 
-.result-meta {
-  margin: 0;
+/* Section label replacing the old debug meta line / divider */
+.results-section-title {
+  margin: 0 2px;
   font-size: 0.72rem;
-  font-weight: 500;
-  letter-spacing: 0.04em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
+}
+.trip-detail-head .results-section-title {
+  margin-top: 16px;
 }
 
 .plan-card {
@@ -4332,22 +4442,28 @@ body.contrib-submitting .bg-orb {
   font-family: inherit;
   color: inherit;
   cursor: pointer;
-  background: var(--bg-card-alt);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 12px 12px 10px;
+  /* ETA-card geometry: pill button + padding → outer radius (38px) */
+  --eta-card-pad: 16px;
+  --eta-btn-h: 44px;
+  --eta-btn-r: calc(var(--eta-btn-h) / 2);
+  --eta-card-r: calc(var(--eta-btn-r) + var(--eta-card-pad));
+  /* Liquid glass — matches ETA Nearby cards */
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--eta-card-r);
+  padding: var(--eta-card-pad);
   transition: border-color 0.2s ease, background 0.2s ease;
   box-sizing: border-box;
 }
 
 .plan-card:hover {
-  border-color: var(--border-hov);
-  background: #1a1a1a;
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .plan-card.active {
-  border-color: rgba(192, 174, 252, 0.5);
-  background: var(--accent-dim);
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.09);
 }
 
 .plan-card:focus-visible {
@@ -4355,36 +4471,65 @@ body.contrib-submitting .bg-orb {
   outline-offset: 2px;
 }
 
-.plan-detail-btn {
+.plan-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.plan-actions .plan-detail-btn,
+.plan-actions .plan-pin-btn {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* Card buttons — same glass pill as the ETA cards’ opposite-direction
+ * button, incl. the thickened top outline (glass texture) */
+.plan-detail-btn,
+.plan-pin-btn {
   appearance: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   width: 100%;
-  margin-top: 8px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  border: 1px solid rgba(192, 174, 252, 0.28);
-  background: rgba(192, 174, 252, 0.08);
-  color: var(--accent);
+  margin: 0;
+  padding: 10px 16px;
+  min-height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.92);
   font-family: inherit;
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: 0.82rem;
+  font-weight: 650;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
-.plan-detail-btn .material-symbols-outlined {
+.plan-detail-btn:hover,
+.plan-pin-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.plan-pin-btn.is-pinned {
+  background: rgba(192, 174, 252, 0.14);
+  border-color: rgba(192, 174, 252, 0.35);
+  color: #ddd6fe;
+}
+
+.plan-detail-btn .material-symbols-outlined,
+.plan-pin-btn .material-symbols-outlined {
   font-size: 18px !important;
 }
 
-.plan-detail-btn:hover {
-  background: rgba(192, 174, 252, 0.16);
-  border-color: rgba(192, 174, 252, 0.45);
-}
-
-.plan-detail-btn:focus-visible {
+.plan-detail-btn:focus-visible,
+.plan-pin-btn:focus-visible {
   outline: 2px solid rgba(192, 174, 252, 0.55);
   outline-offset: 1px;
 }
@@ -4400,31 +4545,16 @@ body.contrib-submitting .bg-orb {
   display: none !important;
 }
 
-.trip-detail-bar {
-  padding: 4px 12px 8px;
-  flex-shrink: 0;
-}
-
-.trip-back-btn {
-  width: 100%;
-  justify-content: flex-start;
-}
-
-.trip-back-btn .btn-row {
-  gap: 6px;
-}
-
 .trip-detail-head {
-  padding: 0 14px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  margin-bottom: 4px;
+  padding: 0 12px 14px;
+  margin-bottom: 8px;
 }
 
 .trip-detail-od {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-bottom: 10px;
+  gap: 4px;
+  margin-bottom: 14px;
 }
 
 .trip-od-from,
@@ -4449,7 +4579,7 @@ body.contrib-submitting .bg-orb {
   gap: 6px 12px;
   font-size: 0.78rem;
   color: var(--text-secondary);
-  margin-bottom: 6px;
+  margin-bottom: 10px;
 }
 
 .trip-detail-meta .duration {
@@ -4483,14 +4613,20 @@ body.contrib-submitting .bg-orb {
 }
 
 .trip-eta-status {
-  margin: 4px 0 0;
+  margin: 8px 0 0;
   font-size: 0.68rem;
   color: var(--text-muted);
   letter-spacing: 0.02em;
 }
 
 .trip-detail-timeline {
-  padding: 8px 12px 20px;
+  padding: 12px 12px calc(var(--nav-dock-h, 80px) + 20px);
+}
+
+/* Wheels ETA panel at each board stop (trip detail) */
+.trip-detail-timeline .wheels-eta-card {
+  margin-top: 8px;
+  width: 100%;
 }
 
 /* Live ETA card at board stop (trip detail) — up to 3 buses/trains */
@@ -5402,10 +5538,28 @@ body.contrib-submitting .bg-orb {
   flex-direction: column;
   align-items: stretch;
   padding: 6px 14px 4px;
+  position: relative;
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
   cursor: grab;
+}
+/* Soft clip: page content fades under the title bar (no hard line) */
+.sheet-chrome::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -34px;
+  height: 34px;
+  pointer-events: none;
+  z-index: 2;
+  background: linear-gradient(
+    to bottom,
+    rgba(var(--glass-rgb), 0.92) 0%,
+    rgba(var(--glass-rgb), 0.45) 55%,
+    rgba(var(--glass-rgb), 0) 100%
+  );
 }
 /* Desktop overrides in min-width:641px (no grabber / tighter top) */
 .sheet-grabber {
@@ -5761,7 +5915,17 @@ body.contrib-submitting .bg-orb {
 .plan-trip-cta {
   width: 100%;
   margin-top: 8px;
+  min-height: 48px;
   justify-content: center;
+  flex-direction: row;
+  align-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #000;
+  border-color: transparent;
+}
+.plan-trip-cta:not(:disabled):hover {
+  box-shadow: 0 0 24px var(--accent-glow, rgba(192, 174, 252, 0.45));
 }
 
 /* Settings / About panel pages */
@@ -5769,16 +5933,39 @@ body.contrib-submitting .bg-orb {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 4px 12px 16px;
+  padding: 4px 8px 16px;
   -webkit-overflow-scrolling: touch;
 }
 .panel-page-scroll .panel-section {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
+  /* Liquid glass card — matches ETA Nearby cards */
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+}
+/* Sections are separate cards — drop the hairline divider */
+.panel-page-scroll .panel-section + .panel-section {
+  margin-top: 0;
+  padding-top: 14px;
+  border-top: none;
 }
 .panel-page-scroll .panel-section h3 {
   margin: 0 0 8px;
   font-size: 0.95rem;
   font-weight: 700;
+}
+/* Glass buttons on Settings / About (downloads, links, contribute) */
+.panel-page-scroll .btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.88);
+}
+.panel-page-scroll .btn:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
 }
 #sidebar-page-settings,
 #sidebar-page-about {
@@ -6115,8 +6302,9 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     background: linear-gradient(
       to top,
       rgba(var(--glass-rgb), 1) 0%,
-      rgba(var(--glass-rgb), 0.99) 45%,
-      rgba(var(--glass-rgb), 0.96) 100%
+      rgba(var(--glass-rgb), 0.97) 32%,
+      rgba(var(--glass-rgb), 0.92) 62%,
+      rgba(var(--glass-rgb), 0.88) 100%
     ) !important;
     border: none !important;
     -webkit-backdrop-filter: blur(28px) saturate(1.55);
@@ -6129,17 +6317,18 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   /* Soft dissolve on the *top* of the dock only (list → glass) */
   .panel-bottom-stack::before {
     opacity: 1;
-    top: -28px;
+    top: -64px;
     bottom: auto;
-    height: 36px;
+    height: 80px;
     background: linear-gradient(
       to bottom,
       rgba(var(--glass-rgb), 0) 0%,
-      rgba(var(--glass-rgb), 0.55) 55%,
-      rgba(var(--glass-rgb), 0.96) 100%
+      rgba(var(--glass-rgb), 0.35) 38%,
+      rgba(var(--glass-rgb), 0.66) 68%,
+      rgba(var(--glass-rgb), 0.9) 100%
     );
-    -webkit-backdrop-filter: blur(16px) saturate(1.4);
-    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(18px) saturate(1.4);
+    backdrop-filter: blur(18px) saturate(1.4);
     -webkit-mask-image: none;
     mask-image: none;
   }
@@ -6170,7 +6359,8 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   .app-bottom-nav {
     padding: 4px 10px 6px !important;
   }
-  #eta-route-detail-chrome {
+  #eta-route-detail-chrome,
+  #subpage-detail-chrome {
     padding: 4px 10px 6px !important;
   }
 
@@ -6277,6 +6467,18 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     overflow: auto;
   }
 
+  /*
+   * Nav clearance: page scrollers must end above the fixed bottom dock.
+   * --nav-dock-h is JS-measured (incl. safe area), so the last element
+   * is never buried under the nav on trip/pinned/settings/about pages.
+   */
+  .panel-page-scroll {
+    padding-bottom: calc(var(--nav-dock-h) + 16px);
+  }
+  .pinned-route-body {
+    padding-bottom: calc(var(--nav-dock-h) + 16px);
+  }
+
   .app-shell[data-sheet="full"] .main-toolbar:not(.is-sheet-dragging) {
     border-radius: 16px 16px 0 0;
   }
@@ -6337,7 +6539,8 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     --safe-bottom-content: 6px;
   }
   html.pwa .app-bottom-nav,
-  html.pwa #eta-route-detail-chrome {
+  html.pwa #eta-route-detail-chrome,
+  html.pwa #subpage-detail-chrome {
     padding-top: 4px !important;
     padding-left: 10px !important;
     padding-right: 10px !important;

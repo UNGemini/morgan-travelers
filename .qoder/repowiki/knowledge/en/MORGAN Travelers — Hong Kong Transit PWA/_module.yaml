@@ -1,0 +1,15 @@
+schema_version: 1
+module_path: ""
+title: MORGAN Travelers — Hong Kong Transit PWA
+scope:
+    - index.html
+    - package.json
+    - package-lock.json
+    - vite.config.js
+    - .gitignore
+    - MORGAN Travelers PRD.md
+    - .env.example
+    - wrangler.toml
+source_files: []
+depends_on: []
+related_to: []

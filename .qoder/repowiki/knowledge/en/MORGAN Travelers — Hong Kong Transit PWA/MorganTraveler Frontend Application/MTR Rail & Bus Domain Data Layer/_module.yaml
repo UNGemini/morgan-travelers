@@ -1,0 +1,16 @@
+schema_version: 1
+module_path: frontend_app/mtr_domain
+title: MTR Rail & Bus Domain Data Layer
+scope:
+    - src/mtrLayer.js
+    - src/mtrStations.js
+    - src/mtrBusData.js
+    - src/mtrColors.js
+    - src/mtrInterchange.js
+    - src/mtrLineOrder.js
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app/app_shell
+    - path: frontend_app/fares_and_interchanges
+    - path: frontend_app/routing_engine

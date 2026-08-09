@@ -1,0 +1,1 @@
+Loads and caches Light Rail route-stop sequences, stop coordinates, and shape/platform overrides from MTR open data plus static overrides, and resolves Green Minibus routes via the etagmb.gov.hk proxy.

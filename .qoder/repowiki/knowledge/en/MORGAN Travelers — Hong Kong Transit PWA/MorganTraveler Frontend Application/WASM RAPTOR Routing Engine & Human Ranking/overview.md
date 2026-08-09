@@ -1,0 +1,1 @@
+Loads a compiled wheels-router-nano WASM graph and wraps it with HK-specific plan filtering, transfer/penalty scoring, and multi-preference ranking for MTR/bus/LRT/AEL itineraries.

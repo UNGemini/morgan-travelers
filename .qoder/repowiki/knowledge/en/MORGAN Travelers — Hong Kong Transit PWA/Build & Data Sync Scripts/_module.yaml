@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: build_scripts
+title: Build & Data Sync Scripts
+scope:
+    - scripts/
+source_files: []
+depends_on: []
+related_to:
+    - path: static_assets

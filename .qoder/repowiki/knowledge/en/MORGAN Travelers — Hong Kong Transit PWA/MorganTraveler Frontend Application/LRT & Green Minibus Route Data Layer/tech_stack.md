@@ -1,0 +1,1 @@
+Plain ES modules with JSDoc type annotations; CSV parsing is hand-rolled (no library); LRT data sourced from MTR opendata CSV and static GeoJSON overrides; GMB data fetched from the app's own `/eta/gmb/*` proxy wrapping data.etagmb.gov.hk.

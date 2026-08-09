@@ -5,7 +5,7 @@
 
 import { LRT_STOPS } from "./lrtStops.js";
 import { MTR_STATIONS } from "./mtrStations.js";
-import { MTR_LINE_ORDER } from "./mtrLineOrder.js";
+import { MTR_LINE_ORDER, mtrStationLabel } from "./mtrLineOrder.js";
 import { isLightRailOption, detectMtrLineCode } from "./mtrColors.js";
 import {
   formatServiceClock,
@@ -255,11 +255,44 @@ export function isOvernightRouteCode(route) {
 }
 
 /**
+ * Approximate last train departure (HK minutes after midnight) per MTR line,
+ * from the terminal stations (the later direction — covers the line's final
+ * train). Verify against MTR's published last-train timetable; adjust here.
+ */
+const MTR_LINE_LAST_TRAIN_MINS = {
+  AEL: 24 * 60 + 48, // 00:48 Hong Kong → AsiaWorld-Expo
+  DRL: 24 * 60 + 10, // 00:10 Disneyland Resort → Sunny Bay
+  TCL: 24 * 60 + 48, // 00:48 Hong Kong → Tung Chung
+  TML: 24 * 60 + 35, // 00:35 Wu Kai Sha → Tuen Mun
+  EAL: 24 * 60 + 45, // 00:45 Admiralty → Lo Wu
+  SIL: 24 * 60 + 45, // 00:45 Admiralty → South Horizons
+  TWL: 24 * 60 + 55, // 00:55 Central → Tsuen Wan
+  ISL: 24 * 60 + 52, // 00:52 Kennedy Town → Chai Wan
+  KTL: 24 * 60 + 42, // 00:42 Whampoa → Tiu Keng Leng
+  TKL: 24 * 60 + 45, // 00:45 North Point → Po Lam
+};
+
+/** Stop MTR schedule predictions this many minutes before the last departure. */
+const MTR_LAST_TRAIN_PREDICT_MINS = 15;
+
+/**
+ * After-midnight cutoff for MTR schedule predictions: a few minutes before
+ * each line's last 3 trains depart. Unknown lines fall back to 01:00.
+ * @param {string} [route]
+ */
+function mtrPredictionEndMins(route) {
+  const last = MTR_LINE_LAST_TRAIN_MINS[String(route || "").toUpperCase()];
+  if (last == null) return 1 * 60;
+  return (last - MTR_LAST_TRAIN_PREDICT_MINS + 24 * 60) % (24 * 60);
+}
+
+/**
  * Rough Hong Kong service window for inventing headways / showing “outside service”.
  * Not a full GTFS calendar — only gates placeholder times.
  *
  *  · Day routes: ~05:30–01:15 (covers last trains/buses after midnight)
  *  · Overnight N-routes: ~23:00–06:30
+ *  · MTR (subway): ends per line, a few minutes before its last 3 trains
  *
  * @param {{
  *   operator?: string,
@@ -285,7 +318,13 @@ export function isTypicalServiceWindow(opts = {}, now = new Date()) {
   // Standard day service: from 05:30 through 01:15 next calendar day
   const dayStart = 5 * 60 + 30;
   const afterMidnightEnd = 1 * 60 + 15;
-  return mins >= dayStart || mins <= afterMidnightEnd;
+  // MTR heavy rail: stop schedule predictions a few minutes before each
+  // line's last 3 trains depart (per-line last-departure table above).
+  const end =
+    String(opts.mode || "").toLowerCase() === "subway"
+      ? mtrPredictionEndMins(route)
+      : afterMidnightEnd;
+  return mins >= dayStart || mins <= end;
 }
 
 /**
@@ -304,6 +343,9 @@ export function outsideServiceEtaResult(base = {}, remark = "Outside service hou
     etaIso: null,
     scheduled: false,
     outsideService: true,
+    // Keep fixed-database platform numbers visible during off hours
+    servingPlatforms: base.servingPlatforms || [],
+    multiPlatform: base.multiPlatform != null ? base.multiPlatform : false,
     remark,
     error: null,
     fetchedAt: Date.now(),
@@ -624,10 +666,10 @@ export function stationNameWithPlatforms(label, platforms) {
   const base = stationBaseName(label) || String(label || "").trim();
   const plats = collectServingPlatforms(platforms || []);
   if (!base) {
-    return plats.length ? `Platform ${plats.join("/")}` : "";
+    return plats.length ? `Platform ${plats.join(" / ")}` : "";
   }
   if (!plats.length) return base;
-  return `${base} - Platform ${plats.join("/")}`;
+  return `${base} - Platform ${plats.join(" / ")}`;
 }
 
 /**
@@ -750,6 +792,7 @@ async function fetchKmbEta(opt, board) {
       waitMins,
       etaIso: iso,
       dest: r.dest_en || r.dest_tc || "",
+      destZh: r.dest_tc || "",
       remark: r.rmk_en || r.rmk_tc || "",
       platform: formatPlatformLabel(r.plat || r.platform) || plat,
     });
@@ -807,6 +850,7 @@ async function fetchCtbEta(opt, board) {
       waitMins,
       etaIso: iso,
       dest: r.dest_en || r.dest_tc || "",
+      destZh: r.dest_tc || "",
       remark: r.rmk_en || r.rmk_tc || "",
       platform: formatPlatformLabel(r.plat || r.platform) || plat,
     });
@@ -1191,7 +1235,20 @@ async function fetchMtrEta(opt, board, alight) {
       alightCode,
     );
 
-    const servingPlatforms = collectServingPlatforms(trains);
+    // Always union live `plat` values with the fixed platform database
+    // (public/mtr/platforms.geojson) so numbers survive night hours and
+    // API gaps when the schedule returns no trains at all.
+    const livePlats = collectServingPlatforms(trains);
+    const staticPlats = await mtrPlatformsForLineStation(
+      line,
+      sta,
+      trains,
+      alightCode,
+    );
+    const servingPlatforms = collectServingPlatforms([
+      ...livePlats,
+      ...staticPlats,
+    ]);
     const now = Date.now();
     const slots = [];
     for (const t of trains) {
@@ -1236,6 +1293,105 @@ async function fetchMtrEta(opt, board, alight) {
       etaIso: null,
       error: e instanceof Error ? e.message : "MTR fetch failed",
     };
+  }
+}
+
+/** Line-name fragments used to match public/mtr/platforms.geojson features. */
+const MTR_PLATFORM_LINE_NAMES = {
+  AEL: ["Airport Express Line", "機場快"],
+  TCL: ["Tung Chung Line", "東涌"],
+  TML: ["Tuen Ma Line", "屯馬"],
+  EAL: ["East Rail Line", "東鐵"],
+  SIL: ["South Island Line", "南港島"],
+  TWL: ["Tsuen Wan Line", "荃灣"],
+  ISL: ["Island Line", "港島"],
+  KTL: ["Kwun Tong Line", "觀塘"],
+  TKL: ["Tseung Kwan O Line", "將軍澳"],
+  DRL: ["Disneyland Resort Line", "迪士尼"],
+};
+
+/** @type {Promise<object> | null} */
+let mtrPlatformsGeoPromise = null;
+
+/** Load public/mtr/platforms.geojson once (cached). */
+function ensureMtrPlatformsGeo() {
+  if (!mtrPlatformsGeoPromise) {
+    mtrPlatformsGeoPromise = fetchJson("/mtr/platforms.geojson").catch((e) => {
+      mtrPlatformsGeoPromise = null;
+      throw e;
+    });
+  }
+  return mtrPlatformsGeoPromise;
+}
+
+/**
+ * Static platform numbers for a line/station when the live API omits `plat`
+ * (or returns no trains at all, e.g. outside service hours). Matches
+ * platforms.geojson features by station code + line name + destination names
+ * from the returned trains and/or the trip terminus (alight code).
+ * Unnumbered platforms (ref 0 / empty, e.g. Po Lam) are skipped.
+ * @param {string} line
+ * @param {string} sta
+ * @param {object[]} [trains]
+ * @param {string} [alightCode]
+ * @returns {Promise<string[]>}
+ */
+async function mtrPlatformsForLineStation(line, sta, trains, alightCode) {
+  const lineNames =
+    MTR_PLATFORM_LINE_NAMES[String(line || "").toUpperCase()] || [];
+  if (!lineNames.length) return [];
+  const dests = new Set();
+  for (const t of trains || []) {
+    const code = String(t?.dest || "").toUpperCase();
+    const lab = mtrStationLabel(code);
+    if (lab?.en && lab.en !== code) dests.add(lab.en);
+    if (lab?.zh && lab.zh !== code) dests.add(lab.zh);
+  }
+  // Trip terminus from the alight option — lets matching run with zero trains
+  if (alightCode) {
+    const lab = mtrStationLabel(alightCode);
+    if (lab?.en && lab.en !== alightCode) dests.add(lab.en);
+    if (lab?.zh && lab.zh !== alightCode) dests.add(lab.zh);
+  }
+  if (!dests.size) return [];
+  try {
+    const gj = await ensureMtrPlatformsGeo();
+    const sc = String(sta || "").toUpperCase();
+    const at = (gj.features || []).filter(
+      (ft) =>
+        String(ft?.properties?.station_code || "").toUpperCase() === sc,
+    );
+    // Prefer features carrying the line name; fall back to dest-only so
+    // features like “Platform 1 to Lo Wu/Lok Ma Chau” still match.
+    const withLine = at.filter((ft) =>
+      lineNames.some(
+        (n) =>
+          (ft.properties?.name_en || "").includes(n) ||
+          (ft.properties?.name_zh || "").includes(n),
+      ),
+    );
+    const pool = withLine.length ? withLine : at;
+    const refs = new Set();
+    for (const ft of pool) {
+      const p = ft.properties || {};
+      const named = [...dests].some(
+        (d) =>
+          (p.name_en || "").includes(d) || (p.name_zh || "").includes(d),
+      );
+      if (!named) continue;
+      const ref = String(p.ref ?? "").trim();
+      if (!ref || ref === "0") continue;
+      refs.add(ref);
+    }
+    return [...refs].sort((a, b) => {
+      const na = Number(a);
+      const nb = Number(b);
+      if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+      return a.localeCompare(b, undefined, { numeric: true });
+    });
+  } catch (e) {
+    console.warn("[eta] MTR platform fallback", line, sta, e);
+    return [];
   }
 }
 
@@ -1313,6 +1469,7 @@ async function fetchLrtEta(opt, board) {
           waitMins,
           etaIso: new Date(now + waitMins * 60_000).toISOString(),
           dest: r.dest_en || r.dest_ch || "",
+          destZh: r.dest_ch || "",
           remark: rno ? `Route ${rno}` : "",
           platform: plat || platformFromStop(board),
           scheduled: false,
@@ -1871,6 +2028,8 @@ export function withScheduledFallback(result, opt, plan = null, legIndex = 0) {
         operator: result?.operator || etaOperator(opt),
         route: routeCode,
         stopId: result?.stopId || "",
+        servingPlatforms: result?.servingPlatforms || [],
+        multiPlatform: result?.multiPlatform,
       },
       "Outside service hours",
     );
@@ -2222,6 +2381,22 @@ export function formatLiveStatusHead(fetchedAt, nowMs = Date.now()) {
   const sec = Math.max(0, Math.floor((nowMs - fetchedAt) / 1000));
   const unit = sec === 1 ? "second" : "seconds";
   return `Live Status (Last Update: ${sec} ${unit} ago)`;
+}
+
+/**
+ * Compact “last update” chip for ETA panels (top-right corner).
+ * @param {number | null | undefined} fetchedAt epoch ms
+ * @param {number} [nowMs]
+ */
+export function formatUpdatedAgo(fetchedAt, nowMs = Date.now()) {
+  if (fetchedAt == null || !Number.isFinite(fetchedAt)) {
+    return "Updated —";
+  }
+  const sec = Math.max(0, Math.floor((nowMs - fetchedAt) / 1000));
+  if (sec < 60) return `Updated ${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `Updated ${min}m ago`;
+  return `Updated ${Math.floor(min / 60)}h ago`;
 }
 
 /**

@@ -1,0 +1,5 @@
+- Async data loaders expose an `ensureXxx()` function that memoizes a single in-flight Promise and a result cache, returning immediately if already loaded or currently loading.
+- Route/direction APIs accept flexible bound strings (`O/I/OUTBOUND/INBOUND/1/2/UP/DOWN/LRT/LINE`) and normalize them to canonical direction codes before filtering cached rows.
+- Stop coordinate lookup uses a multi-key fallback chain (exact code → exact stop_id → exact English name → substring match) to tolerate minor discrepancies between CSV and the local stop registry.
+- Static overrides are read at runtime from `./overrides.js` rather than imported as constants, allowing `public/overrides/lrt.json` to mutate stop positions and shapes after module load.
+- All network requests use the app's same-origin `/eta/*` proxy paths instead of calling upstream APIs directly, keeping CORS and cookie handling uniform.

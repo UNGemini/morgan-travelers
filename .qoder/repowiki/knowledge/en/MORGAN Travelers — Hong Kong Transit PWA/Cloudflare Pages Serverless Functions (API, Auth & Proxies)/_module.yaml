@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: serverless_functions
+title: Cloudflare Pages Serverless Functions (API, Auth & Proxies)
+scope:
+    - functions/
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app/eta_service
+    - path: frontend_app/lrt_gmb_domain
+    - path: frontend_app/preferences_and_overrides

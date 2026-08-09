@@ -1,0 +1,12 @@
+schema_version: 1
+module_path: frontend_app/routing_engine
+title: WASM RAPTOR Routing Engine & Human Ranking
+scope:
+    - src/router.ts
+    - src/pkg/
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app/app_shell
+    - path: frontend_app/mtr_domain
+    - path: frontend_app/preferences_and_overrides

@@ -1,0 +1,6 @@
+- Every route file exports a single `onRequest(context)` handler that destructures `{ request, env }` and parses routes by stripping the prefix from `url.pathname`.
+- CORS is enabled on every response via a local `CORS` object or `corsHeaders()` helper, consistently setting `Access-Control-Allow-Origin: *` and `Cross-Origin-Resource-Policy: cross-origin`.
+- External service responses are proxied by reading the upstream body as an `arrayBuffer` and returning it verbatim with `Content-Type` forwarded from the upstream response.
+- GitHub interactions go exclusively through the shared `_shared/github.js` helpers (`ghHeaders`, `parseSessionCookie`, `sessionCookieHeader`, `openOverridesPullRequest`) rather than inline fetch calls.
+- Environment-sensitive features are gated by checking `env.*` presence and falling back to defaults (e.g. `DEFAULT_REPO`, `DEFAULT_BRANCH`, `DEFAULT_OVERRIDES_REPO`) instead of throwing on missing config.
+- All JSON error responses use a uniform shape `{ ok: false, error: '...', ...context }` and return appropriate HTTP status codes (400/401/405/413/502) with `Cache-Control: no-store`.

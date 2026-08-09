@@ -1,0 +1,5 @@
+- Each child module exports a small, named ES-module API (initXxx / ensureXxx / fetchXxx) imported directly by main.js rather than sharing a global namespace.
+- Domain data loaders use an ensure* prefix to lazily fetch and cache GTFS/static datasets (ensureMtrGeo, ensureLrtRouteData, ensureGmbRouteDirections, ensureMtrBusData) before use.
+- User-facing state (preferences, pinned routes, traffic methods, service day) is persisted to localStorage under morgan.* keys and migrated on load when schema changes.
+- All operator/live-data fetching goes through a single DATA_BASE origin constant that resolves to either a remote CDN or a local /edge proxy depending on hostname.
+- UI interactions are driven by data-* attributes on DOM elements queried via els.* references, with event handlers attached after render rather than via frameworks.

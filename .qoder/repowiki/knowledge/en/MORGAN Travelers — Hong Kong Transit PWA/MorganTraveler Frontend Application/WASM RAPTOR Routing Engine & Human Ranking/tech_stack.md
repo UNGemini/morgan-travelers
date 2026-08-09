@@ -1,0 +1,1 @@
+Rust-compiled wheels-router-nano exposed as WebAssembly via wasm-pack; JS glue class `WasmRouter` with `plan`, `plan_viz`, `stats` methods; graph data served as `.gz` compressed bytes fetched at runtime.

@@ -1,0 +1,12 @@
+schema_version: 1
+module_path: frontend_app/fares_and_interchanges
+title: Fare Estimation & Interchange Discount Engine
+scope:
+    - src/fares.js
+    - src/interchangeSchemes.js
+    - src/data/
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app/app_shell
+    - path: frontend_app/mtr_domain

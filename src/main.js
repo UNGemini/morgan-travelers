@@ -120,11 +120,10 @@ import {
   fetchPlanBoardEtas,
   fetchBoardEta,
   buildPlanStopTimes,
-  formatEtaCardLine,
   formatWaitMins,
   waitMinutesFromIso,
   formatHkClock,
-  formatLiveStatusHead,
+  formatUpdatedAgo,
   stationNameWithPlatforms,
   stationBaseName,
   etaOperatorShowsPlatform,
@@ -233,7 +232,7 @@ const els = {
   btnPickOrigin: document.getElementById("btn-pick-origin"),
   btnPickDest: document.getElementById("btn-pick-dest"),
   mapPickHint: document.getElementById("map-pick-hint"),
-  btnPlan: document.getElementById("btn-plan"),
+  btnPlanCta: document.getElementById("btn-plan-cta"),
   planResults: document.getElementById("plan-results"),
   // Shell: panel + sheets
   mainToolbar: document.getElementById("main-toolbar"),
@@ -261,14 +260,10 @@ const els = {
   sidebarPagePinned: document.getElementById("sidebar-page-pinned"),
   sidebarPageSettings: document.getElementById("sidebar-page-settings"),
   sidebarPageAbout: document.getElementById("sidebar-page-about"),
-  btnSettingsBack: document.getElementById("btn-settings-back"),
-  btnAboutBack: document.getElementById("btn-about-back"),
   pinnedRouteBody: document.getElementById("pinned-route-body"),
-  btnPinnedBack: document.getElementById("btn-pinned-back"),
   etaRouteDetailHead: document.getElementById("eta-route-detail-head"),
   etaRouteDetailBody: document.getElementById("eta-route-detail-body"),
   btnEtaRouteBack: document.getElementById("btn-eta-route-back"),
-  btnTripBack: document.getElementById("btn-trip-back"),
   tripDetailHead: document.getElementById("trip-detail-head"),
   tripDetailTimeline: document.getElementById("trip-detail-timeline"),
   inputEtaRoute: document.getElementById("input-eta-route"),
@@ -283,6 +278,11 @@ const els = {
   toolbarPinnedLabel: document.getElementById("toolbar-pinned-label"),
   etaBottomChrome: document.getElementById("eta-sidebar-bottom-chrome"),
   etaRouteDetailChrome: document.getElementById("eta-route-detail-chrome"),
+  subpageDetailChrome: document.getElementById("subpage-detail-chrome"),
+  btnSubpageBack: document.getElementById("btn-subpage-back"),
+  subpageBackLabel: document.getElementById("subpage-back-label"),
+  btnSubpagePin: document.getElementById("btn-subpage-pin"),
+  subpagePinLabel: document.getElementById("subpage-pin-label"),
   etaSidebarSearch: document.getElementById("eta-sidebar-search"),
   btnEtaSearchToggle: document.getElementById("btn-eta-search-toggle"),
   modeButtons: () =>
@@ -297,6 +297,8 @@ const els = {
 const ETA_PINNED_KEY = "morgan.etaPinnedRoutes";
 /** @deprecated old single-route key — migrated on load */
 const ETA_PINNED_KEY_LEGACY = "morgan.etaPinnedRoute";
+/** Pinned trip plans (survive PWA reloads — localStorage). */
+const PLAN_PINNED_KEY = "morgan.pinnedPlans";
 
 /**
  * Pinned entry: route + boarding stop (+ visit index for circular multi-visit).
@@ -495,6 +497,106 @@ function savePinnedEtaRoutes(routes) {
   } catch {
     /* ignore quota */
   }
+}
+
+/**
+ * Pinned trip plan entry (plan survives PWA reloads).
+ * @typedef {{
+ *   key: string,
+ *   fromLabel: string,
+ *   toLabel: string,
+ *   plan: object,
+ *   pinnedAt: number,
+ * }} PinnedPlanEntry
+ */
+
+/**
+ * @returns {PinnedPlanEntry[]}
+ */
+function loadPinnedPlans() {
+  try {
+    const raw = localStorage.getItem(PLAN_PINNED_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr)
+      ? arr.filter((e) => e && e.plan && e.key)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * @param {PinnedPlanEntry[]} list
+ */
+function savePinnedPlans(list) {
+  try {
+    if (!list?.length) {
+      localStorage.removeItem(PLAN_PINNED_KEY);
+      return;
+    }
+    localStorage.setItem(PLAN_PINNED_KEY, JSON.stringify(list));
+  } catch {
+    /* ignore quota */
+  }
+}
+
+/** Stable identity for a plan: departure + per-leg route/stops. */
+function planPinKey(p) {
+  const head = p.start_time || "";
+  const parts = (p.legs || []).map((leg) => {
+    if (leg.type === "transit") {
+      const opt = leg.route_options?.[0];
+      const a = opt?.from?.stop_id ?? opt?.from?.id ?? "";
+      const b = opt?.to?.stop_id ?? opt?.to?.id ?? "";
+      return `t:${opt?.route_id || opt?.route_short_name || ""}:${a}:${b}`;
+    }
+    if (leg.type === "walk") {
+      const a = leg.from?.stop_id ?? leg.from?.id ?? "";
+      const b = leg.to?.stop_id ?? leg.to?.id ?? "";
+      return `w:${a}:${b}`;
+    }
+    return `${leg.type || "?"}:${Math.round(leg.duration_seconds || 0)}`;
+  });
+  return `${head}|${parts.join(",")}`;
+}
+
+/**
+ * @param {object} p
+ * @returns {boolean}
+ */
+function isPlanPinned(p) {
+  const key = planPinKey(p);
+  return loadPinnedPlans().some((e) => e.key === key);
+}
+
+/**
+ * Pin / unpin the current plan. Returns the new pinned state.
+ * @param {object} p
+ * @returns {boolean}
+ */
+function togglePinPlan(p) {
+  const key = planPinKey(p);
+  const list = loadPinnedPlans();
+  const i = list.findIndex((e) => e.key === key);
+  if (i >= 0) {
+    list.splice(i, 1);
+    savePinnedPlans(list);
+    return false;
+  }
+  let stored;
+  try {
+    stored = JSON.parse(JSON.stringify(p));
+  } catch {
+    return false;
+  }
+  if (!stored) return false;
+  delete stored.fare; // re-estimated on render with the current ticket type
+  stored.fromLabel = origin?.label || origin?.name || "";
+  stored.toLabel = destination?.label || destination?.name || "";
+  list.push({ key, fromLabel: stored.fromLabel, toLabel: stored.toLabel, plan: stored, pinnedAt: Date.now() });
+  savePinnedPlans(list);
+  return true;
 }
 
 /**
@@ -702,9 +804,9 @@ function pinnedRouteCardHtml(route, ctx) {
     color,
     boardName,
     dirDots,
-    etaRows,
-    hasLive,
-    headText,
+    etaSlotsHtml,
+    updatedLabel,
+    fetchedAt,
     key,
   } = ctx;
   return `
@@ -716,15 +818,15 @@ function pinnedRouteCardHtml(route, ctx) {
         </span>
         <span class="material-symbols-outlined pinned-badge-icon" aria-hidden="true">push_pin</span>
       </div>
-      <div class="pinned-dest-row">
-        <span class="eta-card-arrow" aria-hidden="true">→</span>
-        <strong>${escapeHtml(dest)}</strong>
-      </div>
-      ${boardName ? `<p class="pinned-board-stop">${escapeHtml(boardName)}</p>` : ""}
       ${dirDots}
-      <div class="rt-eta-card ${hasLive ? "is-live" : "is-scheduled"}" style="margin-top:10px">
-        <div class="rt-eta-card-head">${escapeHtml(headText)}</div>
-        <ul class="rt-eta-card-list">${etaRows}</ul>
+      <div class="wheels-eta-card pinned-eta-card" style="--wheels-route-color:${escapeHtml(color)}">
+        <div class="wheels-eta-dest">
+          <span class="material-symbols-outlined wheels-eta-dest-icon" aria-hidden="true">arrow_forward</span>
+          <span class="wheels-eta-dest-text">${escapeHtml(dest)}</span>
+          <span class="wheels-eta-updated" data-eta-updated data-fetched-at="${Number.isFinite(Number(fetchedAt)) ? Number(fetchedAt) : ""}">${escapeHtml(updatedLabel)}</span>
+        </div>
+        ${boardName ? `<p class="wheels-eta-board">${escapeHtml(boardName)}</p>` : ""}
+        <div class="wheels-eta-slots" role="list" aria-label="Live arrivals">${etaSlotsHtml}</div>
       </div>
       <div class="pinned-actions">
         <button type="button" class="btn eta-route-details-btn" data-pinned-details data-acrylic>
@@ -772,7 +874,7 @@ async function buildPinnedRouteCardContext(route) {
   );
   const dir = dirs[di] || dirs[0] || { dest: route.label };
   if (route.bound) dir.bound = route.bound;
-  const dest = dir.destZh || dir.dest || route.label;
+  const dest = etaDirectionDisplayLabel(dirs, dir) || route.label;
   const color = companyLineColor(route);
   const coLabel =
     route.kind === "mtr"
@@ -822,28 +924,22 @@ async function buildPinnedRouteCardContext(route) {
 
   const slots = (etaResult.etas || []).slice(0, 3);
   const hasLive = slots.some((s) => !s.scheduled);
-  const boardName =
+  let boardName =
     boardStop?.name ||
     route.stopName ||
     etaLiveByKey.get(etaRouteKey(route))?.stopLabel ||
     dir.orig ||
     "";
-  const etaRows = slots.length
-    ? slots
-        .map((slot, i) => {
-          const line = formatEtaCardLine(slot, {
-            operator: etaResult.operator,
-            showPlatform:
-              !slot.scheduled && etaOperatorShowsPlatform(etaResult.operator),
-          });
-          const tag = slot.scheduled
-            ? `<span class="rt-eta-card-tag" title="SCHEDULED">Sched</span>`
-            : `<span class="rt-eta-card-tag rt-eta-card-tag-live">LIVE</span>`;
-          const nowArrived = slot.waitMins != null && slot.waitMins <= 0;
-          return `<li class="rt-eta-card-row${nowArrived ? " is-due is-now" : ""}${slot.scheduled ? " is-scheduled-row" : ""}${i === 0 ? " is-next" : ""}"><span class="rt-eta-card-line">${escapeHtml(line)}</span>${tag}</li>`;
-        })
-        .join("")
-    : `<li class="rt-eta-card-row is-empty">N/A</li>`;
+  // Board line: station name + platform for rail (MTR / LRT)
+  const plats = etaOperatorShowsPlatform(etaResult.operator)
+    ? etaResult?.servingPlatforms || []
+    : [];
+  if (boardName && plats.length) {
+    boardName = stationNameWithPlatforms(stationBaseName(boardName), plats);
+  }
+  const { html: etaSlotsHtml } = wheelsEtaSlotsHtml(etaResult, {
+    kind: route.kind,
+  });
 
   const dirDots = etaHasRealOpposite(dirs)
     ? `<div class="eta-card-dots pinned-dir-dots" role="tablist" aria-label="Direction">
@@ -867,11 +963,11 @@ async function buildPinnedRouteCardContext(route) {
     color,
     boardName,
     dirDots,
-    etaRows,
-    hasLive,
-    headText: hasLive
-      ? formatLiveStatusHead(etaResult.fetchedAt)
+    etaSlotsHtml,
+    updatedLabel: hasLive
+      ? formatUpdatedAgo(etaResult.fetchedAt)
       : "Timetable",
+    fetchedAt: etaResult?.fetchedAt || null,
     key,
   };
 }
@@ -882,18 +978,88 @@ async function buildPinnedRouteCardContext(route) {
 async function renderPinnedRoutePage() {
   const body = els.pinnedRouteBody;
   if (!body) return;
+  const pinnedPlans = loadPinnedPlans();
   const list = loadPinnedEtaRoutes();
-  if (!list.length) {
+  if (!pinnedPlans.length && !list.length) {
     body.innerHTML = `
       <div class="pinned-empty">
         <span class="material-symbols-outlined" aria-hidden="true">push_pin</span>
-        <p>No pinned stops yet</p>
-        <p class="hint">Open a route, pick a stop, then tap <strong>Pin</strong>.</p>
+        <p>Nothing pinned yet</p>
+        <p class="hint">Pin trip plans from Plan Results, or open a route, pick a stop, then tap <strong>Pin</strong>.</p>
       </div>`;
     return;
   }
 
-  body.innerHTML = `<p class="hint" style="padding:12px">Loading ${list.length} pinned route${list.length > 1 ? "s" : ""}…</p>`;
+  const parts = [];
+  if (pinnedPlans.length) {
+    parts.push(`<h3 class="results-section-title">Pinned Trips</h3>`);
+    parts.push(
+      pinnedPlans
+        .map((entry, i) =>
+          planCardHtml(entry.plan, i, {
+            pinned: true,
+            planKey: entry.key,
+            pinState: true,
+            leastFareOn: false,
+            originPt: { label: entry.fromLabel },
+            destPt: { label: entry.toLabel },
+          }),
+        )
+        .join(""),
+    );
+  }
+  if (list.length) {
+    parts.push(`<h3 class="results-section-title">Pinned Routes</h3>`);
+    parts.push(
+      `<p class="hint" id="pinned-eta-loading" style="padding:12px">Loading ${list.length} pinned route${list.length > 1 ? "s" : ""}…</p>`,
+    );
+  }
+  body.innerHTML = parts.join("");
+
+  // Pinned trip plans: open detail / unpin
+  body.querySelectorAll("[data-pinned-plan]").forEach((card) => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      const entry = pinnedPlans.find(
+        (x) => x.key === card.getAttribute("data-pinned-plan"),
+      );
+      if (entry) openTripDetailPage(entry.plan);
+    });
+    card.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      const entry = pinnedPlans.find(
+        (x) => x.key === card.getAttribute("data-pinned-plan"),
+      );
+      if (entry) openTripDetailPage(entry.plan);
+    });
+  });
+  body.querySelectorAll("[data-pin-plan-detail]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const entry = pinnedPlans.find(
+        (x) => x.key === btn.getAttribute("data-pin-plan-detail"),
+      );
+      if (entry) openTripDetailPage(entry.plan);
+    });
+  });
+  body.querySelectorAll("[data-pin-plan-unpin]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const entry = pinnedPlans.find(
+        (x) => x.key === btn.getAttribute("data-pin-plan-unpin"),
+      );
+      if (!entry) return;
+      savePinnedPlans(loadPinnedPlans().filter((x) => x.key !== entry.key));
+      showToast("Trip plan unpinned", 1600);
+      void renderPinnedRoutePage();
+    });
+  });
+
+  if (!list.length) {
+    clearRouteGeometry();
+    return;
+  }
 
   const resolved = list.map((p) => resolvePinnedRouteEntry(p)).filter(Boolean);
   /** @type {Array<Awaited<ReturnType<typeof buildPinnedRouteCardContext>>>} */
@@ -911,9 +1077,12 @@ async function renderPinnedRoutePage() {
     etaSelectedStops = contexts[0].stops || [];
   }
 
-  body.innerHTML =
+  const etaHtml =
     contexts.map((ctx) => pinnedRouteCardHtml(ctx.route, ctx)).join("") +
     `<p class="hint pinned-foot">${contexts.length} pinned route${contexts.length > 1 ? "s" : ""}</p>`;
+  const loadingEl = body.querySelector("#pinned-eta-loading");
+  if (loadingEl) loadingEl.outerHTML = etaHtml;
+  else body.innerHTML += etaHtml;
 
   body.querySelectorAll("[data-pinned-details]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1025,6 +1194,23 @@ const etaCardDirIndex = new Map();
  * @type {Map<string, { minutes: number | null, stopLabel: string, dest?: string, destZh?: string, bound?: string, stopId?: string, scheduled?: boolean, clock?: string }>}
  */
 const etaLiveByKey = new Map();
+/**
+ * Live ETA per route key (list cards). Carries fetch metadata for UI chips.
+ * @typedef {{
+ *   minutes: number | null,
+ *   stopLabel: string,
+ *   dest?: string,
+ *   destZh?: string,
+ *   bound?: string,
+ *   stopId?: string,
+ *   scheduled?: boolean,
+ *   clock?: string,
+ *   outsideService?: boolean,
+ *   fetchedAt?: number,
+ *   platforms?: string[],
+ * }} EtaLiveByKeyEntry
+ * @type {Map<string, EtaLiveByKeyEntry>}
+ */
 /**
  * Nearby direction slots per route (each bound can use a different stop).
  * Index 0 = preferred “going away from user”.
@@ -1282,6 +1468,8 @@ function applyNearbyDirLive(r, opts = {}) {
   if (!slot) return false;
 
   etaLiveByKey.set(key, {
+    // Keep platform / last-update info from the last network fetch
+    ...(etaLiveByKey.get(key) || {}),
     minutes: slot.minutes,
     stopLabel: slot.stopLabel,
     dest: slot.dest,
@@ -1425,7 +1613,7 @@ async function refreshCardLiveEta(r, opts = {}) {
       if (st) {
         board = {
           stopId: `MTR-${st.code}`,
-          name: st.name_en,
+          name: st.name_zh ? `${st.name_zh} ${st.name_en}` : st.name_en,
           lon: st.lon,
           lat: st.lat,
           stationCode: st.code,
@@ -1489,6 +1677,8 @@ async function refreshCardLiveEta(r, opts = {}) {
       scheduled: !!(first?.scheduled || result?.scheduled),
       clock: first?.clock || "",
       outsideService: !!result?.outsideService,
+      fetchedAt: result?.fetchedAt ?? Date.now(),
+      platforms: result?.servingPlatforms || [],
     });
     if (stopLabel) {
       r.nearbyHint = stopLabel;
@@ -1908,14 +2098,12 @@ function sortSlotsGoingAway(slots) {
 
 /** Sidebar stack: "search" | "trip" */
 let sidebarPage = "search";
-/** Plan index open on the trip detail page */
+/** Plan on the trip detail page: index in `plans`, or the plan object itself (pinned). */
 let tripDetailIdx = null;
 /** @type {Map<number, import("./eta.js").LegEtaResult> | null} */
 let tripDetailEtas = null;
 /** @type {ReturnType<typeof setInterval> | null} */
 let tripEtaPollTimer = null;
-/** @type {ReturnType<typeof setInterval> | null} */
-let tripEtaAgeTimer = null;
 /** Generation token so stale ETA fetches don't paint after close/switch */
 let tripEtaGen = 0;
 
@@ -2115,6 +2303,22 @@ function mapVisiblePadding(extra = {}) {
   const toolbar = document.getElementById("main-toolbar");
   const stack = document.getElementById("panel-bottom-stack");
 
+  // BR control stack (geolocate / nav buttons) — measure the real button
+  // column instead of reserving a blind 56px, which shifts fits left.
+  // Attribution is stroked pointer-events:none text — fits may pass under it.
+  let brReserve = 0;
+  try {
+    const brGroup = document.querySelector(
+      ".maplibregl-ctrl-bottom-right .maplibregl-ctrl-group",
+    );
+    const br = brGroup?.getBoundingClientRect?.();
+    if (br && br.width > 4 && br.top < mapBottom && br.bottom > mapTop) {
+      brReserve = Math.ceil(mapRight - br.left) + 6;
+    }
+  } catch {
+    /* ignore */
+  }
+
   if (isDesktop) {
     // Left panel covers the map
     if (toolbar) {
@@ -2123,8 +2327,8 @@ function mapVisiblePadding(extra = {}) {
         left = Math.max(left, Math.ceil(tr.right - mapLeft) + 16);
       }
     }
-    // Room for BR tools / ©
-    right = Math.max(right, 56);
+    // Room for BR tools (measured; fallback for hidden/unmounted controls)
+    right = Math.max(right, brReserve || 44);
     bottom = Math.max(bottom, 28);
     top = Math.max(top, 20);
   } else {
@@ -2157,17 +2361,19 @@ function mapVisiblePadding(extra = {}) {
         bottom = Math.max(bottom, 240);
       }
     }
-    // Map tools + © on the right
-    right = Math.max(right, 56);
+    // Map tools on the right (measured button column; © is non-blocking)
+    right = Math.max(right, brReserve || 44);
     top = Math.max(top, 12);
   }
 
   // Cap so map still has a usable centre (never pad more than ~70% of an axis)
   const maxL = Math.floor(vw * 0.62);
   const maxB = Math.floor(vh * 0.72);
-  left = Math.min(left, maxL);
   bottom = Math.min(bottom, maxB);
   right = Math.min(right, Math.floor(vw * 0.35));
+  // Balance horizontal padding so fits centre in the open area — the BR
+  // control reserve otherwise pulls the visual centre toward the left.
+  left = Math.min(Math.max(left, right), maxL);
   top = Math.min(top, Math.floor(vh * 0.25));
 
   return {
@@ -2580,11 +2786,8 @@ function repricePlansForFareType() {
     ...p,
     fare: estimatePlanFare(p, type),
   }));
-  // Preserve ms label if present in results header — re-render with 0 ms delta
-  const meta = els.planResults?.querySelector?.(".result-meta");
-  const msMatch = meta?.textContent?.match(/(\d+)\s*ms/);
-  const ms = msMatch ? Number(msMatch[1]) : 0;
-  renderPlans(plans, ms, { bothMtr: !!(origin?.isMtr && destination?.isMtr) });
+  // Re-render cards (no debug meta line anymore — just refresh the list)
+  renderPlans(plans, 0, { bothMtr: !!(origin?.isMtr && destination?.isMtr) });
   return true;
 }
 
@@ -2646,8 +2849,8 @@ function initEalFirstClassUi() {
 initEalFirstClassUi();
 
 function updatePlanButton() {
-  if (!els.btnPlan) return;
-  els.btnPlan.disabled = !(isRouterReady() && origin && destination);
+  const ready = isRouterReady() && origin && destination;
+  if (els.btnPlanCta) els.btnPlanCta.disabled = !ready;
 }
 
 /**
@@ -3136,6 +3339,8 @@ function wireSearchInput(input, which) {
   });
 
   input.addEventListener("focus", () => {
+    // Switching fields closes the other field’s suggest popup
+    hideSuggest(which === "origin" ? "destination" : "origin");
     setPickMode(which === "origin" ? "origin" : "destination", { armMap: false });
     const q = input.value.trim();
     if (q.length >= 1) {
@@ -3166,13 +3371,33 @@ function wireSearchInput(input, which) {
 wireSearchInput(els.inputOrigin, "origin");
 wireSearchInput(els.inputDest, "destination");
 
-// Hide suggestions when clicking outside the field
+// Hide suggestions when clicking outside the field — or when switching fields
+// (each .loc-field carries its own popup, so clicking the other field closes it)
 document.addEventListener("pointerdown", (e) => {
-  if (!e.target.closest?.(".loc-field")) {
+  const field = e.target.closest?.(".loc-field")?.getAttribute("data-field");
+  if (!field) {
+    hideSuggest("origin");
+    hideSuggest("destination");
+  } else if (field === "origin") {
+    hideSuggest("destination");
+  } else if (field === "destination") {
+    hideSuggest("origin");
+  } else {
+    // Any other field (e.g. Departure time): close both suggest popups
     hideSuggest("origin");
     hideSuggest("destination");
   }
 });
+
+// ETA panels: “Updated Ns ago” chips tick every second (route detail / trip / pinned)
+setInterval(() => {
+  if (document.visibilityState !== "visible") return;
+  const now = Date.now();
+  document.querySelectorAll("[data-eta-updated]").forEach((el) => {
+    const t = Number(el.dataset.fetchedAt || 0);
+    if (Number.isFinite(t) && t > 0) el.textContent = formatUpdatedAgo(t, now);
+  });
+}, 1_000);
 
 // ── Current location ─────────────────────────────────────────────────────────
 els.btnUseLocation?.addEventListener("click", async () => {
@@ -3235,7 +3460,7 @@ els.btnSwap?.addEventListener("click", () => {
   updatePlanButton();
 });
 
-els.btnPlan?.addEventListener("click", () => {
+els.btnPlanCta?.addEventListener("click", () => {
   if (!origin || !destination || !isRouterReady()) return;
   runPlan();
 });
@@ -4321,7 +4546,7 @@ async function walkFeatureForLeg(legs, walkIdx, opts = {}) {
 }
 
 function runPlan() {
-  if (els.btnPlan) els.btnPlan.disabled = true;
+  if (els.btnPlanCta) els.btnPlanCta.disabled = true;
   els.planResults.hidden = false;
   els.planResults.innerHTML = `<p class="hint">Planning…</p>`;
   // Hide any previous path; blur until densified geometry is ready
@@ -5262,11 +5487,16 @@ function planRouteLineHtml(legsArr, opts = {}) {
                 : "";
           const etaCard =
             liveEta && isFirst
-              ? `<div class="rt-eta-card" data-eta-card-leg="${origIndex}" aria-live="polite" aria-label="Live status">
-                  <div class="rt-eta-card-head" data-eta-card-head>Live Status (Last Update: —)</div>
-                  <ul class="rt-eta-card-list">
-                    <li class="rt-eta-card-row is-loading">Loading…</li>
-                  </ul>
+              ? `<div class="wheels-eta-card trip-detail-eta-card" data-eta-card-leg="${origIndex}" aria-live="polite" aria-label="Live status" style="--wheels-route-color:${escapeHtml(color)}">
+                  <div class="wheels-eta-dest">
+                    <span class="material-symbols-outlined wheels-eta-dest-icon" aria-hidden="true">arrow_forward</span>
+                    <span class="wheels-eta-dest-text">${dir ? escapeHtml(dir) : ""}</span>
+                    <span class="wheels-eta-updated" data-eta-updated data-fetched-at="">Updated —</span>
+                  </div>
+                  <p class="wheels-eta-board" data-eta-card-board hidden></p>
+                  <div class="wheels-eta-slots" data-eta-card-slots role="list" aria-label="Live arrivals">
+                    <div class="wheels-eta-slot is-empty"><span class="wheels-eta-wait">…</span></div>
+                  </div>
                 </div>`
               : "";
           const nameAttrs =
@@ -5522,113 +5752,18 @@ function renderPlans(list, ms, opts = {}) {
   }
   const leastFareOn =
     opts.leastFareOn || routePreferences.includes("cheapest");
-  const prefLabel = formatPreferencesLabel(routePreferences);
-  const fareLabel = formatFareTypeLabel(getFareType());
-  const modeLabel = formatTrafficMethodsLabel(trafficMethods);
-  const coLabel = formatBusCompaniesLabel(busCompanies);
-  const dayLabel = formatServiceDayLabel(serviceDay);
-  const timeLabel = formatDepartTimeLabel(
-    parseDepartTimeHm(departTime) || departTime,
-  );
-  const policy = `Prefer ${prefLabel} · ${dayLabel} · ${timeLabel} · ${modeLabel} · ${coLabel} · ${fareLabel}`;
-  const meta = `<p class="result-meta">${list.length} plan${list.length > 1 ? "s" : ""} · ${ms} ms · ${policy}</p>`;
   const cards = list
-    .map((p, idx) => {
-      const legsArr = p.legs || [];
-      const timeline = planRouteLineHtml(legsArr);
-      const walkM = p.walk_meters;
-      // Always re-estimate with the current ticket type (never stale adult fares)
-      const fare = estimatePlanFare(p, getFareType());
-      p.fare = fare;
-      // Least fare + first card: never show incomplete / partial fare as a number
-      const fareText =
-        leastFareOn && idx === 0 && fare.incomplete
-          ? "N/A"
-          : formatPlanFare(fare);
-      const fareTitle = (fare.parts || [])
-        .map((part) => {
-          const paid = formatFarePartAmount(part);
-          if (
-            part.adult_amount != null &&
-            part.amount != null &&
-            part.adult_amount !== part.amount
-          ) {
-            return `${part.label}: ${paid} (adult $${Number(part.adult_amount).toFixed(1)})`;
-          }
-          return `${part.label}: ${paid}`;
-        })
-        .join("\n");
-      const badges = [];
-      if (p.is_recommended || idx === 0) {
-        badges.push(`<span class="plan-badge">Recommended</span>`);
-      }
-      // Cross-station free links only (not same-station platform changes)
-      if ((p.free_mtr_interchange_walks || 0) > 0) {
-        badges.push(
-          `<span class="plan-badge plan-badge-indoor" title="Cross-station free walkway (Central↔Hong Kong, TST↔East TST, …)">Free MTR link</span>`,
-        );
-      }
-      if (p.mtr_only) {
-        badges.push(`<span class="plan-badge plan-badge-mtr">MTR</span>`);
-      }
-      const aelPromo = aelPromoForPlan(p, origin, destination);
-      if (aelPromo?.kind === "airport") {
-        badges.push(
-          `<span class="plan-badge plan-badge-ael" title="Same-day free return on Airport Express">AEL free return</span>`,
-        );
-      } else if (aelPromo?.kind === "awe") {
-        badges.push(
-          `<span class="plan-badge plan-badge-ael" title="AsiaWorld-Expo same-day return offer">AWE same-day</span>`,
-        );
-      }
-      const departClock = formatServiceClock(p.start_time);
-      return `<article class="plan-card${idx === 0 ? " active" : ""}" data-idx="${idx}" role="button" tabindex="0" aria-label="Select plan ${idx + 1}">
-        <div class="plan-head">
-          <span class="duration" title="Leave ${escapeHtml(departClock)} (UTC+8)">${escapeHtml(departClock)} · ${escapeHtml(formatDuration(p.duration_seconds))}</span>
-          <span class="plan-fare" title="${escapeHtml(fareTitle || formatFareTypeLabel())}">${escapeHtml(fareText)}</span>
-        </div>
-        <div class="plan-meta-row">
-          <span class="plan-transfers">${escapeHtml(transferLabel(p))} · ${escapeHtml(walkLabel(walkM))}</span>
-          <span class="plan-badges">${badges.join("")}</span>
-        </div>
-        ${timeline}
-        ${aelPromo ? aelPromo.html : ""}
-        ${
-          fare.parts?.length &&
-          !(leastFareOn && idx === 0 && fare.incomplete)
-            ? `<ul class="fare-parts">${fare.parts
-                .map((part) => {
-                  const paid = formatFarePartAmount(part);
-                  const adultNote =
-                    part.adult_amount != null &&
-                    part.amount != null &&
-                    part.adult_amount !== part.amount
-                      ? ` <span class="fare-adult-note">(adult $${Number(part.adult_amount).toFixed(1)})</span>`
-                      : "";
-                  return `<li>${escapeHtml(part.label)}: <strong>${escapeHtml(paid)}</strong>${adultNote}</li>`;
-                })
-                .join("")}${
-                fare.incomplete
-                  ? `<li class="fare-note">+ some legs N/A (missing fare data)</li>`
-                  : ""
-              }</ul>`
-            : leastFareOn && idx === 0 && fare.incomplete
-              ? `<p class="fare-note">Fare incomplete — not used for least-fare ranking</p>`
-              : ""
-        }
-        <button type="button" class="plan-detail-btn" data-detail-idx="${idx}">
-          <span class="material-symbols-outlined" aria-hidden="true">list_alt</span>
-          Show detail
-        </button>
-      </article>`;
-    })
+    .map((p, idx) => planCardHtml(p, idx, { leastFareOn }))
     .join("");
-  els.planResults.innerHTML = meta + cards;
+  els.planResults.innerHTML =
+    `<h3 class="results-section-title">Plan Results</h3>` + cards;
   els.planResults.hidden = false;
   els.planResults.querySelectorAll(".plan-card").forEach((card) => {
     const idx = Number(card.dataset.idx);
     card.addEventListener("click", (e) => {
-      if (e.target.closest(".plan-detail-btn")) return;
+      if (e.target.closest(".plan-detail-btn") || e.target.closest(".plan-pin-btn")) {
+        return;
+      }
       selectPlan(idx);
     });
     card.addEventListener("keydown", (e) => {
@@ -5644,7 +5779,144 @@ function renderPlans(list, ms, opts = {}) {
       openTripDetailPage(Number(btn.dataset.detailIdx));
     });
   });
+  els.planResults.querySelectorAll("[data-plan-pin]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const idx = Number(btn.dataset.planPin);
+      const plan = plans[idx];
+      if (!plan) return;
+      const pinned = togglePinPlan(plan);
+      setPlanPinButton(btn, pinned);
+      showToast(pinned ? "Trip plan pinned" : "Trip plan unpinned", 1600);
+    });
+  });
 }
+
+/**
+ * One plan card — shared by Plan Results and Pinned Trips.
+ * @param {object} p
+ * @param {number} idx
+ * @param {{
+ *   leastFareOn?: boolean,
+ *   pinned?: boolean,
+ *   planKey?: string,
+ *   pinState?: boolean,
+ *   originPt?: { label?: string } | null,
+ *   destPt?: { label?: string } | null,
+ * }} [opts]
+ */
+function planCardHtml(p, idx, opts = {}) {
+  const { leastFareOn = false, pinned = false, planKey = "", pinState } = opts;
+  const legsArr = p.legs || [];
+  const timeline = planRouteLineHtml(legsArr);
+  const walkM = p.walk_meters;
+  // Always re-estimate with the current ticket type (never stale adult fares)
+  const fare = estimatePlanFare(p, getFareType());
+  p.fare = fare;
+  // Least fare + first card: never show incomplete / partial fare as a number
+  const fareText =
+    leastFareOn && idx === 0 && fare.incomplete
+      ? "N/A"
+      : formatPlanFare(fare);
+  const fareTitle = (fare.parts || [])
+    .map((part) => {
+      const paid = formatFarePartAmount(part);
+      if (
+        part.adult_amount != null &&
+        part.amount != null &&
+        part.adult_amount !== part.amount
+      ) {
+        return `${part.label}: ${paid} (adult $${Number(part.adult_amount).toFixed(1)})`;
+      }
+      return `${part.label}: ${paid}`;
+    })
+    .join("\n");
+  const badges = [];
+  if (!pinned && (p.is_recommended || idx === 0)) {
+    badges.push(`<span class="plan-badge">Recommended</span>`);
+  }
+  // Cross-station free links only (not same-station platform changes)
+  if ((p.free_mtr_interchange_walks || 0) > 0) {
+    badges.push(
+      `<span class="plan-badge plan-badge-indoor" title="Cross-station free walkway (Central↔Hong Kong, TST↔East TST, …)">Free MTR link</span>`,
+    );
+  }
+  if (p.mtr_only) {
+    badges.push(`<span class="plan-badge plan-badge-mtr">MTR</span>`);
+  }
+  const aelPromo = aelPromoForPlan(
+    p,
+    opts.originPt ?? origin,
+    opts.destPt ?? destination,
+  );
+  if (aelPromo?.kind === "airport") {
+    badges.push(
+      `<span class="plan-badge plan-badge-ael" title="Same-day free return on Airport Express">AEL free return</span>`,
+    );
+  } else if (aelPromo?.kind === "awe") {
+    badges.push(
+      `<span class="plan-badge plan-badge-ael" title="AsiaWorld-Expo same-day return offer">AWE same-day</span>`,
+    );
+  }
+  const departClock = formatServiceClock(p.start_time);
+  const isPinned = pinState ?? isPlanPinned(p);
+  return `<article class="plan-card${!pinned && idx === 0 ? " active" : ""}" data-idx="${idx}"${pinned ? ` data-pinned-plan="${escapeHtml(planKey)}"` : ""} role="button" tabindex="0" aria-label="Plan ${idx + 1}">
+    <div class="plan-head">
+      <span class="duration" title="Leave ${escapeHtml(departClock)} (UTC+8)">${escapeHtml(departClock)} · ${escapeHtml(formatDuration(p.duration_seconds))}</span>
+      <span class="plan-fare" title="${escapeHtml(fareTitle || formatFareTypeLabel())}">${escapeHtml(fareText)}</span>
+    </div>
+    <div class="plan-meta-row">
+      <span class="plan-transfers">${escapeHtml(transferLabel(p))} · ${escapeHtml(walkLabel(walkM))}</span>
+      <span class="plan-badges">${badges.join("")}</span>
+    </div>
+    ${timeline}
+    ${aelPromo ? aelPromo.html : ""}
+    ${
+      fare.parts?.length &&
+      !(leastFareOn && idx === 0 && fare.incomplete)
+        ? `<ul class="fare-parts">${fare.parts
+            .map((part) => {
+              const paid = formatFarePartAmount(part);
+              const adultNote =
+                part.adult_amount != null &&
+                part.amount != null &&
+                part.adult_amount !== part.amount
+                  ? ` <span class="fare-adult-note">(adult $${Number(part.adult_amount).toFixed(1)})</span>`
+                  : "";
+              return `<li>${escapeHtml(part.label)}: <strong>${escapeHtml(paid)}</strong>${adultNote}</li>`;
+            })
+            .join("")}${
+            fare.incomplete
+              ? `<li class="fare-note">+ some legs N/A (missing fare data)</li>`
+              : ""
+          }</ul>`
+        : leastFareOn && idx === 0 && fare.incomplete
+          ? `<p class="fare-note">Fare incomplete — not used for least-fare ranking</p>`
+          : ""
+    }
+    <div class="plan-actions">
+      <button type="button" class="plan-detail-btn" ${pinned ? `data-pin-plan-detail="${escapeHtml(planKey)}"` : `data-detail-idx="${idx}"`}>
+        <span class="material-symbols-outlined" aria-hidden="true">list_alt</span>
+        Show detail
+      </button>
+      <button type="button" class="plan-pin-btn${isPinned ? " is-pinned" : ""}" ${pinned ? `data-pin-plan-unpin="${escapeHtml(planKey)}"` : `data-plan-pin="${idx}"`} title="${isPinned ? "Unpin plan" : "Pin plan"}">
+        <span class="material-symbols-outlined" aria-hidden="true">${isPinned ? "keep_off" : "push_pin"}</span>
+        <span class="plan-pin-label">${isPinned ? "Unpin" : "Pin"}</span>
+      </button>
+    </div>
+  </article>`;
+}
+
+/** Update a plan pin button after a toggle (icon + label + state). */
+function setPlanPinButton(btn, pinned) {
+  btn.classList.toggle("is-pinned", pinned);
+  btn.title = pinned ? "Unpin plan" : "Pin plan";
+  const icon = btn.querySelector(".material-symbols-outlined");
+  if (icon) icon.textContent = pinned ? "keep_off" : "push_pin";
+  const label = btn.querySelector(".plan-pin-label");
+  if (label) label.textContent = pinned ? "Unpin" : "Pin";
+}
+
 
 /**
  * Sidebar navigation: search ↔ trip / route / pinned / settings / about.
@@ -5718,15 +5990,35 @@ function setSidebarPage(page) {
     const body = els.panel.querySelector(".detail-sidebar-body");
     if (body) body.scrollTop = 0;
   }
-  // Route detail: Back + Pin replace main app nav in the bottom stack
+  // Route detail: Back + Pin replace main app nav in the bottom stack.
+  // Trip detail / Settings / About: single dock Back, same chrome.
+  // Pinned is a primary tab — keeps the app nav, no back button.
   const detailChrome = els.etaRouteDetailChrome;
   const onRouteDetail = sidebarPage === "eta-route";
   if (detailChrome) {
     detailChrome.hidden = !onRouteDetail;
   }
+  const subpageChrome = els.subpageDetailChrome;
+  const onSubPage =
+    sidebarPage === "trip" ||
+    sidebarPage === "settings" ||
+    sidebarPage === "about";
+  if (subpageChrome) {
+    subpageChrome.hidden = !onSubPage;
+  }
+  if (els.subpageBackLabel) {
+    els.subpageBackLabel.textContent =
+      sidebarPage === "trip" ? "Back to plans" : "Back";
+  }
+  // Pin shows only on the trip detail page (settings/about have no plan)
+  if (els.btnSubpagePin) {
+    els.btnSubpagePin.hidden = sidebarPage !== "trip";
+  }
+  updateSubpagePinButton();
   if (els.appBottomNav) {
     // CSS also hides via :has(); keep in sync for older engines
-    els.appBottomNav.style.display = onRouteDetail ? "none" : "";
+    els.appBottomNav.style.display =
+      onRouteDetail || onSubPage ? "none" : "";
   }
   if (typeof syncAppNavActive === "function") syncAppNavActive();
   // Dock height changes (filters ↔ Back/Pin) — remeasure fixed dock offset
@@ -5760,8 +6052,12 @@ function setSidebarPage(page) {
  */
 function tripDetailHeadHtml(plan, live = {}) {
   const from =
-    origin?.label || origin?.name || (origin ? fmtCoord(origin.lat, origin.lon) : "Origin");
+    plan.fromLabel ||
+    origin?.label ||
+    origin?.name ||
+    (origin ? fmtCoord(origin.lat, origin.lon) : "Origin");
   const to =
+    plan.toLabel ||
     destination?.label ||
     destination?.name ||
     (destination ? fmtCoord(destination.lat, destination.lon) : "Destination");
@@ -5817,28 +6113,12 @@ function tripDetailHeadHtml(plan, live = {}) {
                 : ""
             }</ul>`
           : ""
-      }`;
+      }
+      <h3 class="results-section-title">Full Trip Route</h3>`;
 }
 
 /**
- * Refresh "Live Status (Last Update: N seconds ago)" on all ETA cards.
- * @param {Map<number, import("./eta.js").LegEtaResult> | null} [etaMap]
- */
-function paintTripEtaCardHeads(etaMap = tripDetailEtas) {
-  const root = els.tripDetailTimeline;
-  if (!root) return;
-  const now = Date.now();
-  root.querySelectorAll("[data-eta-card-leg]").forEach((card) => {
-    const legIdx = Number(card.getAttribute("data-eta-card-leg"));
-    const eta = etaMap?.get(legIdx);
-    const head = card.querySelector("[data-eta-card-head], .rt-eta-card-head");
-    if (!head) return;
-    head.textContent = formatLiveStatusHead(eta?.fetchedAt, now);
-  });
-}
-
-/**
- * Paint BOARD/PASS BY/ALIGHT clocks + live ETA cards from open-data.
+ * Paint BOARD/PASS BY/ALIGHT clocks + live ETA panels from open-data.
  * @param {object} plan
  * @param {Map<number, import("./eta.js").LegEtaResult>} etaMap
  */
@@ -5889,16 +6169,14 @@ function applyTripDetailEtaDom(plan, etaMap) {
     }
   });
 
-  // Board ETA card — up to 3 rows: live first, then timetable fill
+  // Board ETA panel — Wheels big-slot style (live first, then timetable fill)
   root.querySelectorAll("[data-eta-card-leg]").forEach((card) => {
     const legIdx = Number(card.getAttribute("data-eta-card-leg"));
     const eta = etaMap?.get(legIdx);
-    const list = card.querySelector(".rt-eta-card-list");
-    const head = card.querySelector("[data-eta-card-head], .rt-eta-card-head");
-    if (!list) return;
-
-    card.classList.remove("is-live", "is-empty", "is-loading", "is-scheduled");
-    card.querySelector(".rt-eta-card-badge")?.remove();
+    const slotsEl = card.querySelector("[data-eta-card-slots]");
+    const boardEl = card.querySelector("[data-eta-card-board]");
+    const updatedEl = card.querySelector("[data-eta-updated]");
+    if (!slotsEl) return;
 
     const opt = plan?.legs?.[legIdx]?.route_options?.[0] || {};
     const operator = eta?.operator || etaOperator(opt);
@@ -5927,47 +6205,47 @@ function applyTripDetailEtaDom(plan, etaMap) {
     }
 
     const slots = mergeLiveWithTimetable(liveSlots, schedSlots, 3);
-    const hasLive = slots.some((s) => !s.scheduled);
-    const hasSched = slots.some((s) => s.scheduled);
+    const { html } = wheelsEtaSlotsHtml(
+      {
+        ...(eta || {}),
+        etas: slots,
+        operator,
+        outsideService: !!eta?.outsideService,
+      },
+      {
+        kind:
+          operator === "mtr" ? "mtr" : operator === "lrt" ? "lrt" : "",
+      },
+    );
+    slotsEl.innerHTML = html;
 
-    if (!slots.length) {
-      if (head) head.textContent = formatLiveStatusHead(eta?.fetchedAt);
-      card.classList.add("is-empty");
-      const emptyMsg = eta?.outsideService
-        ? "Outside service hours"
-        : eta?.error || "N/A";
-      list.innerHTML = `<li class="rt-eta-card-row is-empty">${escapeHtml(
-        emptyMsg,
-      )}</li>`;
-      return;
+    // Board line inside the panel: station name + platform for rail (MTR / LRT)
+    if (boardEl) {
+      const stopNameEl = card
+        .closest(".rt-step")
+        ?.querySelector("[data-eta-board-name-leg]");
+      const base =
+        stopNameEl?.getAttribute("data-eta-board-base") ||
+        stopNameEl?.textContent ||
+        "";
+      const plats = eta?.servingPlatforms || [];
+      if (base && plats.length && etaOperatorShowsPlatform(operator)) {
+        boardEl.textContent = stationNameWithPlatforms(base, plats);
+        boardEl.title =
+          plats.length > 1
+            ? `Platforms ${plats.join(" & ")} serve this direction`
+            : `Platform ${plats[0]}`;
+      } else {
+        boardEl.textContent = base;
+      }
+      boardEl.hidden = !boardEl.textContent.trim();
     }
-
-    if (head) {
-      head.textContent = hasLive
-        ? formatLiveStatusHead(eta?.fetchedAt)
-        : "Timetable";
+    // Last-update chip (ticks via the global [data-eta-updated] timer)
+    if (updatedEl) {
+      const t = eta?.fetchedAt || null;
+      updatedEl.dataset.fetchedAt = Number.isFinite(t) ? String(t) : "";
+      updatedEl.textContent = formatUpdatedAgo(t, Date.now());
     }
-    list.innerHTML = slots
-      .map((slot, i) => {
-        const line = formatEtaCardLine(slot, {
-          operator,
-          showPlatform: !slot.scheduled && etaOperatorShowsPlatform(operator),
-        });
-        const nowArrived = slot.waitMins != null && slot.waitMins <= 0;
-        const dest = slot.dest
-          ? ` title="${escapeHtml(`To ${slot.dest}${slot.scheduled ? " (scheduled)" : ""}${slot.remark ? ` · ${slot.remark}` : ""}`)}"`
-          : "";
-        // Per-row SCHEDULED on the right when this departure is from timetable
-        const tag = slot.scheduled
-          ? `<span class="rt-eta-card-tag" title="SCHEDULED · from timetable">Sched</span>`
-          : `<span class="rt-eta-card-tag rt-eta-card-tag-live" title="Live ETA">LIVE</span>`;
-        return `<li class="rt-eta-card-row${nowArrived ? " is-due is-now" : ""}${slot.scheduled ? " is-scheduled-row" : " is-live-row"}${i === 0 ? " is-next" : ""}"${dest}><span class="rt-eta-card-line">${escapeHtml(line)}</span>${tag}</li>`;
-      })
-      .join("");
-
-    if (hasLive && hasSched) card.classList.add("is-live", "is-mixed");
-    else if (hasLive) card.classList.add("is-live");
-    else card.classList.add("is-scheduled");
   });
 }
 
@@ -5976,10 +6254,6 @@ function stopTripEtaPolling() {
     clearInterval(tripEtaPollTimer);
     tripEtaPollTimer = null;
   }
-  if (tripEtaAgeTimer != null) {
-    clearInterval(tripEtaAgeTimer);
-    tripEtaAgeTimer = null;
-  }
 }
 
 /**
@@ -5987,17 +6261,15 @@ function stopTripEtaPolling() {
  * @param {number} [gen]
  */
 async function refreshTripDetailEtas(gen) {
-  const idx = tripDetailIdx;
-  if (idx == null || sidebarPage !== "trip") return;
-  const plan = plans[idx];
-  if (!plan) return;
+  const plan = tripDetailPlan();
+  if (!plan || sidebarPage !== "trip") return;
   const myGen = gen ?? tripEtaGen;
   const statusEl = els.tripDetailHead?.querySelector?.("[data-eta-status]");
 
   try {
     if (document.visibilityState === "hidden") return;
     const etaMap = await fetchPlanBoardEtas(plan);
-    if (myGen !== tripEtaGen || tripDetailIdx !== idx) return;
+    if (myGen !== tripEtaGen || tripDetailPlan() !== plan) return;
     tripDetailEtas = etaMap;
     applyTripDetailEtaDom(plan, etaMap);
 
@@ -6060,24 +6332,25 @@ function startTripEtaPolling() {
     if (sidebarPage !== "trip" || tripDetailIdx == null) return;
     void refreshTripDetailEtas(tripEtaGen);
   }, 60_000);
-  // Tick "Last Update: N seconds ago" every second
-  tripEtaAgeTimer = setInterval(() => {
-    if (document.visibilityState !== "visible") return;
-    if (sidebarPage !== "trip" || tripDetailIdx == null) return;
-    paintTripEtaCardHeads();
-  }, 1_000);
 }
 
 /**
  * Open full stop-by-stop itinerary as a sidebar page.
- * @param {number} idx
+ * @param {number | object} idxOrPlan plan index in `plans`, or the plan object itself (pinned trips)
+ * @param {object} [planOverride]
  */
-function openTripDetailPage(idx) {
-  const plan = plans[idx];
+function openTripDetailPage(idxOrPlan, planOverride) {
+  const plan =
+    planOverride ||
+    (typeof idxOrPlan === "number" ? plans[idxOrPlan] : idxOrPlan);
   if (!plan) return;
-  tripDetailIdx = idx;
+  tripDetailIdx = plan;
   tripDetailEtas = null;
-  selectPlan(idx);
+  if (typeof idxOrPlan === "number" && !planOverride) {
+    selectPlan(idxOrPlan);
+  } else {
+    selectPlan(plan, plan);
+  }
 
   if (els.tripDetailHead) {
     els.tripDetailHead.innerHTML = tripDetailHeadHtml(plan);
@@ -6094,11 +6367,14 @@ function openTripDetailPage(idx) {
 }
 
 function closeTripDetailPage() {
+  const refreshCards = typeof tripDetailIdx === "number" && plans.length > 0;
   stopTripEtaPolling();
   tripDetailIdx = null;
   tripDetailEtas = null;
   tripEtaGen += 1;
   setSidebarPage("search");
+  // Pin state may have changed on the trip detail page — refresh live cards
+  if (refreshCards) renderPlans(plans, 0);
 }
 
 /** Abort in-flight geometry densify when user picks another plan. */
@@ -6107,8 +6383,33 @@ let selectPlanGen = 0;
 /** Last painted route GeoJSON (for contribute-path “From plan”). */
 let lastRouteGeo = null;
 
-async function selectPlan(idx) {
-  const plan = plans[idx];
+/** Plan open on the trip detail page (number = index in `plans`, object = pinned). */
+function tripDetailPlan() {
+  if (tripDetailIdx == null) return null;
+  return typeof tripDetailIdx === "number"
+    ? plans[tripDetailIdx]
+    : tripDetailIdx;
+}
+
+/** Keep the dock Pin button in sync with the plan on the trip detail page. */
+function updateSubpagePinButton() {
+  const btn = els.btnSubpagePin;
+  if (!btn) return;
+  const plan = tripDetailPlan();
+  const pinned = !!plan && isPlanPinned(plan);
+  btn.classList.toggle("is-pinned", pinned);
+  const icon = btn.querySelector(".material-symbols-outlined");
+  if (icon) icon.textContent = pinned ? "keep_off" : "push_pin";
+  const label =
+    els.subpagePinLabel || btn.querySelector(".eta-detail-chrome-label");
+  if (label) label.textContent = pinned ? "Unpin" : "Pin";
+  const title = pinned ? "Unpin this trip" : "Pin this trip";
+  btn.title = title;
+  btn.setAttribute("aria-label", title);
+}
+
+async function selectPlan(idx, planOverride) {
+  const plan = planOverride || plans[idx];
   if (!plan) return;
   els.planResults.querySelectorAll(".plan-card").forEach((el, i) => {
     el.classList.toggle("active", i === idx);
@@ -6867,6 +7168,9 @@ function setUiMode(mode) {
   }
   // Keep sidebar width stable across ETA ↔ Trip Plan (no remeasure / no shrink)
   requestAnimationFrame(() => resizeMapSoon());
+  // Dock height changes with the Plan Trip CTA — remeasure + sync CTA state
+  requestAnimationFrame(() => measureNavDockH());
+  updatePlanButton();
   syncAppNavActive();
 }
 
@@ -7298,6 +7602,9 @@ function etaStationsMatch(a, b) {
  */
 function etaBoardLabelClean(label) {
   return String(label || "")
+    // Nearby browse hints are prefixed: “~123 m · 金鐘 Admiralty”
+    .replace(/^~\s*[\d.]+\s*km\s*·\s*/i, "")
+    .replace(/^~\s*\d+\s*m\s*·\s*/i, "")
     .replace(/\s*·\s*\d+\s*m\s*$/i, "")
     .replace(/\s*·\s*[\d.]+\s*km\s*$/i, "")
     .trim();
@@ -7433,6 +7740,79 @@ function etaNextBranchIndex(di, dirs) {
   const pos = sibs.indexOf(di);
   if (pos < 0) return sibs[0];
   return sibs[(pos + 1) % sibs.length];
+}
+
+/**
+ * Labels for the Branch control, showing BOTH the active branch and the
+ * one it will switch to. When both branches share one destination (TKL
+ * inbound → North Point, EAL inbound → Admiralty) the dest is identical
+ * for both and uninformative — use the terminus each service starts from
+ * instead, so the two options stay distinguishable.
+ * @param {{ dest?: string, destZh?: string, orig?: string, origZh?: string } | null | undefined} cur
+ * @param {{ dest?: string, destZh?: string, orig?: string, origZh?: string } | null | undefined} nextBr
+ */
+function etaBranchPairLabels(cur, nextBr) {
+  if (!cur || !nextBr) return { cur: "Branch", other: "" };
+  const sameDest =
+    etaDestKey(nextBr.destZh || nextBr.dest) ===
+    etaDestKey(cur.destZh || cur.dest);
+  const pick = (d) =>
+    (sameDest ? d.origZh || d.orig : d.destZh || d.dest) ||
+    d.destZh ||
+    d.dest ||
+    "";
+  return { cur: pick(cur), other: pick(nextBr) };
+}
+
+/**
+ * Dual-label branch pill: current (bright) ⇄ other (dimmed).
+ * @param {{ cur: string, other: string }} pair
+ */
+function etaBranchLabelsHtml(pair) {
+  if (!pair?.other) return `<span class="wheels-branch-dest is-current">${escapeHtml(pair?.cur || "Branch")}</span>`;
+  return `<span class="wheels-branch-dest is-current">${escapeHtml(pair.cur)}</span><span class="wheels-branch-sep" aria-hidden="true">⇄</span><span class="wheels-branch-dest is-other">${escapeHtml(pair.other)}</span>`;
+}
+
+/**
+ * Panel destination label for a direction. Branched rail lines whose
+ * siblings diverge show ALL branch termini (“羅湖 / 落馬洲”, “寶琳 / 康城”)
+ * because either train serves the platform; shared-dest directions
+ * (inbound North Point / Admiralty) dedupe to the single dest.
+ * @param {Array<{ bound?: string, branch?: string, dest?: string, destZh?: string }> | null | undefined} dirs
+ * @param {number} di
+ */
+function etaPanelDestLabel(dirs, di) {
+  const cur = dirs?.[di];
+  const base = cur?.destZh || cur?.dest || "";
+  const sibs = etaBranchSiblingIndices(dirs, di);
+  if (sibs.length < 2) return base;
+  const labels = [];
+  for (const i of sibs) {
+    const l = dirs[i]?.destZh || dirs[i]?.dest || "";
+    if (l && !labels.some((x) => etaDestKey(x) === etaDestKey(l))) {
+      labels.push(l);
+    }
+  }
+  return labels.length >= 2 ? labels.join(" / ") : labels[0] || base;
+}
+
+/**
+ * Display destination for a direction on list / pinned cards. Branched rail
+ * lines (EAL/TKL) pair both branch termini (“羅湖 / 落馬洲”, “寶琳 / 康城”)
+ * because either train serves the platform; shared-dest directions dedupe.
+ * @param {Array<{ bound?: string, branch?: string, dest?: string, destZh?: string }> | null | undefined} dirs
+ * @param {{ bound?: string, branch?: string, dest?: string, destZh?: string } | null | undefined} dir
+ */
+function etaDirectionDisplayLabel(dirs, dir) {
+  const base = dir?.destZh || dir?.dest || "";
+  if (!dirs?.length || !dir) return base;
+  const di = dirs.findIndex(
+    (d) =>
+      String(d.bound || "").toUpperCase() ===
+        String(dir.bound || "").toUpperCase() &&
+      String(d.branch || "") === String(dir.branch || ""),
+  );
+  return di < 0 ? base : etaPanelDestLabel(dirs, di);
 }
 
 /**
@@ -8334,6 +8714,41 @@ async function fetchNearbyKmbEtaHits(geo, limit = 16) {
 }
 
 /**
+ * Nearest MTR station served by a line, optionally biased toward the
+ * station name already used in a nearby hint.
+ * @param {string} line
+ * @param {{ lat: number, lon: number }} geo
+ * @param {Map<string, { dist: number, station: string }>} [lineNear]
+ * @returns {{ best: (typeof MTR_STATIONS)[number] | null, dist: number }}
+ */
+function nearestMtrStationForLine(line, geo, lineNear) {
+  let best = null;
+  let bestD = Infinity;
+  const hinted = lineNear?.get(line);
+  for (const st of MTR_STATIONS) {
+    if (!Number.isFinite(st.lat) || !st.code) continue;
+    const lines =
+      mtrStationLinesMap?.get(String(st.name_en || "").toLowerCase()) || [];
+    if (!lines.map((x) => String(x).toUpperCase()).includes(line)) continue;
+    const d = haversineMEta(geo.lat, geo.lon, st.lat, st.lon);
+    // Prefer the same station name used in nearby hint when close enough
+    let score = d;
+    if (
+      hinted?.station &&
+      String(st.name_en || "").toLowerCase() ===
+        String(hinted.station).toLowerCase()
+    ) {
+      score = d * 0.5;
+    }
+    if (score < bestD) {
+      bestD = score;
+      best = st;
+    }
+  }
+  return { best, dist: bestD };
+}
+
+/**
  * Attach live Next Train ETA for nearby MTR line cards.
  * @param {EtaRouteEntry[]} hits
  * @param {{ lat: number, lon: number }} geo
@@ -8348,30 +8763,7 @@ async function attachNearbyMtrLiveEtas(hits, geo, lineNear) {
     mtrHits.map(async (r) => {
       const line = String(r.id || "").toUpperCase();
       // Prefer station already chosen for this line in browse
-      let best = null;
-      let bestD = Infinity;
-      const hinted = lineNear?.get(line);
-      for (const st of MTR_STATIONS) {
-        if (!Number.isFinite(st.lat) || !st.code) continue;
-        const lines =
-          mtrStationLinesMap?.get(String(st.name_en || "").toLowerCase()) ||
-          [];
-        if (!lines.map((x) => String(x).toUpperCase()).includes(line)) continue;
-        const d = haversineMEta(geo.lat, geo.lon, st.lat, st.lon);
-        // Prefer the same station name used in nearby hint when close enough
-        let score = d;
-        if (
-          hinted?.station &&
-          String(st.name_en || "").toLowerCase() ===
-            String(hinted.station).toLowerCase()
-        ) {
-          score = d * 0.5;
-        }
-        if (score < bestD) {
-          bestD = score;
-          best = st;
-        }
-      }
+      const { best } = nearestMtrStationForLine(line, geo, lineNear);
       if (!best?.code) return;
       const opt = {
         kind: "mtr",
@@ -8421,6 +8813,35 @@ async function attachNearbyMtrLiveEtas(hits, geo, lineNear) {
       }
     }),
   );
+}
+
+/**
+ * Attach nearest-station board labels to MTR search hits (no live fetch).
+ * Search cards need a board stop for terminus-aware direction logic (hide
+ * Opposite at EAL/TKL first stations) — same behavior as nearby browse.
+ * @param {EtaRouteEntry[]} hits
+ * @param {{ lat: number, lon: number }} geo
+ */
+async function attachMtrSearchBoardLabels(hits, geo) {
+  const mtrHits = hits.filter((r) => r.kind === "mtr").slice(0, 10);
+  if (!mtrHits.length || !geo) return;
+  await ensureMtrStationLinesMap();
+  for (const r of mtrHits) {
+    const line = String(r.id || "").toUpperCase();
+    const { best, dist } = nearestMtrStationForLine(line, geo);
+    if (!best?.code) continue;
+    const stopLabel = best.name_zh
+      ? `${best.name_zh} ${best.name_en}`
+      : best.name_en;
+    // Board-only live entry (no minutes): enables first-station hiding and
+    // shows the nearest station as the board line; ETAs stay timetable-based.
+    etaLiveByKey.set(etaRouteKey(r), {
+      stopLabel,
+      stopId: best.code,
+      bound: "line",
+    });
+    r.nearbyHint = `${stopLabel} · ${Math.round(dist)} m`;
+  }
 }
 
 /**
@@ -8850,7 +9271,12 @@ async function browseEtaRoutes(limit = 28, opts = {}) {
       const c = String(code).toUpperCase();
       const prev = lineNear.get(c);
       if (!prev || d < prev.dist) {
-        lineNear.set(c, { dist: d, station: st.name_en });
+        lineNear.set(c, {
+          dist: d,
+          station: st.name_en,
+          // Browse hint label keeps Chinese (attached live labels already do)
+          stationFull: st.name_zh ? `${st.name_zh} ${st.name_en}` : st.name_en,
+        });
       }
     }
   }
@@ -8871,7 +9297,12 @@ async function browseEtaRoutes(limit = 28, opts = {}) {
     const ranked = [...lineNear.entries()].sort((a, b) => a[1].dist - b[1].dist);
     for (const [code, info] of ranked) {
       const entry = filtered.find((r) => r.kind === "mtr" && r.id === code);
-      if (entry) push(entry, `~${Math.round(info.dist)} m · ${info.station}`);
+      if (entry) {
+        push(
+          entry,
+          `~${Math.round(info.dist)} m · ${info.stationFull || info.station}`,
+        );
+      }
     }
     if (onlyMtr) {
       for (const r of filtered.filter((x) => x.kind === "mtr")) push(r);
@@ -9056,6 +9487,9 @@ function prefersRoutesSearch(s) {
   if (/^\d{1,2}[A-Za-z]/.test(q)) return true;
   // "117", "A21", "K51", "E31", "506"
   if (/^[A-Za-z]?\d/.test(q) || /^\d/.test(q)) return true;
+  // Letter-only ids like "TKL", "EAL" — MTR line codes (falls back to
+  // places when no route matches, so place-ish words still work)
+  if (/^[A-Za-z]{2,4}$/.test(q)) return true;
   // Very short alphanumeric — route number starting
   if (q.length <= 2 && /^[A-Za-z0-9\u4e00-\u9fff]/.test(q)) return true;
   return false;
@@ -9254,14 +9688,26 @@ function searchEtaRoutes(query, limit = 16) {
  * Wheels-style card body (no wifi icon). Company color on route number.
  * @param {EtaRouteEntry} r
  * @param {{ dest: string, destZh?: string, bound?: string, orig?: string }} dir
- * @param {{ minutes?: number | null, stopLabel?: string, scheduled?: boolean, clock?: string, stopId?: string, outsideService?: boolean }} [eta]
+ * @param {{ minutes?: number | null, stopLabel?: string, scheduled?: boolean, clock?: string, stopId?: string, outsideService?: boolean, platforms?: string[] }} [eta]
+ * @param {{ destLabel?: string }} [opts] destLabel: display-only destination
+ *   (e.g. paired branch termini for EAL/TKL); `dest` stays single so
+ *   headway / fare lookups keep matching.
  */
-function etaRouteCardInnerHtml(r, dir, eta = {}) {
+function etaRouteCardInnerHtml(r, dir, eta = {}, opts = {}) {
   const dest = dir.destZh || dir.dest || r.label || "—";
-  const stop =
+  const destLabel = opts.destLabel || dest;
+  let stop =
     eta.stopLabel ||
     r.nearbyHint ||
-    (dir.orig ? dir.orig : "");
+    (dir.orig
+      ? dir.origZh
+        ? `${dir.origZh} ${dir.orig}`
+        : dir.orig
+      : "");
+  // Platform indicator in the stop line for MTR / LRT (e.g. “金鐘 Admiralty - Platform 7”)
+  if (stop && eta.platforms?.length && (r.kind === "mtr" || r.kind === "lrt")) {
+    stop = stationNameWithPlatforms(stationBaseName(stop), eta.platforms);
+  }
   let mins = eta.minutes;
   let scheduled = !!eta.scheduled;
   let clock = eta.clock || "";
@@ -9355,7 +9801,7 @@ function etaRouteCardInnerHtml(r, dir, eta = {}) {
       <div class="eta-card-route ${etaCompanyColorClass(r)}" style="color:${escapeHtml(color)}">${escapeHtml(r.id)}</div>
       <div class="eta-card-dest">
         <span class="eta-card-arrow" aria-hidden="true">→</span>
-        <span>${escapeHtml(dest)}</span>
+        <span>${escapeHtml(destLabel)}</span>
       </div>
       ${stop ? `<div class="eta-card-stop">${escapeHtml(stop)}</div>` : ""}
       ${fareHtml}
@@ -9405,12 +9851,16 @@ function etaCardDotsHtml(r, dirs, activeDir, opts = {}) {
   const branchSibs = etaBranchSiblingIndices(dirs, di);
   const canBranch = branchSibs.length >= 2;
   const nextBr = canBranch ? dirs[etaNextBranchIndex(di, dirs)] : null;
-  const branchLabel = nextBr ? nextBr.destZh || nextBr.dest || "Branch" : "Branch";
-  const branchHtml = canBranch
-    ? `<button type="button" class="wheels-dir-switch eta-card-dir-switch eta-card-branch-switch" data-route-key="${escapeHtml(etaRouteKey(r))}" data-action="branch" aria-label="Switch branch" title="Switch branch to ${escapeHtml(String(branchLabel))}">
+  const branchPair = etaBranchPairLabels(dirs[di], nextBr);
+  // List cards can't reliably filter branch trains (mainline-only ETA
+  // users): drop the branch switch here. Route detail keeps it for users
+  // who explicitly want the branch shape / stop list.
+  const branchAllowed = !/^(EAL|TKL)$/i.test(String(r?.id || "").trim());
+  const branchHtml = canBranch && branchAllowed
+    ? `<button type="button" class="wheels-dir-switch eta-card-dir-switch eta-card-branch-switch" data-route-key="${escapeHtml(etaRouteKey(r))}" data-action="branch" aria-label="Switch branch" title="Switch branch: ${escapeHtml(String(branchPair.cur))} ⇄ ${escapeHtml(String(branchPair.other))}">
           <span class="material-symbols-outlined" aria-hidden="true">alt_route</span>
           <span>Branch</span>
-          <span class="wheels-branch-dest">${escapeHtml(String(branchLabel))}</span>
+          ${etaBranchLabelsHtml(branchPair)}
         </button>`
     : "";
 
@@ -9440,18 +9890,25 @@ function etaRouteCardLiHtml(r, i) {
   let di = resolveCardDirIndex(r, dirs);
   let hideOpposite = false;
 
-  // MTR: auto-suggest direction away from board; hide Opposite at first station
-  if (isRail && r.kind === "mtr" && boardLabel && dirs.length >= 1) {
+  // MTR: auto-suggest direction away from board; hide Opposite at first station.
+  // Without a live board (search without geo) the card shows the direction's
+  // first station — treat it as the board so first-station cards hide Opposite.
+  const posBoard =
+    boardLabel ||
+    (dirs[di]?.origZh
+      ? `${dirs[di].origZh} ${dirs[di].orig}`
+      : dirs[di]?.orig || "");
+  if (isRail && r.kind === "mtr" && posBoard && dirs.length >= 1) {
     const boardStop = {
       stationCode: live?.stopId || "",
       code: live?.stopId || "",
-      name: boardLabel,
+      name: posBoard,
     };
     // Prefer a direction where board is first (departing terminus) or middle
     let bestDi = di;
     let bestScore = -1;
     for (let j = 0; j < dirs.length; j++) {
-      const pos = etaMtrBoardPosition(r.id, dirs[j], boardLabel, boardStop);
+      const pos = etaMtrBoardPosition(r.id, dirs[j], posBoard, boardStop);
       if (pos.index < 0) continue;
       // Last station → wrong way (arriving only); first/middle preferred
       let score = pos.isLast ? 0 : pos.isFirst ? 3 : 2;
@@ -9466,7 +9923,7 @@ function etaRouteCardLiHtml(r, i) {
       di = bestDi;
       setCardDir(r, di);
     }
-    const pos = etaMtrBoardPosition(r.id, dirs[di], boardLabel, boardStop);
+    const pos = etaMtrBoardPosition(r.id, dirs[di], posBoard, boardStop);
     // At first station of this direction: auto-away already chosen — no Opposite
     // At last station: also hide (should have flipped); intermediate: show
     if (pos.isFirst || pos.isLast || pos.index < 0) {
@@ -9560,7 +10017,8 @@ function etaRouteCardLiHtml(r, i) {
         clock: liveForDir ? live?.clock : "",
         stopId: liveForDir ? live?.stopId : "",
         outsideService: liveForDir ? !!live?.outsideService : false,
-      })}
+        platforms: liveForDir ? live?.platforms : undefined,
+      }, { destLabel: etaDirectionDisplayLabel(dirs, useDir) })}
     </div>
     ${etaCardDotsHtml(r, dirs, di, { hideOpposite })}
   </li>`;
@@ -9908,6 +10366,16 @@ async function refreshEtaRouteSuggest() {
 
       if (result.kind === "routes") {
         const hits = result.routes || [];
+        // MTR search cards need a board stop for terminus-aware direction
+        // logic (hide Opposite at EAL/TKL first stations) — same as nearby.
+        if (etaUserGeo && hits.some((r) => r.kind === "mtr")) {
+          await attachMtrSearchBoardLabels(hits, {
+            lat: etaUserGeo.lat,
+            lon: etaUserGeo.lon,
+          });
+          if (gen !== etaSuggestGen || getUiMode() !== "eta") return;
+          if (String(els.inputEtaRoute?.value || "").trim() !== q) return;
+        }
         renderEtaRouteSuggest(
           hits,
           hits.length ? result.hint || "" : result.hint || `No routes match “${q}”`,
@@ -10248,20 +10716,19 @@ function fitMapToRouteCoords(coords, opts = {}) {
     maxLat += 0.008;
   }
 
-  const run = (attempt = 0) => {
+  const run = () => {
     try {
       if (!map?.getStyle?.()) return;
       map.resize?.();
-      map.stop?.();
       const bounds = [
         [minLon, minLat],
         [maxLon, maxLat],
       ];
       const padding = mapVisiblePadding({
         top: 28,
-        right: 16,
+        right: 8,
         bottom: 20,
-        left: 16,
+        left: 8,
       });
       const duration = opts.duration ?? 900;
       const maxZoom = opts.maxZoom ?? 15;
@@ -10271,13 +10738,15 @@ function fitMapToRouteCoords(coords, opts = {}) {
           maxZoom,
         });
         if (camera?.center && Number.isFinite(camera?.zoom)) {
+          // cameraForBounds already framed the bounds inside `padding` —
+          // do NOT pass padding to flyTo again or the view shifts by the
+          // padding delta (route ends up off-centre / under the sheet).
           map.flyTo({
             center: camera.center,
             zoom: camera.zoom,
-            duration: attempt === 0 ? duration : Math.max(300, duration - 300),
+            duration,
             essential: true,
             curve: 1.2,
-            padding,
           });
           return;
         }
@@ -10285,34 +10754,51 @@ function fitMapToRouteCoords(coords, opts = {}) {
       map.fitBounds(bounds, {
         padding,
         maxZoom,
-        duration: attempt === 0 ? duration : Math.max(300, duration - 300),
+        duration,
         essential: true,
         linear: false,
         curve: 1.2,
       });
-    } catch {
-      /* ignore */
+    } catch (e) {
+      console.warn("[eta] fitMapToRouteCoords", e);
     }
   };
 
-  const schedule = () => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        setTimeout(() => run(0), 60);
-        setTimeout(() => run(1), 320);
-        setTimeout(() => run(2), 760);
-      });
-    });
+  // Wait for the bottom sheet / dock to settle (height animates ~0.32s
+  // when detail opens) so mapVisiblePadding measures the final layout, not
+  // a mid-flight frame that centres the route under the panel.
+  // Do NOT gate on map.loaded(): it stays false while PMTiles tiles stream,
+  // and "load" fires only once — waiting on it skips the fit forever.
+  const runAfterSettle = () => {
+    const toolbar = document.getElementById("main-toolbar");
+    const stack = document.getElementById("panel-bottom-stack");
+    const snap = () =>
+      `${toolbar?.getBoundingClientRect().top ?? -1}|${
+        stack?.getBoundingClientRect().top ?? -1
+      }`;
+    const deadline = performance.now() + 480;
+    let prev = snap();
+    const tick = () => {
+      const cur = snap();
+      if (cur === prev || performance.now() > deadline) {
+        run();
+        return;
+      }
+      prev = cur;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
   };
-  try {
-    if (map.loaded?.() === false) {
-      map.once?.("load", schedule);
+  const start = () => {
+    if (map.getStyle?.()) {
+      runAfterSettle();
       return;
     }
-  } catch {
-    /* ignore */
-  }
-  schedule();
+    map.once?.("styledata", runAfterSettle);
+  };
+  requestAnimationFrame(() => {
+    requestAnimationFrame(start);
+  });
 }
 
 /**
@@ -11257,10 +11743,32 @@ async function fetchEtaForDetailStop(route, dir, boardStop, dest) {
 }
 
 /**
+ * Display label for one ETA slot's own destination (per-departure).
+ * Covers peak-hour / special trips whose dest differs from the direction.
+ * MTR Next Train returns station codes (e.g. "POA") — map to names.
+ * @param {{ dest?: string, destZh?: string } | null | undefined} slot
+ * @param {string} [kind] route kind ("mtr" maps codes)
+ */
+function etaSlotDestLabel(slot, kind) {
+  const dest = String(slot?.dest || "").trim();
+  if (!dest) return "";
+  if (kind === "mtr" && /^[A-Z]{2,4}$/.test(dest)) {
+    const lab = mtrStationLabel(dest);
+    if (lab && (lab.en || lab.zh) && (lab.en !== dest || lab.zh !== dest)) {
+      return `${lab.zh || ""} ${lab.en || ""}`.trim();
+    }
+  }
+  const zh = String(slot?.destZh || "").trim();
+  if (zh && dest && zh !== dest) return `${zh} ${dest}`;
+  return zh || dest;
+}
+
+/**
  * Wheels big-slot HTML for ETA result.
  * @param {object} etaResult
+ * @param {{ kind?: string }} [opts]
  */
-function wheelsEtaSlotsHtml(etaResult) {
+function wheelsEtaSlotsHtml(etaResult, opts = {}) {
   const slots = (etaResult?.etas || []).slice(0, 3);
   const hasLive = slots.some((s) => !s.scheduled);
   if (!slots.length) {
@@ -11296,9 +11804,14 @@ function wheelsEtaSlotsHtml(etaResult) {
       const kind = slot.scheduled ? "Sched" : "Live";
       const kindTitle = slot.scheduled ? "SCHEDULED" : "LIVE";
       const clockLine = `${clockBase}・${kind}`;
+      // Per-departure destination (peak-hour special trips show their own)
+      const destLine = etaSlotDestLabel(slot, opts.kind);
+      const destHtml = destLine
+        ? `<span class="wheels-eta-slotdest" title="To ${escapeHtml(destLine)}">${escapeHtml(destLine)}</span>`
+        : "";
       return `<div class="wheels-eta-slot${due ? " is-due" : ""}${slot.scheduled ? " is-scheduled" : ""}">
         <span class="wheels-eta-wait">${escapeHtml(wait)}</span>
-        <span class="wheels-eta-clock" title="${kindTitle}">${escapeHtml(clockLine)}</span>
+        <span class="wheels-eta-clock" title="${kindTitle}">${escapeHtml(clockLine)}</span>${destHtml}
       </div>`;
     })
     .join("");
@@ -11362,19 +11875,33 @@ async function renderEtaRouteDetailBody(route, ctx) {
   const etaResult = await fetchEtaForDetailStop(route, dir, boardStop, dest);
   if (gen !== etaShapeGen || etaFetchId !== etaDetailEtaGen) return;
 
-  const { html: etaBigHtml, hasLive, slots } = wheelsEtaSlotsHtml(etaResult);
+  // Board line: station name + platform for rail (MTR / LRT) after live fetch
+  const platOk = etaOperatorShowsPlatform(etaResult.operator);
+  const plats = platOk ? etaResult?.servingPlatforms || [] : [];
+  const boardText =
+    boardName && plats.length
+      ? stationNameWithPlatforms(stationBaseName(boardName), plats)
+      : boardName;
+
+  const { html: etaBigHtml, hasLive, slots } = wheelsEtaSlotsHtml(etaResult, {
+    kind: route.kind,
+  });
   const reachMins = named.length
     ? etaStopReachMinutes(named, boardIndex, slots[0]?.waitMins, route.kind)
     : [];
 
   const oppDi = etaOppositeDirIndex(di, dirs);
+  // Route detail keeps Opposite everywhere: at a first station it flips to
+  // the reverse bound and boards at that direction's first station (see the
+  // #btn-eta-detail-dir handler). List cards do the terminus hiding.
   const canOpposite = etaHasRealOpposite(dirs) && oppDi !== di;
   const branchSibs = etaBranchSiblingIndices(dirs, di);
   const canBranch = branchSibs.length >= 2;
   const nextBr = canBranch ? dirs[etaNextBranchIndex(di, dirs)] : null;
-  const branchLabel = nextBr
-    ? nextBr.destZh || nextBr.dest || "Branch"
-    : "Branch";
+  const branchPair = etaBranchPairLabels(dirs[di], nextBr);
+  // Panel header shows every branch terminus; stop list head keeps `dest`
+  // (the current branch) — see rt-route-to below.
+  const panelDest = etaPanelDestLabel(dirs, di) || dest;
 
   const dirSwitchButtons = [
     canOpposite
@@ -11385,10 +11912,10 @@ async function renderEtaRouteDetailBody(route, ctx) {
         </button>`
       : "",
     canBranch
-      ? `<button type="button" class="wheels-dir-switch wheels-branch-switch" id="btn-eta-detail-branch" aria-label="Switch branch" title="Switch branch to ${escapeHtml(String(branchLabel))}">
+      ? `<button type="button" class="wheels-dir-switch wheels-branch-switch" id="btn-eta-detail-branch" aria-label="Switch branch" title="Switch branch: ${escapeHtml(String(branchPair.cur))} ⇄ ${escapeHtml(String(branchPair.other))}">
           <span class="material-symbols-outlined" aria-hidden="true">alt_route</span>
           <span>Branch</span>
-          <span class="wheels-branch-dest">${escapeHtml(String(branchLabel))}</span>
+          ${etaBranchLabelsHtml(branchPair)}
         </button>`
       : "",
   ]
@@ -11495,9 +12022,10 @@ async function renderEtaRouteDetailBody(route, ctx) {
         <div class="wheels-eta-card" id="eta-detail-card" style="--wheels-route-color:${escapeHtml(color)}">
           <div class="wheels-eta-dest">
             <span class="material-symbols-outlined wheels-eta-dest-icon" aria-hidden="true">arrow_forward</span>
-            <span class="wheels-eta-dest-text">${escapeHtml(dest)}</span>
+            <span class="wheels-eta-dest-text">${escapeHtml(panelDest)}</span>
+            <span class="wheels-eta-updated" data-eta-updated data-fetched-at="${Number.isFinite(Number(etaResult?.fetchedAt)) ? Number(etaResult?.fetchedAt) : ""}">${escapeHtml(formatUpdatedAgo(etaResult?.fetchedAt))}</span>
           </div>
-          <p class="wheels-eta-board" id="eta-detail-board"${boardName ? "" : " hidden"}>${escapeHtml(boardName)}</p>
+          <p class="wheels-eta-board" id="eta-detail-board"${boardText ? "" : " hidden"}>${escapeHtml(boardText)}</p>
           <div class="wheels-eta-slots" id="eta-detail-slots" role="list" aria-label="${hasLive ? "Live arrivals" : "Scheduled departures"}">
             ${etaBigHtml}
           </div>
@@ -11869,6 +12397,7 @@ async function showEtaRouteDetailsPanel() {
   etaDetailStopIndex = selectedIndex;
 
   // Draw route with passed segment greyed (board index = selected stop)
+  // paint with fit:true zooms to the route path once geometry is on the map
   try {
     if (etaSelectedStops.length >= 2) {
       await paintEtaRouteOnMap(route, etaSelectedStops, {
@@ -11886,24 +12415,6 @@ async function showEtaRouteDetailsPanel() {
   }
 
   if (gen !== etaShapeGen) return;
-
-  const fitCoords =
-    etaMapGeomCache?.coords?.length >= 2
-      ? etaMapGeomCache.coords
-      : (etaSelectedStops || [])
-          .filter(
-            (s) => Number.isFinite(s.lon) && Number.isFinite(s.lat) && !s._polylineOnly,
-          )
-          .map((s) => [s.lon, s.lat]);
-  if (fitCoords.length >= 2) {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          fitMapToRouteCoords(fitCoords, { maxZoom: 15, duration: 900 });
-        }, 180);
-      });
-    });
-  }
 
   await renderEtaRouteDetailBody(route, {
     gen,
@@ -12096,9 +12607,6 @@ function initEtaRouteSearchUi() {
   els.btnEtaPinned?.addEventListener("click", () => {
     void openPinnedRoutePage();
   });
-  els.btnPinnedBack?.addEventListener("click", () => {
-    setSidebarPage("search");
-  });
 
   document.querySelectorAll(".eta-method-pill[data-eta-mode]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -12253,7 +12761,19 @@ els.btnPanel?.addEventListener("click", () => {
 });
 
 // Trip detail sidebar page
-els.btnTripBack?.addEventListener("click", () => closeTripDetailPage());
+els.btnSubpageBack?.addEventListener("click", () => {
+  if (sidebarPage === "trip") closeTripDetailPage();
+  else setSidebarPage("search");
+});
+
+// Pin / unpin the trip shown on the detail page
+els.btnSubpagePin?.addEventListener("click", () => {
+  const plan = tripDetailPlan();
+  if (!plan) return;
+  const pinned = togglePinPlan(plan);
+  updateSubpagePinButton();
+  showToast(pinned ? "Trip plan pinned" : "Trip plan unpinned", 1600);
+});
 
 // Instant sync when returning to the tab (PRD dual-loop: Instant Sync)
 document.addEventListener("visibilitychange", () => {
@@ -12343,8 +12863,6 @@ els.btnInfo?.addEventListener("click", (e) => {
   closeProfileMenu();
   setSidebarPage("about");
 });
-els.btnSettingsBack?.addEventListener("click", () => setSidebarPage("search"));
-els.btnAboutBack?.addEventListener("click", () => setSidebarPage("search"));
 document.addEventListener("click", (e) => {
   const root = els.mapProfile || document.getElementById("map-profile");
   if (!root?.contains(/** @type {Node} */ (e.target))) {
@@ -12612,8 +13130,7 @@ const pathContributor = createPathContributor({
   },
   getSelectedPlanRoute: () => {
     if (tripDetailIdx == null && (!plans?.length)) return null;
-    const idx = tripDetailIdx != null ? tripDetailIdx : 0;
-    const plan = plans?.[idx];
+    const plan = tripDetailIdx != null ? tripDetailPlan() : plans?.[0];
     if (!plan) return null;
     for (const leg of plan.legs || []) {
       if (leg.type !== "transit" || !leg.route_options?.[0]) continue;

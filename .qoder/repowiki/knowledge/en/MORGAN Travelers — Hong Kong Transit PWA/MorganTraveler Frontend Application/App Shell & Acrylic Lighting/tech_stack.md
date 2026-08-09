@@ -1,0 +1,1 @@
+MapLibre GL v6 with PMTiles protocol and @protomaps/basemaps; Material Symbols Outlined icons; CSS `backdrop-filter` + `mask-composite` for glass/acrylic effects; `requestAnimationFrame`-throttled pointer tracking; `localStorage` for pinned routes and preferences.

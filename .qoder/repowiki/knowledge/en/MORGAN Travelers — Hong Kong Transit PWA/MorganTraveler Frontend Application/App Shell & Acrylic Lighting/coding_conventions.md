@@ -1,0 +1,5 @@
+- DOM nodes are cached once into a central `els` object keyed by `getElementById` and reused throughout the app instead of querying repeatedly.
+- User-facing strings in dynamically built HTML are wrapped with an `escapeHtml` helper to prevent XSS when inserting route names, ETA text, and labels.
+- UI state is persisted to `localStorage` under a namespaced key (e.g. `morgan.etaPinnedRoutes`) with try/catch around parse/stringify to tolerate quota or corruption.
+- Interactive elements opt into the acrylic glow by adding the `data-acrylic` attribute; the effect is automatically disabled on mobile via the `mobile-ui` body class.
+- CSS uses a shared token layer in `:root` (colors, radii, safe-area insets, sheet heights) rather than hard-coded values, allowing the shell to adapt to different viewport modes.

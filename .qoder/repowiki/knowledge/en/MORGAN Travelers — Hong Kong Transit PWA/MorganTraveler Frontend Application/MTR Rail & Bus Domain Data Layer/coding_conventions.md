@@ -1,0 +1,6 @@
+- Domain state (GeoJSON feature collections, cached CSV rows) is held in module-level variables and exposed only through explicit `export` functions rather than global getters.
+- Multi-source data loading uses a tiered fallback chain (static bundle → proxy → direct URL) with header validation before caching results.
+- Station name matching normalises input by stripping platform/gate noise, lowercasing, and then applies scored exact / prefix / substring matches with minimum score thresholds to reject weak hits.
+- Directional station pairs (East/West, North/South) are handled by extracting directional keys and requiring equality so parent-child names never collapse into each other.
+- Interchange logic is expressed as declarative arrays of `{ id, patterns }` groups matched via `matchStationGroup` against stop labels, keeping policy changes localised.
+- Line colour and heritage detection funnel GTFS option objects through `isMtrRailCandidate` / `isLightRailOption` guards before applying short-code or long-name regex maps.

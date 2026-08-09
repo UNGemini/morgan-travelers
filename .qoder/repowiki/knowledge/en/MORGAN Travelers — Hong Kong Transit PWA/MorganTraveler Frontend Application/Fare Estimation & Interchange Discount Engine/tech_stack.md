@@ -1,0 +1,1 @@
+ES modules with static JSON import (`import raw from ... with { type: "json" }`) for interchange rules; runtime `fetch` with cache-busting query params (`?v=5`, `?v=1`) for fare matrices and BBI compact pairs; JSDoc-only types (`@typedef`) for `FareType`, `PlanFare`, `FarePart`, `MtrIxRule`, `BusBusRule`.

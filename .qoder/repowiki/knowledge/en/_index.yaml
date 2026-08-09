@@ -1,0 +1,183 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: en-US
+branch: main
+nodes_managed: true
+exported_at: "2026-08-09T08:15:47Z"
+modules:
+    "":
+        dir_name: MORGAN Travelers — Hong Kong Transit PWA
+        title: MORGAN Travelers — Hong Kong Transit PWA
+        scope:
+            - index.html
+            - package.json
+            - package-lock.json
+            - vite.config.js
+            - .gitignore
+            - MORGAN Travelers PRD.md
+            - .env.example
+            - wrangler.toml
+        source_files: []
+        children:
+            - build_scripts
+            - frontend_app
+            - serverless_functions
+            - static_assets
+        depends_on: []
+        related_to: []
+    build_scripts:
+        dir_name: Build & Data Sync Scripts
+        title: Build & Data Sync Scripts
+        scope:
+            - scripts/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: static_assets
+    frontend_app:
+        dir_name: MorganTraveler Frontend Application
+        title: MorganTraveler Frontend Application
+        scope:
+            - src/
+        source_files: []
+        children:
+            - frontend_app/app_shell
+            - frontend_app/eta_service
+            - frontend_app/fares_and_interchanges
+            - frontend_app/lrt_gmb_domain
+            - frontend_app/mtr_domain
+            - frontend_app/preferences_and_overrides
+            - frontend_app/routing_engine
+        depends_on: []
+        related_to: []
+    frontend_app/app_shell:
+        dir_name: App Shell & Acrylic Lighting
+        title: App Shell & Acrylic Lighting
+        scope:
+            - src/main.js
+            - src/style.css
+            - src/acrylic.js
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: frontend_app/eta_service
+            - path: frontend_app/fares_and_interchanges
+            - path: frontend_app/lrt_gmb_domain
+            - path: frontend_app/mtr_domain
+            - path: frontend_app/preferences_and_overrides
+            - path: frontend_app/routing_engine
+    frontend_app/eta_service:
+        dir_name: ETA, Bus Shape & Route Snapping Services
+        title: ETA, Bus Shape & Route Snapping Services
+        scope:
+            - src/eta.js
+            - src/busShapes.js
+            - src/routeSnapper.js
+            - src/railSnapper.js
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: frontend_app/app_shell
+            - path: serverless_functions
+    frontend_app/fares_and_interchanges:
+        dir_name: Fare Estimation & Interchange Discount Engine
+        title: Fare Estimation & Interchange Discount Engine
+        scope:
+            - src/fares.js
+            - src/interchangeSchemes.js
+            - src/data/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: frontend_app/app_shell
+            - path: frontend_app/mtr_domain
+    frontend_app/lrt_gmb_domain:
+        dir_name: LRT & Green Minibus Route Data Layer
+        title: LRT & Green Minibus Route Data Layer
+        scope:
+            - src/lrtRouteData.js
+            - src/lrtStops.js
+            - src/lrtShapes.js
+            - src/gmbRouteData.js
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: frontend_app/app_shell
+            - path: serverless_functions
+    frontend_app/mtr_domain:
+        dir_name: MTR Rail & Bus Domain Data Layer
+        title: MTR Rail & Bus Domain Data Layer
+        scope:
+            - src/mtrLayer.js
+            - src/mtrStations.js
+            - src/mtrBusData.js
+            - src/mtrColors.js
+            - src/mtrInterchange.js
+            - src/mtrLineOrder.js
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: frontend_app/app_shell
+            - path: frontend_app/fares_and_interchanges
+            - path: frontend_app/routing_engine
+    frontend_app/preferences_and_overrides:
+        dir_name: Preferences, Overrides & Routing Post-Processing
+        title: Preferences, Overrides & Routing Post-Processing
+        scope:
+            - src/preferences.js
+            - src/overrides.js
+            - src/contributePath.js
+            - src/alightPrefer.js
+            - src/shuttleInject.js
+            - src/harbourWalk.js
+            - src/stationAccess.js
+            - src/geocode.js
+            - src/stopMerge.js
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: frontend_app/app_shell
+            - path: frontend_app/routing_engine
+            - path: serverless_functions
+    frontend_app/routing_engine:
+        dir_name: WASM RAPTOR Routing Engine & Human Ranking
+        title: WASM RAPTOR Routing Engine & Human Ranking
+        scope:
+            - src/router.ts
+            - src/pkg/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: frontend_app/app_shell
+            - path: frontend_app/mtr_domain
+            - path: frontend_app/preferences_and_overrides
+    serverless_functions:
+        dir_name: Cloudflare Pages Serverless Functions (API, Auth & Proxies)
+        title: Cloudflare Pages Serverless Functions (API, Auth & Proxies)
+        scope:
+            - functions/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: frontend_app/eta_service
+            - path: frontend_app/lrt_gmb_domain
+            - path: frontend_app/preferences_and_overrides
+    static_assets:
+        dir_name: Static Assets & PWA Shell
+        title: Static Assets & PWA Shell
+        scope:
+            - public/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: build_scripts

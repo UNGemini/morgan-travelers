@@ -1,0 +1,1 @@
+MapLibre GL JS + PMTiles basemaps for rendering; wheels-router-nano compiled to WebAssembly (pkg/wheels_router_nano.*) for RAPTOR routing; Vite-based bundling with import.meta.env BASE_URL for worker/pmtiles paths; localStorage for user preferences and pinned routes.

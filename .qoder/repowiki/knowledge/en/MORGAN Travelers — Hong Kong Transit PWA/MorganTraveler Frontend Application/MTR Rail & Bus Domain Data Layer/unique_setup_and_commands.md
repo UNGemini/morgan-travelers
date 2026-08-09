@@ -1,0 +1,1 @@
+MTR Bus CSV loading requires either bundled `public/data/mtr_bus_routes.csv` + `mtr_bus_stops.csv`, a running `/eta/mtr-open` proxy, or direct HTTPS access to `opendata.mtr.com.hk` (may fail under COEP). Station GeoJSON assets must be served at `${import.meta.env.BASE_URL}mtr/{stations,exits,platforms,lrt-platforms}.geojson`.

@@ -1,0 +1,6 @@
+- All network requests go through a small typed wrapper (`fetchJson` in eta.js, `osrmNearest`/`osrmMatch` in routeSnapper.js) that attaches AbortSignals and throws on non-OK responses so callers can catch and degrade gracefully.
+- Geometric calculations use a shared haversine helper and cumulative-distance arrays to measure distances in metres rather than degrees, applied consistently across snapping, corridor scoring, and graph building.
+- Operator / mode classification is done via explicit string checks against `agency`, `mode`, `route_short_name`, and `route_id` fields, producing a normalized enum-like token (`kmb`/`ctb`/`nlb`/`mtr`/`lrt`/`gmb`/`mtr_bus`/`unknown`) before dispatching to per-operator handlers.
+- Fallback chains are expressed as ordered try/catch or candidate lists (e.g. NLB routeId variants, CTB padded/unpadded stop ids, railSnapper's named → preferred → usable segment sets) rather than early-return error paths.
+- Public entry points return a stable shape object (e.g. `LegEtaResult`, `{ path, method, controls, snapped, inserted, keptRaw }`) with optional `error`/`remark`/`debug` fields instead of throwing on partial failures.
+- Concurrency over network calls is bounded via a simple `mapPool(items, limit, fn)` worker pattern used for both OSRM nearest lookups and PMTiles tile batches.

@@ -1,0 +1,1 @@
+Web App Manifest + Service Worker (W3C PWA), MapLibre GL JS prebuilt bundles (`maplibre-gl-shared.mjs`, `maplibre-gl-worker.mjs`), GeoJSON/CSV transit datasets, Cloudflare Pages `_headers` for COOP/COEP/CORP enforcement.

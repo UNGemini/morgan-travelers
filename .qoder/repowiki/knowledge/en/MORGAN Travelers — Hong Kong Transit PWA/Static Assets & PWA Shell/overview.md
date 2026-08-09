@@ -1,0 +1,1 @@
+Serves the app's static resources — icons, manifest, service worker, GeoJSON transit data, fare tables, and MapLibre GL runtime bundles — plus COOP/COEP headers for cross-origin isolation.

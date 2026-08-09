@@ -1,0 +1,1 @@
+Root of the MorganTravelers monorepo that composes a Vite-built MapLibre frontend, Cloudflare Pages serverless functions, static assets, and data-sync scripts into a deployable transit planner PWA.

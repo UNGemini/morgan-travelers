@@ -1,0 +1,5 @@
+- Public entry points expose typed request/response interfaces (`RouteQuery`, `PlanResponse`, `Plan`, `RankContext`) rather than raw WASM objects, keeping callers decoupled from the WASM schema.
+- Mode and operator classification is done via small predicate helpers (`isMtrTransitOption`, `isBusTransitOption`, `classifyTrafficMethodId`, `classifyBusCompanyId`) that inspect route metadata, agency names, and short-name regexes instead of hard-coding per-route logic inline.
+- Human ranking uses additive penalty/bonus constants (e.g. `BUS_TRANSFER_PENALTY_SECONDS`, `MTR_TRANSFER_PENALTY_SECONDS`, `MTR_NETWORK_BONUS_SECONDS`) accumulated into a single `score` in `perceivedCost`, with preference weights averaged across selected goals.
+- Optional/stitched fields on `Leg` (e.g. `free_mtr_link`, `indoor_interchange`) are accessed through `// @ts-expect-error` comments because they originate from stitching helpers outside the core type definitions.
+- Graph loading follows a candidate-list pattern: build an ordered array of URLs, iterate with try/catch, log warnings per failure, and throw only after the last candidate is exhausted.

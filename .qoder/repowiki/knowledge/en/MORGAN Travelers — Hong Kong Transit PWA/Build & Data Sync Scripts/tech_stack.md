@@ -1,0 +1,1 @@
+Node.js ESM modules using built-in `node:fs`, `node:path`, `node:crypto`, `node:stream/promises`, and native `fetch`; optional `mdbtools` (`mdb-export`) for extracting Transport Department MDB databases; relies on external GTFS/pmtiles/WheelsRouter artifacts produced elsewhere.

@@ -1,0 +1,1 @@
+Requires the build step `npm run build:fares` to generate `fares/hk-fares.json`; missing or incomplete student/child matrices trigger a console warning during `initFares()`.

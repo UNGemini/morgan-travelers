@@ -1,0 +1,1 @@
+LRT CSV loading falls back across three sources — a bundler-resolved `import.meta.env.BASE_URL` path, the `/eta/mtr-open` server proxy, and a direct HTTPS call — so the module works offline when the bundled CSV is present but requires the proxy or CORS-enabled direct access otherwise. GMB lookups require the backend `/eta/gmb/route*` endpoints to be mounted.

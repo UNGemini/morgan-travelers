@@ -1,0 +1,1 @@
+MapLibre's v6 module worker must be served from `${import.meta.env.BASE_URL}maplibre/maplibre-gl-worker.mjs` because Vite's prebundle breaks the default `import.meta.url` derivation — `setWorkerUrl()` is called explicitly at startup.

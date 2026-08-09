@@ -1,0 +1,1 @@
+Frontend services that fetch live HK transit ETAs from operator APIs, match contributor bus-shape overrides to routes, and snap itineraries onto road or rail geometry for map display.

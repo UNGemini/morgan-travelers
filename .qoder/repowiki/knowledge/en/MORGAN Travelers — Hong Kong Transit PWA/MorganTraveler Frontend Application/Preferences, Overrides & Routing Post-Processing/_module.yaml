@@ -1,0 +1,19 @@
+schema_version: 1
+module_path: frontend_app/preferences_and_overrides
+title: Preferences, Overrides & Routing Post-Processing
+scope:
+    - src/preferences.js
+    - src/overrides.js
+    - src/contributePath.js
+    - src/alightPrefer.js
+    - src/shuttleInject.js
+    - src/harbourWalk.js
+    - src/stationAccess.js
+    - src/geocode.js
+    - src/stopMerge.js
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app/app_shell
+    - path: frontend_app/routing_engine
+    - path: serverless_functions

@@ -1,0 +1,1 @@
+ES modules with JSDoc type annotations; `Intl.DateTimeFormat` with `Asia/Hong_Kong` timezone for service-day clock; Haversine distance calculations throughout; fetch-based caching with TTL maps; OSM Nominatim via same-origin `/geocode` proxy for COEP safety; GitHub raw JSON for community-contributed bus shapes.

@@ -1,0 +1,1 @@
+Requires same-origin serverless proxies: `/eta/*` for operator ETA feeds and `/osrm/*` for OSRM routing/matching; PMTiles served from `https://hk-gtgtfsdata.morgandev.cc/hongkong.pmtiles` (or `/edge/hongkong.pmtiles` on localhost). Bus-shape contributions POST to `/api/contribute-path` Cloudflare Pages Function.

@@ -1,0 +1,1 @@
+Client-side HK public transport fare estimation combining MTR/AEL/LRT/bus matrices with operator interchange discount rules and JoyYou concession scaling.

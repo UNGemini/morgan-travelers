@@ -1,0 +1,13 @@
+schema_version: 1
+module_path: frontend_app/lrt_gmb_domain
+title: LRT & Green Minibus Route Data Layer
+scope:
+    - src/lrtRouteData.js
+    - src/lrtStops.js
+    - src/lrtShapes.js
+    - src/gmbRouteData.js
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app/app_shell
+    - path: serverless_functions

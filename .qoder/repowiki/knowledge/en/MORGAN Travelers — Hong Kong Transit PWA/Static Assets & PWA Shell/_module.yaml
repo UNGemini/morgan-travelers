@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: static_assets
+title: Static Assets & PWA Shell
+scope:
+    - public/
+source_files: []
+depends_on: []
+related_to:
+    - path: build_scripts

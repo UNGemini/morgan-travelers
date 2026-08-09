@@ -1,0 +1,13 @@
+schema_version: 1
+module_path: frontend_app/eta_service
+title: ETA, Bus Shape & Route Snapping Services
+scope:
+    - src/eta.js
+    - src/busShapes.js
+    - src/routeSnapper.js
+    - src/railSnapper.js
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app/app_shell
+    - path: serverless_functions

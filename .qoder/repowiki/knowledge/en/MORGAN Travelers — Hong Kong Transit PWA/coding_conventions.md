@@ -1,0 +1,4 @@
+- External service calls from the frontend go through Vite dev proxies (`/edge`, `/geocode`, `/osrm`, `/eta/*`) or Cloudflare Pages Functions so responses carry COEP/CORP headers required by the WASM worker.
+- Contributions follow a draft-then-merge pattern: POSTed payloads are persisted as JSON files under `pending/` (with status `pending_review`) and merged into `bus-shapes.json` (status `published`) via the overrides merge endpoint.
+- GitHub identity flows use the same OAuth state/session cookie scheme in both the dev middleware and the Pages Functions, reading config from `.env`/process env and falling back to defaults defined in `functions/_shared/github.js`.
+- Build-time data acquisition is performed by Node ESM scripts registered in `package.json` scripts and executed via npm lifecycle hooks (`predev`, `prebuild`, `postinstall`) rather than ad-hoc commands.

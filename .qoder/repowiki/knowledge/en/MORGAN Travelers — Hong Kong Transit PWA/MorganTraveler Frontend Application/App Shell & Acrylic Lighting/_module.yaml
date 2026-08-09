@@ -1,0 +1,16 @@
+schema_version: 1
+module_path: frontend_app/app_shell
+title: App Shell & Acrylic Lighting
+scope:
+    - src/main.js
+    - src/style.css
+    - src/acrylic.js
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app/eta_service
+    - path: frontend_app/fares_and_interchanges
+    - path: frontend_app/lrt_gmb_domain
+    - path: frontend_app/mtr_domain
+    - path: frontend_app/preferences_and_overrides
+    - path: frontend_app/routing_engine

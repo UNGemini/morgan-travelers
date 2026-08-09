@@ -1,0 +1,1 @@
+Vite 6 as the unified dev/build orchestrator with a custom plugin injecting dev-only auth/overrides APIs and COEP/CORP headers; Cloudflare Pages + Wrangler for production deployment of the same `dist` output alongside Pages Functions; Node ESM scripts driving data synchronization; MapLibre GL + PMTiles + WASM RAPTOR consumed by the frontend.

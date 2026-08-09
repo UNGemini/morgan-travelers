@@ -1,0 +1,6 @@
+- Scripts resolve the project root by computing `__dirname` from `import.meta.url` and joining `..`, then derive all input/output paths relative to that root.
+- Remote HTTP requests use a consistent `User-Agent` header containing `MORGAN-Travelers` plus a short role suffix (e.g. `(fare-build)`, `(collect-open-data)`, `(schemes-sync)`).
+- Configuration is driven by environment variables with defaults (`DATA_PUBLIC_BASE_URL`, `COLLECT_SKIP_LARGE`, `OVERRIDES_BUS_SHAPES_URL`, `VITE_OVERRIDES_BUS_SHAPES_URL`) rather than config files.
+- Output artifacts are written as pretty-printed JSON with a trailing newline and include an `updated_at` timestamp field.
+- Optional or non-critical dependencies (e.g. `mdb-export`, missing maplibre-gl dist files, absent Citybus/KMB endpoints) are detected at runtime and cause a warning + graceful skip instead of a hard failure.
+- Fare/discount values are normalized through a shared `money()` helper that strips commas and rounds to two decimals before storage.

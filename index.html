@@ -841,21 +841,6 @@
                 </p>
               </div>
 
-              <button
-                type="button"
-                id="btn-plan"
-                class="btn btn-primary plan-trip-cta"
-                data-acrylic
-                disabled
-                title="Plan trip"
-                aria-label="Plan trip"
-              >
-                <span class="btn-row">
-                  <span class="material-symbols-outlined" aria-hidden="true">directions</span>
-                  Plan trip
-                </span>
-              </button>
-
               <div class="pref-field" id="eal-first-class-field">
                 <span class="loc-label pref-label">
                   <span class="material-symbols-outlined" aria-hidden="true">airline_seat_recline_extra</span>
@@ -884,19 +869,6 @@
 
             <!-- Page: full trip detail (all stops) -->
             <div id="sidebar-page-trip" class="sidebar-page" hidden>
-              <div class="trip-detail-bar">
-                <button
-                  type="button"
-                  id="btn-trip-back"
-                  class="btn btn-ghost trip-back-btn"
-                  data-acrylic
-                >
-                  <span class="btn-row">
-                    <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
-                    Back to plans
-                  </span>
-                </button>
-              </div>
               <div id="trip-detail-head" class="trip-detail-head"></div>
               <div id="trip-detail-timeline" class="trip-detail-timeline"></div>
             </div>
@@ -909,32 +881,11 @@
 
             <!-- Page: Pinned routes (plan-style cards + live/scheduled ETA) -->
             <div id="sidebar-page-pinned" class="sidebar-page" hidden>
-              <div class="trip-detail-bar">
-                <button
-                  type="button"
-                  id="btn-pinned-back"
-                  class="btn btn-ghost trip-back-btn"
-                  data-acrylic
-                >
-                  <span class="btn-row">
-                    <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
-                    Back to routes
-                  </span>
-                </button>
-              </div>
               <div id="pinned-route-body" class="pinned-route-body" role="list" aria-label="Pinned routes"></div>
             </div>
 
             <!-- Page: Settings -->
             <div id="sidebar-page-settings" class="sidebar-page" hidden>
-              <div class="trip-detail-bar">
-                <button type="button" id="btn-settings-back" class="btn btn-ghost trip-back-btn" data-acrylic>
-                  <span class="btn-row">
-                    <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
-                    Back
-                  </span>
-                </button>
-              </div>
               <div class="panel-page-scroll" id="settings-page-body">
 <section class="panel-section">
               <h3>Dataset status</h3>
@@ -1044,14 +995,6 @@
 
             <!-- Page: About -->
             <div id="sidebar-page-about" class="sidebar-page" hidden>
-              <div class="trip-detail-bar">
-                <button type="button" id="btn-about-back" class="btn btn-ghost trip-back-btn" data-acrylic>
-                  <span class="btn-row">
-                    <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
-                    Back
-                  </span>
-                </button>
-              </div>
               <div class="panel-page-scroll" id="about-page-body">
 <section class="panel-section">
               <h3>MORGAN Travelers</h3>
@@ -1153,6 +1096,24 @@
           </div>
         </div>
 
+        <!-- Trip Plan: Plan Trip CTA above the app nav (route mode only) -->
+        <div class="route-plan-cta-chrome" id="route-plan-cta-chrome">
+          <button
+            type="button"
+            id="btn-plan-cta"
+            class="btn plan-trip-cta"
+            data-acrylic
+            disabled
+            title="Plan trip"
+            aria-label="Plan trip"
+          >
+            <span class="btn-row">
+              <span class="material-symbols-outlined" aria-hidden="true">directions</span>
+              Plan trip
+            </span>
+          </button>
+        </div>
+
         <!-- Route detail: Back + Pin replaces app nav -->
         <div
           class="eta-route-detail-chrome"
@@ -1179,6 +1140,36 @@
           >
             <span class="material-symbols-outlined" aria-hidden="true">push_pin</span>
             <span class="eta-detail-chrome-label">Pin stop</span>
+          </button>
+        </div>
+
+        <!-- Trip detail / Settings / About: dock Back replaces app nav (same chrome as Route detail) -->
+        <div
+          class="subpage-detail-chrome"
+          id="subpage-detail-chrome"
+          hidden
+          aria-label="Sub-page actions"
+        >
+          <button
+            type="button"
+            id="btn-subpage-back"
+            class="eta-detail-chrome-btn eta-detail-back"
+            title="Back"
+            aria-label="Back"
+          >
+            <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
+            <span class="eta-detail-chrome-label" id="subpage-back-label">Back</span>
+          </button>
+          <button
+            type="button"
+            id="btn-subpage-pin"
+            class="eta-detail-chrome-btn eta-detail-pin"
+            title="Pin this trip"
+            aria-label="Pin this trip"
+            hidden
+          >
+            <span class="material-symbols-outlined" aria-hidden="true">push_pin</span>
+            <span class="eta-detail-chrome-label" id="subpage-pin-label">Pin</span>
           </button>
         </div>
 

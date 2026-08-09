@@ -1,0 +1,1 @@
+MapLibre GL JS GeoJSON sources/layers for MTR platform/exits rendering; CSV parsing done in-process (no external library); distance calculations use a haversine implementation; data sourced from CSDI-powered crawler GeoJSON and MTR Open Data CSVs.

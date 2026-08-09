@@ -1,0 +1,1 @@
+Node.js ESM scripts that download, parse, and package transit fare tables, interchange schemes, bus shapes, and MapLibre worker assets into the project's public data artifacts.

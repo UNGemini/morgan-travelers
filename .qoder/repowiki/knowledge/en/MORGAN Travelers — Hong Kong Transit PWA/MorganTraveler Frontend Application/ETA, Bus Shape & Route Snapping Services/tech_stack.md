@@ -1,0 +1,1 @@
+Pure ES modules running in the browser: OSRM driving/route/match/nearest endpoints via same-origin `/eta` and `/osrm` proxies; PMTiles + VectorTile/PBF for basemap railway tile parsing; Haversine geometry throughout; JSDoc-only types (no TypeScript compiler).

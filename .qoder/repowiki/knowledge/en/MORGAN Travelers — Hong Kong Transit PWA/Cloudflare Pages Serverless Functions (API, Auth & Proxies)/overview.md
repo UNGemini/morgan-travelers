@@ -1,0 +1,1 @@
+Cloudflare Pages Functions providing GitHub OAuth auth, bus-shapes override proxying, path contribution intake with PR submission, and COEP-safe proxies for ETA, geocoding, and OSRM services.

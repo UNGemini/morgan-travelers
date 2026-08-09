@@ -1,0 +1,5 @@
+- Persistent user preferences are exposed as paired `loadX`/`saveX`/`getX`/`setX` functions that read/write `localStorage` keys while also updating an in-memory variable, with try/catch around storage calls to tolerate private mode.
+- Expensive or network-backed data is cached behind a module-level promise variable so concurrent callers share a single load (`loadPromise` pattern used for both `initFares` and `loadBbiCompactPairs`).
+- Configuration-heavy rule sets live in JSON files under `src/data/` and are compiled at module load time by dedicated `compile*Rule` functions that normalize field name variants (camelCase/snake_case) into a stable internal shape.
+- Ticket-type selection goes through a central `matrixKeyForType` switch that maps UI-facing `FareType` values to the corresponding matrix key inside the fare pack, keeping fare lookup uniform across MTR/AEL/LRT/bus.
+- Station/stop name matching uses layered normalization (strip platform/parentheses, strip trailing 'Station'/站, alias table, then prefix/contains fallback) rather than exact string equality.
