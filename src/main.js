@@ -2399,6 +2399,27 @@ function syncGeolocateFitPadding() {
   }
 }
 
+/**
+ * Disengage the locate control's camera-follow before a programmatic fit.
+ * MapLibre only drops its ACTIVE_LOCK on user gestures: the control's
+ * movestart handler bails out while isZooming() is true, which every
+ * flyTo/fitBounds sets before firing movestart — so the lock survives a
+ * route fit and the next position fix snaps the camera back to the user,
+ * undoing the fit. stop() ends any in-flight locate re-centre animation;
+ * resize() then emits a genuine movestart (not zooming) that the control
+ * treats like a user pan → BACKGROUND: the dot keeps updating, but the
+ * camera no longer follows.
+ */
+function disengageGeolocateFollow() {
+  try {
+    if (!map || !geolocateControl) return;
+    map.stop?.();
+    map.resize?.();
+  } catch (e) {
+    console.warn("[map] disengageGeolocateFollow", e);
+  }
+}
+
 // Scale — top-centre; shown while zooming, fades after scale settles
 const scaleControl = new ScaleControl({ unit: "metric", maxWidth: 120 });
 map.addControl(scaleControl, "top-left");
@@ -6568,6 +6589,9 @@ function fitRouteBounds(geo) {
     any = true;
   }
   if (any) {
+    // A live locate lock would re-centre on the user at the next position
+    // fix and undo this fit — drop it first (see disengageGeolocateFollow).
+    disengageGeolocateFollow();
     map.fitBounds(bounds, {
       padding: mapVisiblePadding({ top: 24, right: 24, bottom: 24, left: 24 }),
       maxZoom: 15,
@@ -10719,7 +10743,9 @@ function fitMapToRouteCoords(coords, opts = {}) {
   const run = () => {
     try {
       if (!map?.getStyle?.()) return;
-      map.resize?.();
+      // stop()+resize() disengage a live locate lock (it would otherwise
+      // re-centre on the user at the next position fix, undoing the fit).
+      disengageGeolocateFollow();
       const bounds = [
         [minLon, minLat],
         [maxLon, maxLat],
