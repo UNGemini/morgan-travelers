@@ -2531,8 +2531,12 @@ map.on("load", () => {
   bootstrapMtrLayers().catch((err) => {
     console.warn("[mtrLayer]", err);
   });
-  // Default Nearby center = user location when permission granted
-  void bootstrapNearbyUserLocation({ fly: true, triggerControl: true });
+  // Default Nearby center = user location when permission granted — deferred
+  // until the opening splash is gone so the browser permission prompt never
+  // pops over the boot animation (bootSplashDonePromise resolves on removal).
+  void bootSplashDonePromise.then(() =>
+    bootstrapNearbyUserLocation({ fly: true, triggerControl: true }),
+  );
 });
 
 /** Load MTR GeoJSON, enrich search directory, draw layers + click popups. */
@@ -13491,14 +13495,31 @@ if (typeof window !== "undefined") {
 const BOOT_SPLASH_MIN_MS = 700;
 const BOOT_STARTED_AT = Date.now();
 
+/**
+ * Resolves once the splash cover has fully left the screen — work that must
+ * not run over the opening animation (e.g. the location permission prompt)
+ * chains onto this promise.
+ */
+let resolveBootSplashDone = () => {};
+const bootSplashDonePromise = new Promise((resolve) => {
+  resolveBootSplashDone = resolve;
+});
+
 /** Bounce + fade the splash mark, fade the cover, then remove it. */
 function dismissBootSplash() {
   const splash = document.getElementById("app-splash");
-  if (!splash || splash.dataset.done) return;
+  if (!splash) {
+    resolveBootSplashDone();
+    return;
+  }
+  if (splash.dataset.done) return;
   splash.dataset.done = "1";
   splash.classList.add("is-dismissing");
   window.setTimeout(() => splash.classList.add("is-fading"), 560);
-  window.setTimeout(() => splash.remove(), 1250);
+  window.setTimeout(() => {
+    splash.remove();
+    resolveBootSplashDone();
+  }, 1250);
 }
 
 Promise.all([

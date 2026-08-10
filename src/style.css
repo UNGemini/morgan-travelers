@@ -82,9 +82,8 @@
  * don’t show above/below the map/drawer.
  */
 html {
-  width: 100%;
-  height: 100%;
-  height: 100dvh;
+  width: 100vw;
+  height: 100vh;
   height: -webkit-fill-available;
   /* Match panel glass (rgb 18,22,28) — not pure black, avoids home-bar letterbox */
   background: #12161c;
@@ -102,11 +101,6 @@ body {
   -webkit-font-smoothing: antialiased;
   line-height: 1.6;
   overflow: hidden;
-  width: 100%;
-  height: 100%;
-  height: 100dvh;
-  min-height: 100dvh;
-  min-height: -webkit-fill-available;
   /* Don’t inset the whole page — map/sheet paint under system UI */
   padding: 0;
   margin: 0;
@@ -127,8 +121,8 @@ body {
 html.pwa,
 html.pwa body,
 html.pwa #app {
-  height: 100%;
-  min-height: 100%;
+  height: 100vh;
+  min-height: 100vh;
   min-height: -webkit-fill-available;
 }
 
@@ -176,6 +170,33 @@ html.pwa #app {
     rgba(0, 180, 220, 0.05) 0%,
     transparent 70%
   );
+}
+
+/* Ambient life: orbs drift + breathe very slowly behind the glass */
+.bg-orb {
+  will-change: transform;
+}
+.bg-orb-1 {
+  animation: orb-drift-1 34s ease-in-out infinite alternate;
+}
+.bg-orb-2 {
+  animation: orb-drift-2 42s ease-in-out infinite alternate;
+}
+@keyframes orb-drift-1 {
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    transform: translate(7vw, 5vh) scale(1.14);
+  }
+}
+@keyframes orb-drift-2 {
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    transform: translate(-6vw, -4vh) scale(1.1);
+  }
 }
 
 /* ── Sayram acrylic border lighting ─────────────────────────── */
@@ -460,6 +481,21 @@ body.mobile-ui [data-acrylic]::before {
 .map-route-badge[hidden] {
   display: none !important;
 }
+/* Route number pops up over the map when a route detail opens */
+.map-route-badge:not([hidden]) {
+  animation: badge-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  transform-origin: left bottom;
+}
+@keyframes badge-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.82) translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
 .map-route-badge-co {
   font-size: 0.78rem;
   font-weight: 700;
@@ -502,6 +538,38 @@ body.mobile-ui [data-acrylic]::before {
      * Beside left panel (same clamp as .main-toolbar desktop width).
      * Mobile left/bottom untouched — this block is desktop-only.
      */
+    left: calc(var(--dock-pad) + min(440px, max(300px, 34vw)) + 12px);
+    bottom: calc(14px + var(--safe-bottom));
+  }
+}
+
+/*
+ * Map brand logo — bottom-left, same slot as the route-detail number
+ * (position mirrors .map-route-badge exactly). JS hides it on the
+ * Route Detail page so the badge owns the spot.
+ */
+.map-brand-logo {
+  position: absolute;
+  z-index: 4;
+  left: 12px;
+  bottom: var(--map-tools-bottom, 100px);
+  width: clamp(120px, 20vw, 200px);
+  height: auto;
+  pointer-events: none;
+  opacity: 0.92;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.8));
+}
+.map-brand-logo[hidden] {
+  display: none !important;
+}
+@media (max-width: 640px) {
+  .map-brand-logo {
+    left: 14px;
+    bottom: var(--map-tools-bottom) !important;
+  }
+}
+@media (min-width: 641px) {
+  .map-brand-logo {
     left: calc(var(--dock-pad) + min(440px, max(300px, 34vw)) + 12px);
     bottom: calc(14px + var(--safe-bottom));
   }
@@ -616,6 +684,21 @@ body.mobile-ui [data-acrylic]::before {
   flex-direction: column;
   gap: 2px;
   z-index: 20;
+  transform-origin: top right;
+}
+/* Pop in from the profile button */
+.profile-menu:not([hidden]) {
+  animation: menu-in 0.22s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 /* Critical: class { display:flex } would override [hidden] — force closed */
 .profile-menu[hidden],
@@ -705,10 +788,19 @@ body.mobile-ui [data-acrylic]::before {
   box-sizing: border-box;
 }
 
-/* Trip Plan form — match Nearby's 24px card inset (16px panel + 8px list) */
+/* Trip Plan form — match Nearby's 24px card inset (16px panel + 8px list).
+   Drop the .panel-section + .panel-section divider too: in route mode this
+   is the only visible section, so the hairline above reads as a stray line
+   over the preferences. */
 #trip-plan-sidebar-panel {
+  border-top: none;
   padding-left: 24px;
   padding-right: 24px;
+}
+/* Pre-plan (no results yet): the form is the only content — keep a blank
+   below the last preference field so it doesn't end flush against the dock. */
+.app-shell:has(#plan-results[hidden]) #trip-plan-sidebar-panel {
+  padding-bottom: calc(var(--nav-dock-h, 80px) + 16px);
 }
 
 .app-shell[data-toolbar="closed"] .main-toolbar {
@@ -958,6 +1050,36 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 /*
+ * No visible scrollbars anywhere in the panel — tracks/gutters would read
+ * as blank glass against the sheet. Scrolling still works as usual.
+ */
+.detail-sidebar-body,
+.eta-route-list-sidebar,
+.panel-page-scroll,
+.pinned-route-body,
+.wheels-stop-panel,
+.sheet-body,
+.eta-route-details-panel,
+.contribute-body,
+.loc-suggest {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.detail-sidebar-body::-webkit-scrollbar,
+.eta-route-list-sidebar::-webkit-scrollbar,
+.panel-page-scroll::-webkit-scrollbar,
+.pinned-route-body::-webkit-scrollbar,
+.wheels-stop-panel::-webkit-scrollbar,
+.sheet-body::-webkit-scrollbar,
+.eta-route-details-panel::-webkit-scrollbar,
+.contribute-body::-webkit-scrollbar,
+.loc-suggest::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/*
  * Liquid glass: dense over the nav, eases through the pills, soft clear above.
  * Extra stops keep the ramp smooth (no hard edge).
  */
@@ -1198,7 +1320,8 @@ body.mobile-ui [data-acrylic]::before {
   transition:
     color 0.2s ease,
     font-size 0.22s ease,
-    font-variation-settings 0.2s ease;
+    font-variation-settings 0.2s ease,
+    transform 0.2s ease;
 }
 
 .eta-mode-tab-label {
@@ -1226,11 +1349,15 @@ body.mobile-ui [data-acrylic]::before {
 .eta-mode-tab.is-active .material-symbols-outlined {
   font-variation-settings: "FILL" 1, "wght" 500, "GRAD" 0, "opsz" 24;
   color: var(--accent);
+  animation: tab-icon-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .eta-mode-tab:hover:not(.is-active) {
   color: #fff;
   background: rgba(255, 255, 255, 0.06);
+}
+.eta-mode-tab:hover:not(.is-active) .material-symbols-outlined {
+  animation: tab-icon-bounce 0.5s ease;
 }
 
 /* Circular liquid-glass search button */
@@ -2487,6 +2614,48 @@ body.mobile-ui [data-acrylic]::before {
     0 8px 20px rgba(0, 0, 0, 0.25);
 }
 
+/*
+ * First Nearby browse per session: cards stagger in from below.
+ * Triggered once via .is-first-browse on the list (see renderEtaRouteSuggest).
+ */
+.eta-route-list-sidebar.is-first-browse li.eta-route-card {
+  animation: eta-card-in 0.45s ease both;
+  animation-delay: calc(min(var(--i, 0), 12) * 45ms);
+}
+@keyframes eta-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Location override: cards fall back out (reverse of eta-card-in) */
+.eta-route-list-sidebar.is-exiting li.eta-route-card {
+  animation: eta-card-out 0.3s ease both;
+  animation-delay: calc(min(var(--i, 0), 8) * 35ms);
+  pointer-events: none;
+}
+@keyframes eta-card-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .eta-route-list-sidebar.is-first-browse li.eta-route-card,
+  .eta-route-list-sidebar.is-exiting li.eta-route-card {
+    animation: none;
+  }
+}
+
 .eta-route-card-body {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -2535,6 +2704,28 @@ body.mobile-ui [data-acrylic]::before {
   animation: eta-route-spin 0.75s linear infinite;
 }
 
+/* Loading shows only the circle — no dashed card / text */
+.eta-route-list-sidebar .eta-route-status.is-loading {
+  margin: 8px 4px;
+  padding: 32px 16px;
+  border: 0;
+  background: transparent;
+  min-height: 0;
+}
+
+/* Visually hidden but kept for screen readers */
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
 @keyframes eta-route-spin {
   to {
     transform: rotate(360deg);
@@ -2569,11 +2760,6 @@ body.mobile-ui [data-acrylic]::before {
   color: var(--text-muted, rgba(255, 255, 255, 0.45));
   line-height: 1.35;
   max-width: 16rem;
-}
-
-.eta-route-status.is-loading .eta-route-status-title {
-  color: var(--text-muted, rgba(255, 255, 255, 0.55));
-  font-weight: 600;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3909,7 +4095,7 @@ body.contrib-submitting .bg-orb {
 }
 
 .btn:not(:disabled):active {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.98);
 }
 
 .btn-row {
@@ -3920,6 +4106,22 @@ body.contrib-submitting .bg-orb {
 
 .btn-row .material-symbols-outlined {
   font-size: 1.15em;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Icon nudges forward on hover, settles on press */
+.btn:not(:disabled):hover .btn-row .material-symbols-outlined {
+  transform: translateX(2px);
+}
+.btn:not(:disabled):active .btn-row .material-symbols-outlined {
+  transform: translateX(0);
+}
+
+/* GitHub mark in btn rows (Material Symbols has no brand glyph) */
+.btn-row .github-mark {
+  flex: none;
+  width: 1.15em;
+  height: 1.15em;
 }
 
 .btn-sub {
@@ -4022,7 +4224,10 @@ body.contrib-submitting .bg-orb {
   font-weight: 500;
   padding: 10px 12px;
   outline: none;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.2s ease;
 }
 
 .loc-input::placeholder {
@@ -4033,6 +4238,7 @@ body.contrib-submitting .bg-orb {
 .loc-input:focus {
   border-color: rgba(192, 174, 252, 0.45);
   background: #1c1c1c;
+  box-shadow: 0 0 0 3px rgba(192, 174, 252, 0.14);
 }
 
 .btn-icon {
@@ -4046,13 +4252,36 @@ body.contrib-submitting .bg-orb {
   color: var(--text-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  transition:
+    transform 0.18s ease,
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
-.btn-icon:hover {
+.btn.btn-icon:hover {
   color: var(--text-primary);
   border-color: var(--border-hov);
   background: var(--bg-card);
-  transform: none;
+  transform: translateY(-1px) scale(1.04);
+}
+
+.btn.btn-icon:active {
+  transform: translateY(0) scale(0.93);
+}
+
+/* Swap button: icon flips 180° once per tap */
+.btn.btn-icon.is-swapped .material-symbols-outlined {
+  animation: swap-spin 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes swap-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(180deg);
+  }
 }
 
 .btn-icon .material-symbols-outlined {
@@ -4082,6 +4311,18 @@ body.contrib-submitting .bg-orb {
 
 .loc-suggest.is-open {
   display: block;
+  /* Drop down over the input field */
+  animation: suggest-in 0.18s ease both;
+}
+@keyframes suggest-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .loc-suggest li {
@@ -4288,6 +4529,15 @@ body.contrib-submitting .bg-orb {
   background: rgba(192, 174, 252, 0.22);
   color: #f0eaff;
   box-shadow: inset 0 0 0 1px rgba(192, 174, 252, 0.35);
+  animation: pref-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes pref-pop {
+  from {
+    transform: scale(0.94);
+  }
+  to {
+    transform: scale(1);
+  }
 }
 
 .pref-opt:hover span {
@@ -4426,8 +4676,8 @@ body.contrib-submitting .bg-orb {
   margin-top: 12px;
   display: grid;
   gap: 8px;
-  /* Side padding matches the ETA list inset (24px); scroll container clears dock */
-  padding: 0 24px;
+  /* Side padding matches the ETA list inset (24px); bottom clears the dock */
+  padding: 0 24px calc(var(--nav-dock-h, 80px) + 16px);
 }
 
 /* Section label replacing the old debug meta line / divider */
@@ -4476,6 +4726,23 @@ body.contrib-submitting .bg-orb {
 .plan-card:focus-visible {
   outline: 2px solid rgba(192, 174, 252, 0.55);
   outline-offset: 2px;
+}
+
+/* Plan result / pinned cards stagger in after render (JS sets --i) */
+.plan-results .plan-card,
+.pinned-route-body .plan-card {
+  animation: card-in-up 0.4s ease both;
+  animation-delay: calc(min(var(--i, 0), 10) * 45ms);
+}
+@keyframes card-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .plan-actions {
@@ -4529,6 +4796,24 @@ body.contrib-submitting .bg-orb {
   border-color: rgba(192, 174, 252, 0.35);
   color: #ddd6fe;
 }
+/* Pin icon does a little twist + pop when a plan gets pinned */
+.plan-pin-btn.is-pinned .material-symbols-outlined {
+  animation: pin-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.pinned-actions .eta-route-pin-btn.is-pinned .material-symbols-outlined {
+  animation: pin-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes pin-pop {
+  0% {
+    transform: scale(1) rotate(0deg);
+  }
+  40% {
+    transform: scale(1.35) rotate(-14deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
 
 .plan-detail-btn .material-symbols-outlined,
 .plan-pin-btn .material-symbols-outlined {
@@ -4550,6 +4835,24 @@ body.contrib-submitting .bg-orb {
 
 .sidebar-page[hidden] {
   display: none !important;
+}
+/* Page switch: content fades + rises in */
+.sidebar-page:not([hidden]) {
+  animation: page-in 0.3s ease both;
+}
+#eta-sidebar-panel:not([hidden]),
+#trip-plan-sidebar-panel:not([hidden]) {
+  animation: page-in 0.3s ease both;
+}
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .trip-detail-head {
@@ -4628,6 +4931,51 @@ body.contrib-submitting .bg-orb {
 
 .trip-detail-timeline {
   padding: 12px 12px calc(var(--nav-dock-h, 80px) + 20px);
+}
+
+/* Trip timeline steps rise in sequence (rendered once per detail open) */
+#trip-detail-timeline > * {
+  animation: step-in 0.3s ease both;
+}
+#trip-detail-timeline > *:nth-child(2) {
+  animation-delay: 35ms;
+}
+#trip-detail-timeline > *:nth-child(3) {
+  animation-delay: 70ms;
+}
+#trip-detail-timeline > *:nth-child(4) {
+  animation-delay: 105ms;
+}
+#trip-detail-timeline > *:nth-child(5) {
+  animation-delay: 140ms;
+}
+#trip-detail-timeline > *:nth-child(6) {
+  animation-delay: 175ms;
+}
+#trip-detail-timeline > *:nth-child(7) {
+  animation-delay: 210ms;
+}
+#trip-detail-timeline > *:nth-child(8) {
+  animation-delay: 245ms;
+}
+#trip-detail-timeline > *:nth-child(9) {
+  animation-delay: 280ms;
+}
+#trip-detail-timeline > *:nth-child(10) {
+  animation-delay: 315ms;
+}
+#trip-detail-timeline > *:nth-child(n + 11) {
+  animation-delay: 350ms;
+}
+@keyframes step-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* Wheels ETA panel at each board stop (trip detail) */
@@ -5445,6 +5793,20 @@ body.contrib-submitting .bg-orb {
   box-shadow: var(--shadow);
   pointer-events: none;
 }
+/* Slide up + fade in each time a toast appears */
+.toast:not([hidden]) {
+  animation: toast-in 0.32s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 14px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
 
 /* ── MapLibre chrome ────────────────────────────────────────── */
 .maplibregl-ctrl-group {
@@ -5551,22 +5913,65 @@ body.contrib-submitting .bg-orb {
   touch-action: none;
   cursor: grab;
 }
-/* Soft clip: page content fades under the title bar (no hard line) */
+/* Soft clip: page content fades under the title bar (no hard line).
+ * Spans from the panel top; the top half of the title bar stays fully
+ * solid (content scrolling under it is completely hidden), then the
+ * glass eases out over the rest of the chrome and below the seam.
+ * Hidden at the top of a page; fades in once content scrolls. */
 .sheet-chrome::after {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
-  bottom: -34px;
-  height: 34px;
+  top: 0;
+  bottom: -48px;
   pointer-events: none;
   z-index: 2;
   background: linear-gradient(
     to bottom,
-    rgba(var(--glass-rgb), 0.92) 0%,
-    rgba(var(--glass-rgb), 0.45) 55%,
-    rgba(var(--glass-rgb), 0) 100%
+    rgba(var(--glass-rgb), 1) 0%,
+    rgba(var(--glass-rgb), 1)
+      calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) * 0.5),
+    rgba(var(--glass-rgb), 0.82)
+      calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) * 0.68),
+    rgba(var(--glass-rgb), 0.45)
+      calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) * 0.9),
+    rgba(var(--glass-rgb), 0)
+      calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) + 48px)
   );
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.app-shell.is-scrolled .sheet-chrome::after {
+  opacity: 1;
+}
+/* Route detail: the head is static and only the stop list scrolls below it,
+   so content never reaches the title bar — no dissolve band needed there. */
+.app-shell:has(#sidebar-page-eta-route:not([hidden])) .sheet-chrome::after {
+  display: none;
+}
+/* The band spans the chrome's own box — keep the grabber and title row
+   above it, or the solid glass paints over the text and drag handle. */
+.sheet-chrome .sheet-grabber,
+.sheet-chrome .sheet-title-row {
+  position: relative;
+  z-index: 3;
+}
+
+/*
+ * Top soft clip on the list itself — the scroll container clips content at
+ * its top edge, so the fade must live on the list (same language as the
+ * dock's bottom dissolve); otherwise the clip line shows as a hard edge
+ * under the title band. Desktop only: mobile scrolls content under the
+ * chrome instead (blank padding), so the cut happens behind the glass.
+ * Applied only while scrolled; the band's opacity transition carries the
+ * perceived fade.
+ */
+@media (min-width: 641px) {
+  .app-shell.is-scrolled .detail-sidebar-body {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 28px);
+    mask-image: linear-gradient(to bottom, transparent 0%, #000 28px);
+  }
 }
 /* Desktop overrides in min-width:641px (no grabber / tighter top) */
 .sheet-grabber {
@@ -5628,8 +6033,14 @@ body.contrib-submitting .bg-orb {
 }
 /* Same liquid-glass capsule as .eta-mode-tabs */
 .app-nav-tabs {
-  flex: 1 1 auto;
+  /* Explicit width instead of flex-grow: the capsule and the search wrap
+     hold complementary widths (48px circle + 10px gap), so the morph is a
+     true animated swap — the capsule shrinks while the pill (last flex
+     item, right edge pinned) grows right-to-left, always filling the bar. */
+  flex: 0 0 auto;
+  width: calc(100% - 58px);
   min-width: 0;
+  max-width: none;
   display: flex;
   align-items: stretch;
   justify-content: stretch;
@@ -5643,6 +6054,11 @@ body.contrib-submitting .bg-orb {
   box-shadow: var(--lg-highlight), var(--lg-shadow);
   -webkit-backdrop-filter: blur(32px) saturate(1.7);
   backdrop-filter: blur(32px) saturate(1.7);
+  transition:
+    width var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1)),
+    min-width var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1)),
+    max-width var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1)),
+    padding var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1));
 }
 .app-nav-tab {
   appearance: none;
@@ -5670,13 +6086,22 @@ body.contrib-submitting .bg-orb {
   transition:
     background 0.2s ease,
     color 0.2s ease,
-    box-shadow 0.2s ease;
+    box-shadow 0.2s ease,
+    /* Morph props animate with search open/close (same tokens as the pill) */
+    flex-grow var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1)),
+    flex-basis var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1)),
+    opacity var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1)),
+    visibility var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1)),
+    width var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1)),
+    min-width var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1)),
+    max-width var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1)),
+    padding var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1));
 }
 .app-nav-tab .material-symbols-outlined {
   font-size: 22px !important;
   line-height: 1 !important;
   font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
-  transition: color 0.2s ease, font-variation-settings 0.2s ease;
+  transition: color 0.2s ease, font-variation-settings 0.2s ease, transform 0.2s ease;
 }
 .app-nav-tab-label {
   max-width: 100%;
@@ -5694,10 +6119,40 @@ body.contrib-submitting .bg-orb {
 .app-nav-tab.is-active .material-symbols-outlined {
   font-variation-settings: "FILL" 1, "wght" 500, "GRAD" 0, "opsz" 24;
   color: var(--accent);
+  animation: tab-icon-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .app-nav-tab:hover:not(.is-active):not(:disabled) {
   color: #fff;
   background: rgba(255, 255, 255, 0.06);
+}
+.app-nav-tab:hover:not(.is-active):not(:disabled) .material-symbols-outlined {
+  animation: tab-icon-bounce 0.5s ease;
+}
+@keyframes tab-icon-bounce {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  30% {
+    transform: translateY(-3px) scale(1.14);
+  }
+  62% {
+    transform: translateY(0) scale(1.14);
+  }
+  80% {
+    transform: translateY(-1px) scale(1);
+  }
+}
+@keyframes tab-icon-pop {
+  0% {
+    transform: scale(0.7);
+  }
+  60% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 .app-nav-tab:disabled {
   opacity: 0.4;
@@ -5710,9 +6165,11 @@ body.contrib-submitting .bg-orb {
 /*
  * Search morph: closed = circle; open = pill expands (same timing as old ETA search).
  * Keep both nodes in layout — do not display:none the button.
+ * flex-basis auto lets the width property drive the morph (animatable);
+ * no max-width here or the closed→open clamp would freeze the growth.
  */
 .app-nav-search-wrap {
-  flex: 0 0 48px;
+  flex: 0 0 auto;
   width: 48px;
   min-width: 48px;
   height: 48px;
@@ -5728,10 +6185,10 @@ body.contrib-submitting .bg-orb {
     max-width var(--nav-morph-dur, 0.34s) var(--nav-morph-ease, cubic-bezier(0.32, 0.72, 0, 1));
 }
 .app-nav-search-wrap.is-open {
-  flex: 1 1 auto;
-  width: auto;
-  min-width: min(140px, 36vw);
-  max-width: min(320px, 58vw);
+  flex: 0 0 auto;
+  width: calc(100% - 58px);
+  min-width: 0;
+  max-width: none;
 }
 
 /*
@@ -5743,15 +6200,17 @@ body.contrib-submitting .bg-orb {
   gap: 10px;
 }
 .app-bottom-nav.is-search-open .app-nav-tabs {
-  flex: 0 0 48px;
+  /* flex-start keeps the surviving tab left-pinned while the capsule
+     shrinks; the closed layout is fully packed, so this swap is jump-free */
+  flex: 0 0 auto;
   width: 48px;
-  min-width: 48px;
-  max-width: 48px;
+  min-width: 0;
+  max-width: none;
   height: 48px;
   padding: 0;
   gap: 0;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   background: transparent;
   border: none;
   box-shadow: none;
@@ -5760,13 +6219,22 @@ body.contrib-submitting .bg-orb {
   overflow: visible;
 }
 .app-bottom-nav.is-search-open .app-nav-tab:not(.is-active) {
-  display: none !important;
+  /* Fade + collapse instead of display:none so the switcher shrinks in
+     sync with the pill; visibility flips at the end of the fade. */
+  opacity: 0;
+  visibility: hidden;
+  flex: 0 0 0;
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  padding: 0;
+  overflow: hidden;
 }
 .app-bottom-nav.is-search-open .app-nav-tab.is-active {
-  flex: 0 0 48px;
+  flex: 0 0 auto;
   width: 48px;
-  min-width: 48px;
-  max-width: 48px;
+  min-width: 0;
+  max-width: none;
   min-height: 48px;
   height: 48px;
   margin: 0;
@@ -5790,8 +6258,8 @@ body.contrib-submitting .bg-orb {
   font-variation-settings: "FILL" 1, "wght" 500, "GRAD" 0, "opsz" 24;
 }
 .app-bottom-nav.is-search-open .app-nav-search-wrap {
-  flex: 1 1 auto;
-  width: auto;
+  flex: 0 0 auto;
+  width: calc(100% - 58px);
   min-width: 0;
   max-width: none;
   height: 48px;
@@ -5907,6 +6375,8 @@ body.contrib-submitting .bg-orb {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .app-nav-tabs,
+  .app-nav-tab,
   .app-nav-search-wrap,
   .app-nav-search-btn,
   .app-nav-search-field,
@@ -5986,6 +6456,18 @@ body.contrib-submitting .bg-orb {
   display: none !important;
 }
 
+/* About → Developer: “Developed by MORGAN” brand mark + link stack */
+.about-dev-logo {
+  display: block;
+  width: min(160px, 60%);
+  height: auto;
+  margin: 12px 0 0;
+  opacity: 0.9;
+}
+.about-dev-btns {
+  margin-top: 12px;
+}
+
 /* Hide legacy toolbar if present */
 .toolbar-inner {
   display: none !important;
@@ -6028,12 +6510,20 @@ body.contrib-submitting .bg-orb {
   backdrop-filter: blur(32px) saturate(1.7) !important;
   display: grid !important;
   place-items: center !important;
+  transition:
+    transform 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
 }
 .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group button + button {
   border-top: 1px solid rgba(255, 255, 255, 0.14) !important;
 }
 .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group button:hover {
   background: rgba(55, 58, 66, 0.75) !important;
+  transform: translateY(-1px) scale(1.05);
+}
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-group button:active {
+  transform: scale(0.94);
 }
 .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group button:focus {
   outline: none;
@@ -6176,7 +6666,13 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     border-bottom: none;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
-    transition: height 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+    /* max-height must ride along with height: both are set to the same
+       calc(var(--sheet-h) + dock), so if only height transitions the
+       max-height snap clamps the used height to the target instantly
+       (collapse full → half jumps while expand animates). */
+    transition:
+      height 0.32s cubic-bezier(0.32, 0.72, 0, 1),
+      max-height 0.32s cubic-bezier(0.32, 0.72, 0, 1);
     box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.45);
   }
   .main-toolbar.is-sheet-dragging {
@@ -6218,7 +6714,12 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     flex: 0 0 auto;
     z-index: 4;
     display: flex !important;
-    position: relative;
+    /* Float over the list top so content can scroll UNDER the title bar
+       (each scroller pads by the chrome height; no clip line at the seam). */
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
     touch-action: none;
     -webkit-user-select: none;
     user-select: none;
@@ -6260,6 +6761,20 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   .app-shell[data-detail="closed"] .sheet-chrome {
     padding: 8px 16px 18px;
   }
+  /* Soft breathing hint on the grabber while the sheet is closed */
+  .app-shell[data-sheet="closed"] .sheet-grabber-bar,
+  .app-shell[data-detail="closed"] .sheet-grabber-bar {
+    animation: grabber-hint 2.6s ease-in-out 0.8s infinite;
+  }
+  @keyframes grabber-hint {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
+  }
   .app-shell[data-sheet="closed"] .sheet-title-row,
   .app-shell[data-detail="closed"] .sheet-title-row {
     min-height: 42px;
@@ -6272,6 +6787,36 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   .app-shell[data-sheet="closed"] {
     --sheet-chrome-h: 72px;
     --sheet-h: 72px;
+  }
+
+  /*
+   * List scrolls under the title bar: the chrome floats over the list top
+   * and every scroller's content starts at the chrome's bottom (blank =
+   * real chrome height, px published by JS). The cut only ever happens
+   * behind the opaque chrome — no visible clip line at the seam.
+   */
+  .app-shell[data-ui-mode="route"] .detail-sidebar-body {
+    padding-top: var(--sheet-chrome-h-px, var(--sheet-chrome-h));
+  }
+  #eta-route-list-sidebar {
+    padding-top: calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) - 4px);
+  }
+  .pinned-route-body,
+  .panel-page-scroll {
+    padding-top: var(--sheet-chrome-h-px, var(--sheet-chrome-h));
+  }
+  /* Detail pages that fill the whole body sit behind the chrome; the
+     route-detail and trip-detail pages keep their heads below the seam. */
+  .app-shell[data-ui-mode="eta"] #sidebar-page-eta-route,
+  .app-shell[data-ui-mode="eta"] #sidebar-page-trip {
+    padding-top: var(--sheet-chrome-h-px, var(--sheet-chrome-h));
+  }
+  /* In route mode the body itself scrolls — pull the flex-filling pages
+     back up behind the chrome so their scroller's blank aligns with it. */
+  .app-shell[data-ui-mode="route"] #sidebar-page-pinned,
+  .app-shell[data-ui-mode="route"] #sidebar-page-settings,
+  .app-shell[data-ui-mode="route"] #sidebar-page-about {
+    margin-top: calc(-1 * var(--sheet-chrome-h-px, var(--sheet-chrome-h)));
   }
 
   .detail-sidebar {
@@ -6305,39 +6850,59 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     margin: 0;
     border-radius: 0 !important;
     overflow: visible;
-    /* Opaque foot = no black home-bar gap on release builds */
-    background: linear-gradient(
-      to top,
-      rgba(var(--glass-rgb), 1) 0%,
-      rgba(var(--glass-rgb), 0.97) 32%,
-      rgba(var(--glass-rgb), 0.92) 62%,
-      rgba(var(--glass-rgb), 0.88) 100%
-    ) !important;
+    /* Transparent control layer — the ::before dissolve + sheet glass
+       keep the fade; the old opaque foot drew a hard straight top edge. */
+    background: transparent !important;
     border: none !important;
-    -webkit-backdrop-filter: blur(28px) saturate(1.55);
-    backdrop-filter: blur(28px) saturate(1.55);
     /* Tabs use small --safe-bottom-content; no extra min-height lifting them */
     padding-bottom: 0;
     min-height: 0;
     box-shadow: none;
   }
-  /* Soft dissolve on the *top* of the dock only (list → glass) */
+  /* Soft dissolve over the whole dock: transparent above, ramps through the
+     pills, dense over the nav — the band reaches the dock foot so it never
+     ends with a hard edge mid-dock. */
   .panel-bottom-stack::before {
     opacity: 1;
     top: -64px;
-    bottom: auto;
-    height: 80px;
+    bottom: 0;
+    height: auto;
     background: linear-gradient(
       to bottom,
       rgba(var(--glass-rgb), 0) 0%,
-      rgba(var(--glass-rgb), 0.35) 38%,
-      rgba(var(--glass-rgb), 0.66) 68%,
-      rgba(var(--glass-rgb), 0.9) 100%
+      rgba(var(--glass-rgb), 0.3) 26%,
+      rgba(var(--glass-rgb), 0.6) 52%,
+      rgba(var(--glass-rgb), 0.84) 78%,
+      rgba(var(--glass-rgb), 0.97) 100%
     );
     -webkit-backdrop-filter: blur(18px) saturate(1.4);
     backdrop-filter: blur(18px) saturate(1.4);
-    -webkit-mask-image: none;
-    mask-image: none;
+    /* Mask fades the blur itself in, not just the tint — otherwise the
+       band's top edge is a hard sharp-to-blur cutoff. */
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgba(0, 0, 0, 0.35) 24%,
+      rgba(0, 0, 0, 0.75) 48%,
+      #000 70%,
+      #000 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgba(0, 0, 0, 0.35) 24%,
+      rgba(0, 0, 0, 0.75) 48%,
+      #000 70%,
+      #000 100%
+    );
+  }
+
+  /* Collapsed: the sheet is just the title bar sitting directly on the dock —
+     the band's upward dissolve would fade over the chrome, so disable it
+     (the nav tabs / CTA keep their own liquid-glass fills). */
+  .app-shell[data-sheet="closed"] .panel-bottom-stack::before,
+  .app-shell[data-detail="closed"] .panel-bottom-stack::before {
+    display: none;
   }
 
   /*
@@ -6457,6 +7022,11 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   .app-shell[data-detail="closed"] #eta-sidebar-bottom-chrome {
     display: none !important;
   }
+  /* Collapsed: only the title bar + nav remain — drop the Plan Trip CTA too */
+  .app-shell[data-sheet="closed"] #route-plan-cta-chrome,
+  .app-shell[data-detail="closed"] #route-plan-cta-chrome {
+    display: none !important;
+  }
 
   .app-shell[data-sheet="closed"] .detail-sidebar,
   .app-shell[data-detail="closed"] .detail-sidebar {
@@ -6541,9 +7111,10 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     padding-bottom: 0 !important;
   }
 
-  /* Standalone: same fixed foot as mobile — no safe-area under tabs */
+  /* Standalone: same fixed foot as mobile — no safe-area under tabs.
+     Extra bottom padding lifts the capsule clear of the home bar. */
   html.pwa {
-    --safe-bottom-content: 6px;
+    --safe-bottom-content: 16px;
   }
   html.pwa .app-bottom-nav,
   html.pwa #eta-route-detail-chrome,
@@ -6551,7 +7122,7 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     padding-top: 4px !important;
     padding-left: 10px !important;
     padding-right: 10px !important;
-    padding-bottom: 6px !important;
+    padding-bottom: 21px !important;
   }
 
   html.pwa .app-shell::after {
@@ -6614,6 +7185,24 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   font-size: 18px !important;
   line-height: 1 !important;
   font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+  transition: transform 0.18s ease;
+}
+.eta-method-pill:hover:not(.is-active) .material-symbols-outlined {
+  transform: scale(1.22);
+}
+.eta-method-pill.is-active .material-symbols-outlined {
+  animation: pill-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes pill-pop {
+  0% {
+    transform: scale(0.78);
+  }
+  60% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 .eta-method-pill-label {
   white-space: nowrap;
@@ -6654,4 +7243,44 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   box-shadow:
     0 0 0 6px rgba(77, 163, 255, 0.25),
     0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Reduced motion: kill decorative animation app-wide ─────── */
+@media (prefers-reduced-motion: reduce) {
+  .bg-orb-1,
+  .bg-orb-2,
+  .sheet-grabber-bar,
+  .app-nav-tab .material-symbols-outlined,
+  .eta-mode-tab .material-symbols-outlined,
+  .eta-method-pill .material-symbols-outlined,
+  .plan-pin-btn.is-pinned .material-symbols-outlined,
+  .pinned-actions .eta-route-pin-btn.is-pinned .material-symbols-outlined,
+  .btn.btn-icon.is-swapped .material-symbols-outlined {
+    animation: none !important;
+  }
+  .profile-menu:not([hidden]),
+  .sidebar-page:not([hidden]),
+  #eta-sidebar-panel:not([hidden]),
+  #trip-plan-sidebar-panel:not([hidden]),
+  .toast:not([hidden]),
+  .loc-suggest.is-open,
+  .map-route-badge:not([hidden]),
+  .plan-results .plan-card,
+  .pinned-route-body .plan-card,
+  #trip-detail-timeline > *,
+  .pref-opt input:checked + span {
+    animation: none !important;
+  }
+  .btn-icon,
+  .btn-row .material-symbols-outlined,
+  .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group button,
+  .sheet-chrome::after {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+  }
+  .eta-method-pill:hover:not(.is-active) .material-symbols-outlined,
+  .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group button:hover,
+  .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group button:active {
+    transform: none;
+  }
 }

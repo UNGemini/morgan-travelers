@@ -1,7 +1,7 @@
 {
   "name": "MORGAN Travelers",
-  "short_name": "MTravelers",
-  "description": "Hong Kong transit trip planner and live bus tracking PWA",
+  "short_name": "Travelers",
+  "description": "Serverless Hong Kong transit trip planner and live bus tracking PWA",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

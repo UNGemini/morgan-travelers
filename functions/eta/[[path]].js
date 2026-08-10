@@ -28,12 +28,41 @@ const CORS = {
   "Cross-Origin-Resource-Policy": "cross-origin",
 };
 
+/** Header joining a client request to this proxy across the boundary. */
+const CORRELATION_HEADER = "x-correlation-id";
+
+/**
+ * Reuse a well-formed client correlation id, else mint one for the request.
+ * @param {Request} req
+ */
+function correlationId(req) {
+  const provided = req.headers.get(CORRELATION_HEADER);
+  return provided && /^[A-Za-z0-9._:-]{1,64}$/.test(provided)
+    ? provided
+    : `eta-${crypto.randomUUID()}`;
+}
+
+/** Structured JSON failure with the correlation id echoed in header + body. */
+function jsonError(body, status, correlation) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      [CORRELATION_HEADER]: correlation,
+      ...CORS,
+    },
+  });
+}
+
 export async function onRequest(context) {
   const req = context.request;
   const url = new URL(req.url);
+  const correlation = correlationId(req);
+  const corsHeaders = { ...CORS, [CORRELATION_HEADER]: correlation };
 
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS });
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   // /eta/kmb/stop-eta/XXX  → path parts after /eta/
@@ -43,13 +72,11 @@ export async function onRequest(context) {
   const sub = slash >= 0 ? rest.slice(slash) : "";
   const base = TARGETS[op];
   if (!base) {
-    return new Response(JSON.stringify({ error: "unknown eta operator", op }), {
-      status: 404,
-      headers: {
-        "Content-Type": "application/json",
-        ...CORS,
-      },
-    });
+    return jsonError(
+      { ok: false, error: "unknown eta operator", op, correlationId: correlation },
+      404,
+      correlation,
+    );
   }
 
   const target = new URL(`${base}${sub || ""}`);
@@ -71,7 +98,24 @@ export async function onRequest(context) {
     init.body = await req.arrayBuffer();
   }
 
-  const res = await fetch(target.toString(), init);
+  let res;
+  try {
+    res = await fetch(target.toString(), init);
+  } catch (error) {
+    // Upstream unreachable — structured, joinable failure instead of an opaque 500.
+    return jsonError(
+      {
+        ok: false,
+        error: "upstream_request_failed",
+        message: String(error?.message ?? error),
+        operator: op,
+        correlationId: correlation,
+      },
+      502,
+      correlation,
+    );
+  }
+
   const body = await res.arrayBuffer();
   return new Response(body, {
     status: res.status,
@@ -79,7 +123,7 @@ export async function onRequest(context) {
       "Content-Type": res.headers.get("Content-Type") || "application/json",
       "Cache-Control":
         req.method === "GET" ? "public, max-age=15" : "no-store",
-      ...CORS,
+      ...corsHeaders,
     },
   });
 }

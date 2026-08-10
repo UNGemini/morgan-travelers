@@ -16,6 +16,16 @@ import {
 /** Same-origin proxy prefix */
 const ETA_BASE = "/eta";
 
+/** Correlation header shared with the /eta proxy (functions/eta/[[path]].js). */
+const CORRELATION_HEADER = "x-correlation-id";
+
+let correlationSeq = 0;
+/** Mint a per-request id the proxy echoes back for joinable failures. */
+function nextCorrelationId() {
+  correlationSeq += 1;
+  return `eta-${Date.now().toString(36)}-${correlationSeq}`;
+}
+
 /** @type {Map<string, { t: number, data: any }>} */
 const cache = new Map();
 const CACHE_MS = 25_000;
@@ -31,11 +41,19 @@ async function fetchJson(url, opts = {}) {
   const ttl = opts.ttlMs ?? CACHE_MS;
   const hit = cache.get(url);
   if (hit && Date.now() - hit.t < ttl) return hit.data;
+  const correlationId = nextCorrelationId();
   const res = await fetch(url, {
-    headers: { Accept: "application/json" },
+    headers: {
+      Accept: "application/json",
+      [CORRELATION_HEADER]: correlationId,
+    },
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(`ETA ${res.status} ${url}`);
+  if (!res.ok) {
+    const echo = res.headers.get(CORRELATION_HEADER) || correlationId;
+    console.warn("[eta] proxy failure", res.status, url, { correlationId: echo });
+    throw new Error(`ETA ${res.status} ${url} correlation=${echo}`);
+  }
   const data = await res.json();
   cache.set(url, { t: Date.now(), data });
   return data;
@@ -1524,11 +1542,18 @@ async function fetchGmbEta(opt, board) {
     };
   }
   try {
+    const correlationId = nextCorrelationId();
     const res = await fetch(
       `${ETA_BASE}/gmb/eta/route-stop/${encodeURIComponent(routeId)}/${routeSeq || 1}/${stopSeq}`,
-      { headers: { Accept: "application/json" } },
+      {
+        headers: {
+          Accept: "application/json",
+          [CORRELATION_HEADER]: correlationId,
+        },
+      },
     );
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok)
+      throw new Error(`HTTP ${res.status} correlation=${res.headers.get(CORRELATION_HEADER) || correlationId}`);
     const data = await res.json();
     const rows = Array.isArray(data?.data?.eta) ? data.data.eta : [];
     const now = Date.now();
@@ -1613,15 +1638,18 @@ async function fetchMtrBusEta(opt, board) {
     };
   }
   try {
+    const correlationId = nextCorrelationId();
     const res = await fetch(`${ETA_BASE}/mtr/bus/getSchedule`, {
       method: "POST",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
+        [CORRELATION_HEADER]: correlationId,
       },
       body: JSON.stringify({ language: "en", routeName: route }),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok)
+      throw new Error(`HTTP ${res.status} correlation=${res.headers.get(CORRELATION_HEADER) || correlationId}`);
     const data = await res.json();
     const stops = Array.isArray(data?.busStop) ? data.busStop : [];
     const now = Date.now();

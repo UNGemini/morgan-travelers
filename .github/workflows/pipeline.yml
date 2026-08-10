@@ -23,11 +23,13 @@ on:
   push:
     paths:
       - ".github/workflows/pipeline.yml"
-      - "scripts/generate-metadata.mjs"
-
-concurrency:
-  group: gtfs-pipeline
-  cancel-in-progress: true
+      - "scripts/**"
+      - "src/**"
+      - "functions/**"
+      - "index.html"
+      - "vite.config.js"
+      - "package.json"
+      - "package-lock.json"
 
 env:
   DATA_PUBLIC_BASE_URL: ${{ vars.DATA_PUBLIC_BASE_URL || 'https://hk-gtfsdata.morgandev.cc' }}
@@ -38,6 +40,19 @@ jobs:
     name: Build · Metadata · R2 Sync
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    concurrency:
+      group: gtfs-pipeline
+      cancel-in-progress: true
+    # Data job only on pushes that touch the data pipeline itself; frontend
+    # pushes still trigger this workflow but only the frontend-check job below.
+    # github.event.head_commit is null on schedule/dispatch — short-circuit first.
+    if: >-
+      github.event_name != 'push' ||
+      (github.event.head_commit != null &&
+       (contains(join(github.event.head_commit.modified, ' '), 'scripts/generate-metadata.mjs') ||
+        contains(join(github.event.head_commit.added, ' '), 'scripts/generate-metadata.mjs') ||
+        contains(join(github.event.head_commit.removed, ' '), 'scripts/generate-metadata.mjs') ||
+        contains(join(github.event.head_commit.modified, ' '), '.github/workflows/pipeline.yml')))
 
     steps:
       - name: Checkout
@@ -180,3 +195,34 @@ jobs:
             -X POST \
             -d "${BODY}" \
             "${WEBHOOK_URL}"
+
+  # Frontend changes (src/, functions/, config) get a mechanical pass/fail
+  # signal before review: syntax-check + production build via npm run check.
+  frontend-check:
+    name: Frontend Build · Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run project check (syntax + build)
+        run: npm run check
+
+      - name: Upload check result
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-check-result
+          path: dist/
+          retention-days: 7

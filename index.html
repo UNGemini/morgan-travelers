@@ -9,15 +9,12 @@
     <meta name="theme-color" content="#12161c" media="(prefers-color-scheme: dark)" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta
-      name="apple-mobile-web-app-status-bar-style"
-      content="black-translucent"
-    />
     <meta name="apple-mobile-web-app-title" content="Travelers" />
     <meta
       name="description"
       content="MORGAN Travelers — Hong Kong transit map, GTFS data, and live routing foundation."
     />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/siteicon.png" type="image/png" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -33,9 +30,8 @@
       html, body {
         margin: 0;
         padding: 0;
-        width: 100%;
-        height: 100%;
-        height: -webkit-fill-available; 
+        width: 100vw;
+        height: 100vh;
         overflow: hidden;
         background: #12161c;
         color: #fff;
@@ -49,8 +45,8 @@
       .map-stage, #map {
         position: absolute;
         inset: 0;
-        width: 100%;
-        height: 100%;
+        width: 100vw;
+        height: 100vh;
         background: #0a0c10;
       }
       .map-status.is-visually-hidden {

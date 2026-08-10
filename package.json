@@ -17,6 +17,7 @@
     "schemes:nlb": "node scripts/merge-nlb-bbi.mjs",
     "collect:open-data": "node scripts/collect-open-data.mjs",
     "preview": "vite preview",
+    "check": "node scripts/check.mjs",
     "generate-metadata": "node scripts/generate-metadata.mjs",
     "sync:bus-shapes": "node scripts/sync-bus-shapes-from-remote.mjs",
     "overrides:status": "node scripts/overrides-local.mjs status",
