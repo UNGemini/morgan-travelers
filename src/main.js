@@ -260,6 +260,7 @@ const els = {
   sidebarPagePinned: document.getElementById("sidebar-page-pinned"),
   sidebarPageSettings: document.getElementById("sidebar-page-settings"),
   sidebarPageAbout: document.getElementById("sidebar-page-about"),
+  mapBrandLogo: document.getElementById("map-brand-logo"),
   pinnedRouteBody: document.getElementById("pinned-route-body"),
   etaRouteDetailHead: document.getElementById("eta-route-detail-head"),
   etaRouteDetailBody: document.getElementById("eta-route-detail-body"),
@@ -293,6 +294,43 @@ const els = {
     ),
   navTabs: () => Array.from(document.querySelectorAll(".app-nav-tab[data-nav]")),
 };
+
+/*
+ * Title-bar soft edge: hidden at the top of a page, fades in only when
+ * content scrolls under it. Re-checked on every scroll (capture phase —
+ * element scrolls don't bubble) and on page switches via setSidebarPage.
+ */
+const TOP_FADE_SCROLLERS = [
+  ".detail-sidebar-body",
+  ".eta-route-list-sidebar",
+  ".panel-page-scroll",
+  ".pinned-route-body",
+  ".wheels-stop-panel",
+];
+
+function syncTopFade() {
+  let on = false;
+  const root = els.mainToolbar;
+  if (root) {
+    for (const el of root.querySelectorAll(TOP_FADE_SCROLLERS.join(","))) {
+      // Ignore hidden pages — their scrollers keep stale offsets
+      const host = el.closest(
+        ".sidebar-page, .eta-sidebar-panel, .trip-plan-sidebar-panel",
+      );
+      if (host && host.hidden) continue;
+      if (el.scrollTop > 4) {
+        on = true;
+        break;
+      }
+    }
+  }
+  els.app?.classList.toggle("is-scrolled", on);
+}
+document.addEventListener("scroll", syncTopFade, {
+  capture: true,
+  passive: true,
+});
+syncTopFade();
 
 const ETA_PINNED_KEY = "morgan.etaPinnedRoutes";
 /** @deprecated old single-route key — migrated on load */
@@ -582,6 +620,7 @@ function togglePinPlan(p) {
   if (i >= 0) {
     list.splice(i, 1);
     savePinnedPlans(list);
+    syncPinnedRouteToolbar();
     return false;
   }
   let stored;
@@ -596,6 +635,7 @@ function togglePinPlan(p) {
   stored.toLabel = destination?.label || destination?.name || "";
   list.push({ key, fromLabel: stored.fromLabel, toLabel: stored.toLabel, plan: stored, pinnedAt: Date.now() });
   savePinnedPlans(list);
+  syncPinnedRouteToolbar();
   return true;
 }
 
@@ -716,33 +756,45 @@ function isRoutePinned(route, stop = null) {
 }
 
 function syncPinnedRouteToolbar() {
-  const list = loadPinnedEtaRoutes();
+  const routes = loadPinnedEtaRoutes();
+  const trips = loadPinnedPlans();
   const btn = els.btnEtaPinned;
   const label = els.toolbarPinnedLabel;
   if (!btn) return;
-  btn.classList.toggle("has-pins", list.length > 0);
+  const total = routes.length + trips.length;
+  btn.classList.toggle("has-pins", total > 0);
   // Always keep the tab name “Pinned” (supports multiple stops)
   if (label) label.textContent = "Pinned";
-  if (list.length) {
+  if (total > 0) {
     btn.disabled = false;
-    const oneStop =
-      list.length === 1 && (list[0].stopName || list[0].stopId)
-        ? ` @ ${list[0].stopName || list[0].stopId}`
-        : "";
-    btn.title =
-      list.length === 1
-        ? `Pinned: ${list[0].id}${oneStop}`
-        : `Pinned (${list.length} stops)`;
-    btn.setAttribute(
-      "aria-label",
-      list.length === 1
-        ? `Open pinned ${list[0].id}${oneStop}`
-        : `Open ${list.length} pinned stops`,
-    );
+    if (routes.length === 1 && trips.length === 0) {
+      const oneStop =
+        routes[0].stopName || routes[0].stopId
+          ? ` @ ${routes[0].stopName || routes[0].stopId}`
+          : "";
+      btn.title = `Pinned: ${routes[0].id}${oneStop}`;
+      btn.setAttribute(
+        "aria-label",
+        `Open pinned ${routes[0].id}${oneStop}`,
+      );
+    } else if (trips.length === 0) {
+      btn.title = `Pinned (${routes.length} stops)`;
+      btn.setAttribute(
+        "aria-label",
+        `Open ${routes.length} pinned stops`,
+      );
+    } else if (routes.length === 0) {
+      const n = trips.length === 1 ? "1 trip" : `${trips.length} trips`;
+      btn.title = `Pinned (${n})`;
+      btn.setAttribute("aria-label", `Open ${n}`);
+    } else {
+      btn.title = `Pinned (${total} items)`;
+      btn.setAttribute("aria-label", `Open ${total} pinned items`);
+    }
   } else {
     btn.disabled = true;
-    btn.title = "Pin a route stop from route details";
-    btn.setAttribute("aria-label", "No pinned stops");
+    btn.title = "Pin a route stop or trip plan";
+    btn.setAttribute("aria-label", "No pinned items");
   }
   const pinBtn = els.btnEtaPinRoute;
   if (pinBtn && etaSelectedForDetails) {
@@ -1015,6 +1067,11 @@ async function renderPinnedRoutePage() {
     );
   }
   body.innerHTML = parts.join("");
+
+  // Stagger card entrance after render (CSS uses --i)
+  body.querySelectorAll(".plan-card").forEach((card, i) => {
+    card.style.setProperty("--i", String(i));
+  });
 
   // Pinned trip plans: open detail / unpin
   body.querySelectorAll("[data-pinned-plan]").forEach((card) => {
@@ -2986,6 +3043,8 @@ function setNearbyBrowseLocation(lat, lon, opts = {}) {
     if (sidebarPage !== "search" && sidebarPage !== "eta-route") {
       setSidebarPage("search");
     }
+    // Manual override: replay the card entrance for the new location's list
+    etaNearbyReplayAnimate = true;
     void refreshEtaRouteSuggest();
   }
 }
@@ -3465,6 +3524,13 @@ els.btnSwap?.addEventListener("click", () => {
   const d = destination;
   const oVal = els.inputOrigin?.value || "";
   const dVal = els.inputDest?.value || "";
+
+  // Spin the swap icon once (CSS keyframe; restarts via class toggle)
+  if (els.btnSwap) {
+    els.btnSwap.classList.remove("is-swapped");
+    void els.btnSwap.offsetWidth;
+    els.btnSwap.classList.add("is-swapped");
+  }
 
   originMarker?.remove();
   destMarker?.remove();
@@ -5788,6 +5854,7 @@ function renderPlans(list, ms, opts = {}) {
   els.planResults.hidden = false;
   els.planResults.querySelectorAll(".plan-card").forEach((card) => {
     const idx = Number(card.dataset.idx);
+    card.style.setProperty("--i", String(idx));
     card.addEventListener("click", (e) => {
       if (e.target.closest(".plan-detail-btn") || e.target.closest(".plan-pin-btn")) {
         return;
@@ -6007,6 +6074,8 @@ function setSidebarPage(page) {
   if (sidebarPage !== "eta-route") {
     clearMapRouteBadge();
   }
+  // Map brand logo shares the badge's bottom-left slot — hide on route detail
+  if (els.mapBrandLogo) els.mapBrandLogo.hidden = sidebarPage === "eta-route";
   if (
     (sidebarPage === "trip" ||
       sidebarPage === "eta-route" ||
@@ -6071,6 +6140,8 @@ function setSidebarPage(page) {
   } catch {
     /* ignore */
   }
+  // Title-bar fade state follows the new page's scroll offset
+  syncTopFade();
 }
 
 /**
@@ -6638,7 +6709,7 @@ async function bootstrapRouter() {
   }
 }
 
-bootstrapRouter();
+const routerReadyPromise = bootstrapRouter();
 
 // Multi-type MTR fare tables (adult / student / child / QR / contactless)
 /** @type {Promise<unknown>} */
@@ -6972,9 +7043,10 @@ function sheetSnapHeights() {
 
   const dock = measureNavDockH() || readCssLen("--nav-dock-h", 80);
   let closed = 52;
+  let chromeH = 52;
   try {
     // Content-only closed height = grabber + title (nav is fixed below)
-    const chromeH = els.sheetChrome?.getBoundingClientRect().height || 52;
+    chromeH = els.sheetChrome?.getBoundingClientRect().height || 52;
     closed = Math.max(44, Math.round(chromeH));
   } catch {
     closed = readCssLen("--sheet-chrome-h", 52);
@@ -6994,6 +7066,7 @@ function sheetSnapHeights() {
     open: Math.round(open),
     full,
     dock: Math.round(dock),
+    chrome: Math.round(chromeH),
   };
 }
 
@@ -7046,6 +7119,12 @@ function setSheetState(state) {
             ? snaps.full
             : snaps.open;
       document.documentElement.style.setProperty("--sheet-h", `${px}px`);
+      // Real chrome height — scrollers pad their content by this so the
+      // list starts below the title bar and scrolls under it (blank zone)
+      document.documentElement.style.setProperty(
+        "--sheet-chrome-h-px",
+        `${snaps.chrome}px`,
+      );
     };
     publish();
     requestAnimationFrame(() => {
@@ -10043,7 +10122,7 @@ function etaRouteCardLiHtml(r, i) {
   }
 
   const active = i === etaRouteActive ? "is-active" : "";
-  return `<li role="option" data-idx="${i}" class="eta-route-card ${active}" aria-selected="${active ? "true" : "false"}">
+  return `<li role="option" data-idx="${i}" class="eta-route-card ${active}" style="--i:${i}" aria-selected="${active ? "true" : "false"}">
     <div class="eta-route-card-body">
       ${etaRouteCardInnerHtml(r, useDir, {
         minutes: liveForDir ? live?.minutes : null,
@@ -10071,6 +10150,10 @@ const etaCardLiveLastAt = new Map();
 const ETA_CARD_LIVE_MIN_MS = 25_000;
 /** Current list mode: nearby browse vs typed search */
 let etaListMode = /** @type {"nearby" | "search" | null} */ (null);
+/** First Nearby browse per session — plays the staggered card entrance once */
+let etaNearbyFirstBrowse = true;
+/** Manual nearby-location override — replays the staggered card entrance */
+let etaNearbyReplayAnimate = false;
 
 function teardownEtaCardLiveObserver() {
   if (etaCardLiveObserver) {
@@ -10272,7 +10355,7 @@ function etaRouteListStatusHtml(status, message = "") {
   if (status === "loading") {
     return `<li class="eta-route-status is-loading" role="status" aria-live="polite" aria-busy="true">
       <span class="eta-route-status-spinner" aria-hidden="true"></span>
-      <span class="eta-route-status-title">${escapeHtml(message || "Loading routes…")}</span>
+      <span class="sr-only">${escapeHtml(message || "Loading routes…")}</span>
     </li>`;
   }
   if (status === "error") {
@@ -10288,6 +10371,25 @@ function etaRouteListStatusHtml(status, message = "") {
     <span class="eta-route-status-title">${escapeHtml(message || "No routes found")}</span>
     <span class="eta-route-status-sub">Try another filter or search term</span>
   </li>`;
+}
+
+/**
+ * Reverse stagger on the current Nearby cards (manual location override).
+ * Resolves once the exit has finished so the spinner can replace the cards.
+ */
+function animateEtaCardsExit() {
+  const list = els.etaRouteListSidebar;
+  if (!list || !list.querySelector("li.eta-route-card")) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    list.classList.add("is-exiting");
+    // Exit lasts ~0.58s (delay cap 8×35ms + 0.3s anim) — wait past it
+    window.setTimeout(() => {
+      list.classList.remove("is-exiting");
+      resolve();
+    }, 650);
+  });
 }
 
 /**
@@ -10317,6 +10419,7 @@ function renderEtaRouteSuggest(hits, hint = "", opts = {}) {
     teardownEtaCardLiveObserver();
     etaRouteHits = [];
     etaRouteActive = -1;
+    if (opts.mode === "nearby") etaNearbyReplayAnimate = false;
     list.innerHTML = etaRouteListStatusHtml("error", hint || "Couldn’t load routes");
     return;
   }
@@ -10349,6 +10452,7 @@ function renderEtaRouteSuggest(hits, hint = "", opts = {}) {
 
   if (!hits.length) {
     teardownEtaCardLiveObserver();
+    if (opts.mode === "nearby") etaNearbyReplayAnimate = false;
     list.innerHTML = etaRouteListStatusHtml(
       "empty",
       hint && /no |not found|none/i.test(hint)
@@ -10358,7 +10462,23 @@ function renderEtaRouteSuggest(hits, hint = "", opts = {}) {
     return;
   }
 
+  // First Nearby browse per session, or a manual location override:
+  // stagger cards in (search stays instant)
+  const firstNearby =
+    opts.mode === "nearby" &&
+    hits.length > 0 &&
+    (etaNearbyFirstBrowse || etaNearbyReplayAnimate);
+  if (firstNearby) {
+    etaNearbyFirstBrowse = false;
+    etaNearbyReplayAnimate = false;
+  }
   list.innerHTML = hits.map((r, i) => etaRouteCardLiHtml(r, i)).join("");
+
+  if (firstNearby) {
+    list.classList.add("is-first-browse");
+    // Let later re-renders (prefetch OD, soft refresh) skip the animation
+    window.setTimeout(() => list.classList.remove("is-first-browse"), 1200);
+  }
 
   list.querySelectorAll("li[data-idx]").forEach((li) => {
     bindEtaRouteCardEvents(li);
@@ -10448,12 +10568,20 @@ async function refreshEtaRouteSuggest() {
   // Empty search field — nearby browse
   // Soft refresh: keep existing cards (no “Loading nearby routes…” flash).
   // Live ETAs for visible cards only run via IntersectionObserver after paint.
+  // Manual location override: cards fall out (reverse stagger), then the
+  // spinner shows while the new location's routes load.
+  const overrideThisRefresh = etaNearbyReplayAnimate;
+  if (overrideThisRefresh) {
+    await animateEtaCardsExit();
+    // A search may have started while the exit played — never clobber it
+    if (gen !== etaSuggestGen || getUiMode() !== "eta") return;
+  }
   const softNearby =
     etaListMode === "nearby" &&
     etaRouteHits.length > 0 &&
     !els.etaRouteListSidebar?.querySelector(".eta-route-status.is-loading");
 
-  if (!softNearby) {
+  if (!softNearby || overrideThisRefresh) {
     etaNearbyDirsByKey.clear();
     renderEtaRouteSuggest([], "Loading nearby routes…", {
       status: "loading",
@@ -10490,8 +10618,9 @@ async function refreshEtaRouteSuggest() {
   } catch (e) {
     console.warn("[eta] browse", e);
     if (gen !== etaSuggestGen) return;
-    // Soft: keep stale cards on network blip
-    if (softNearby && etaRouteHits.length) return;
+    // Soft: keep stale cards on network blip — but never after an override
+    // (those cards already animated out and were replaced by the spinner)
+    if (softNearby && etaRouteHits.length && !overrideThisRefresh) return;
     renderEtaRouteSuggest([], "Couldn’t load nearby routes", {
       status: "error",
       mode: "nearby",
@@ -12907,6 +13036,8 @@ closeProfileMenu();
 els.btnProfile?.addEventListener("click", (e) => {
   e.stopPropagation();
   e.preventDefault();
+  // Collapsed sheet shows only the title bar — expand before opening the menu
+  if (els.app?.dataset?.sheet === "closed") setSheetState("open");
   toggleProfileMenu();
 });
 els.btnSettings?.addEventListener("click", (e) => {
@@ -13036,11 +13167,6 @@ function wireSheetSnap() {
     if (!dragging) return;
     dragging = false;
     activePointerId = null;
-    if (!moved) {
-      clearDragStyles();
-      toggleSheetSnap();
-      return;
-    }
     const snaps = sheetSnapHeights();
     const dragToken = parseFloat(
       getComputedStyle(document.documentElement).getPropertyValue(
@@ -13049,8 +13175,22 @@ function wireSheetSnap() {
     );
     // Content-only height for snap (not full shell including dock)
     const h = Number.isFinite(dragToken) ? dragToken : contentHeightNow();
+    if (!moved) {
+      clearDragStyles();
+      // Transition was disabled while the drag class was on — flush styles so
+      // the tap snap animates instead of jumping (e.g. full → half).
+      void toolbar.offsetHeight;
+      toggleSheetSnap();
+      return;
+    }
     const snap = nearestSnap(h, velocity, snaps);
-    clearDragStyles();
+    // Re-arm the transition starting from the released height: pin the height
+    // while the drag class comes off, then let setSheetState animate to snap.
+    toolbar.style.height = `${Math.round(
+      toolbar.getBoundingClientRect().height,
+    )}px`;
+    toolbar.classList.remove("is-sheet-dragging");
+    void toolbar.offsetHeight;
     setSheetState(snap);
   };
 
@@ -13346,5 +13486,40 @@ if (typeof window !== "undefined") {
     runPlan,
   };
 }
+
+// ── Boot splash ─────────────────────────────────────────────────────────────
+const BOOT_SPLASH_MIN_MS = 700;
+const BOOT_STARTED_AT = Date.now();
+
+/** Bounce + fade the splash mark, fade the cover, then remove it. */
+function dismissBootSplash() {
+  const splash = document.getElementById("app-splash");
+  if (!splash || splash.dataset.done) return;
+  splash.dataset.done = "1";
+  splash.classList.add("is-dismissing");
+  window.setTimeout(() => splash.classList.add("is-fading"), 560);
+  window.setTimeout(() => splash.remove(), 1250);
+}
+
+Promise.all([
+  // Full page (fonts, images) settled
+  new Promise((resolve) => {
+    if (document.readyState === "complete") resolve();
+    else window.addEventListener("load", resolve, { once: true });
+  }),
+  // Basemap style painted
+  map.loaded()
+    ? Promise.resolve()
+    : new Promise((resolve) => map.once("load", resolve)),
+  // WASM router graph (resolves on success or handled failure)
+  routerReadyPromise,
+])
+  .then(() => {
+    const wait = Math.max(0, BOOT_SPLASH_MIN_MS - (Date.now() - BOOT_STARTED_AT));
+    window.setTimeout(dismissBootSplash, wait);
+  })
+  .catch(() => dismissBootSplash());
+// Safety net — never leave the cover stuck if a dependency hangs
+window.setTimeout(dismissBootSplash, 8000);
 
 export { map, loadManifest, initRouter, planTrip };
