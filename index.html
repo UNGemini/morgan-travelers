@@ -2,10 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
     <!-- Edge-to-edge on iOS: map under status/Dynamic Island, sheet under home bar.
          theme-color matches panel glass so home-indicator chrome isn’t pure black. -->
     <meta name="theme-color" content="#12161c" />
@@ -16,7 +13,7 @@
       name="apple-mobile-web-app-status-bar-style"
       content="black-translucent"
     />
-    <meta name="apple-mobile-web-app-title" content="MTravelers" />
+    <meta name="apple-mobile-web-app-title" content="Travelers" />
     <meta
       name="description"
       content="MORGAN Travelers — Hong Kong transit map, GTFS data, and live routing foundation."
@@ -38,6 +35,7 @@
         padding: 0;
         width: 100%;
         height: 100%;
+        height: -webkit-fill-available; 
         overflow: hidden;
         background: #12161c;
         color: #fff;
@@ -66,12 +64,79 @@
         border: 0 !important;
       }
       [hidden] { display: none !important; }
+      /* Boot splash — inline so the black cover renders before main CSS loads.
+         main.js removes #app-splash after bounce + fade. */
+      #app-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #000;
+        transition: opacity 0.55s ease;
+      }
+      #app-splash .app-splash-mark {
+        width: min(26vw, 120px);
+        height: auto;
+        opacity: 0;
+        animation: splash-mark-in 0.7s ease forwards;
+      }
+      @keyframes splash-mark-in {
+        from { opacity: 0; transform: translateY(16px) scale(0.94); }
+        to { opacity: 1; transform: none; }
+      }
+      #app-splash.is-dismissing .app-splash-mark {
+        animation: splash-mark-out 0.55s ease forwards;
+      }
+      @keyframes splash-mark-out {
+        0% { transform: none; opacity: 1; }
+        45% { transform: scale(1.12) translateY(-10px); opacity: 1; }
+        100% { transform: scale(0.9) translateY(12px); opacity: 0; }
+      }
+      #app-splash.is-fading {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #app-splash .app-splash-foot {
+        position: absolute;
+        bottom: calc(30px + env(safe-area-inset-bottom, 0px));
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .app-splash-spinner {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        border: 2px solid transparent;
+        border-top-color: #fff;
+        animation: splash-spin 0.9s linear infinite;
+      }
+      @keyframes splash-spin {
+        to { transform: rotate(360deg); }
+      }
+      .app-splash-dev {
+        height: 16px;
+        width: auto;
+        opacity: 0.85;
+      }
     </style>
     <title>MORGAN Travelers</title>
   </head>
   <body>
     <div class="bg-orb bg-orb-1" aria-hidden="true"></div>
     <div class="bg-orb bg-orb-2" aria-hidden="true"></div>
+
+    <!-- Boot splash: black cover; mark bounces + fades once the shell is ready -->
+    <div id="app-splash" aria-hidden="true">
+      <img class="app-splash-mark" src="/logo.svg" alt="" width="120" height="120" />
+      <div class="app-splash-foot">
+        <span class="app-splash-spinner" aria-hidden="true"></span>
+        <img class="app-splash-dev" src="/developedbymorgan.png" alt="Developed by MORGAN" />
+      </div>
+    </div>
 
     <div id="app" class="app-shell" data-ui-mode="eta" data-toolbar="open" data-detail="open" data-sheet="open">
       <!-- Full-bleed map -->
@@ -99,6 +164,14 @@
             <span class="map-route-loading-label">Drawing route…</span>
           </div>
         </div>
+        <!-- Map brand logo — same bottom-left slot as the route badge;
+             hidden by JS on Route Detail so the badge owns the spot -->
+        <img
+          id="map-brand-logo"
+          class="map-brand-logo"
+          src="/logowithtext.png"
+          alt="MORGAN Travelers"
+        />
         <!-- Router status kept for JS but visually hidden (no “Ready · N stops” chip) -->
         <div id="map-status" class="map-status is-visually-hidden" role="status" aria-live="polite">
           <p id="router-status" class="status-line">Loading WASM router…</p>
@@ -1006,6 +1079,51 @@
               <p class="hint" style="margin-top: 10px">
                 Data: MTR open data · Protomaps · OpenStreetMap contributors.
               </p>
+            </section>
+            <section class="panel-section">
+              <h3>Developer</h3>
+              <img
+                class="about-dev-logo"
+                src="/developedbymorgan.png"
+                alt="Developed by MORGAN"
+                width="1920"
+                height="344"
+              />
+              <div class="btn-stack about-dev-btns">
+                <a
+                  class="btn btn-ghost"
+                  data-acrylic
+                  href="https://www.morgandev.cc"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">language</span>
+                    UNLOOP MORGAN
+                  </span>
+                </a>
+                <a
+                  class="btn btn-ghost"
+                  data-acrylic
+                  href="https://github.com/UNGemini/morgan-travelers"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <span class="btn-row">
+                    <svg
+                      class="github-mark"
+                      viewBox="0 0 16 16"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"
+                      />
+                    </svg>
+                    GitHub Repository
+                  </span>
+                </a>
+              </div>
             </section>
             <section
               class="panel-section contrib-desktop-only"
