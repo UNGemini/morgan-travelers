@@ -1163,6 +1163,8 @@ let etaTrafficModes = new Set();
 let etaTrafficMode = "all";
 /** @type {{ lat: number, lon: number, at: number } | null} */
 let etaUserGeo = null;
+/** GPS may re-centre the Nearby map until the user overrides it (map click) or a route fit runs */
+let nearbyGeoFollow = true;
 /** @type {Promise<{ lat: number, lon: number } | null> | null} */
 let etaGeoPromise = null;
 /** @type {Map<string, string[]> | null} station name_en lower → line codes */
@@ -2408,11 +2410,14 @@ function syncGeolocateFitPadding() {
  * undoing the fit. stop() ends any in-flight locate re-centre animation;
  * resize() then emits a genuine movestart (not zooming) that the control
  * treats like a user pan → BACKGROUND: the dot keeps updating, but the
- * camera no longer follows.
+ * camera no longer follows. Also flips nearbyGeoFollow off so the app's
+ * own geolocate listener (it re-centres on every fix in ANY control state)
+ * stops yanking the camera / resetting a manual browse point too.
  */
 function disengageGeolocateFollow() {
   try {
     if (!map || !geolocateControl) return;
+    nearbyGeoFollow = false;
     map.stop?.();
     map.resize?.();
   } catch (e) {
@@ -3000,6 +3005,8 @@ map.on("click", (e) => {
       mapPickArmed = false;
       els.mapPickHint?.classList.remove("is-picking");
     }
+    // Manual override: GPS stops driving the camera/pin until locate is re-tapped
+    disengageGeolocateFollow();
     setNearbyBrowseLocation(lat, lng);
     reverseGeocode(lat, lng).then((label) => {
       if (label && nearbyBrowseMarker) {
@@ -9171,6 +9178,10 @@ async function bootstrapNearbyUserLocation(opts = {}) {
 geolocateControl.on?.("geolocate", (ev) => {
   const c = ev?.coords;
   if (!c || !Number.isFinite(c.latitude) || !Number.isFinite(c.longitude)) return;
+  // Manual browse point (map click) or route fit on screen: GPS must not
+  // reset the override point or yank the camera back — only the locate
+  // button re-engages following.
+  if (!nearbyGeoFollow) return;
   etaUserGeo = { lat: c.latitude, lon: c.longitude, at: Date.now() };
 
   // Control’s first frame may ignore current sheet height — re-centre with
@@ -9213,6 +9224,8 @@ try {
   const _geoTrigger = geolocateControl.trigger?.bind(geolocateControl);
   if (_geoTrigger) {
     geolocateControl.trigger = () => {
+      // Re-engage GPS driving of the map centre / Nearby point
+      nearbyGeoFollow = true;
       syncGeolocateFitPadding();
       return _geoTrigger();
     };
