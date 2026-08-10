@@ -7,7 +7,7 @@
   "scripts": {
     "postinstall": "node scripts/sync-maplibre-worker.mjs",
     "predev": "node scripts/sync-maplibre-worker.mjs && node scripts/build-fares.mjs",
-    "prebuild": "node scripts/sync-maplibre-worker.mjs && node scripts/build-fares.mjs",
+    "prebuild": "node scripts/sync-maplibre-worker.mjs",
     "dev": "vite",
     "build": "vite build",
     "build:fares": "node scripts/build-fares.mjs",

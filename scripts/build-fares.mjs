@@ -8,7 +8,9 @@
  *  - hk-bus-crawling routeFareList: full-journey fallback + ferry
  *
  * Usage: node scripts/build-fares.mjs
- * Requires: mdbtools (`mdb-export`) for TD bus section fares.
+ * Requires: mdbtools (`mdb-export`) for TD bus section fares; when the binary
+ * is missing (e.g. the Cloudflare Pages build image) the busSection already
+ * in the output file is reused, so a deploy never silently drops section fares.
  * Output: public/fares/hk-fares.json
  */
 import { writeFileSync, mkdirSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
@@ -514,6 +516,24 @@ async function packTdBusSection() {
   }
 }
 
+/**
+ * Reuse the busSection already present in the output file. The TD .mdb pack
+ * needs mdbtools (`mdb-export`), which the Cloudflare Pages build image does
+ * not have — without this, a deploy silently overwrites the committed pack
+ * with one that has no section fares at all.
+ * @returns {object | null}
+ */
+function committedBusSection() {
+  try {
+    const prev = JSON.parse(readFileSync(OUT, "utf8"));
+    const s = prev.busSection;
+    if (s && Object.keys(s).length) return s;
+  } catch {
+    /* no previous file yet */
+  }
+  return null;
+}
+
 console.log("[build-fares] downloading…");
 const [mtrText, aelText, lrtText, lrtStopsText, mtrBusText, hkbus, busSection] =
   await Promise.all([
@@ -531,6 +551,14 @@ const [mtrText, aelText, lrtText, lrtStopsText, mtrBusText, hkbus, busSection] =
       return null;
     }),
   ]);
+
+// Keep section fares on environments without mdbtools instead of dropping them.
+const busSectionFinal = busSection ?? committedBusSection();
+if (busSectionFinal && !busSection) {
+  console.log(
+    `[build-fares] mdb-export unavailable — reused committed busSection (${Object.keys(busSectionFinal).length} keys)`,
+  );
+}
 
 const mtr = packMtr(parseCsv(mtrText));
 const ael = packAel(parseCsv(aelText));
@@ -552,7 +580,7 @@ const pack = {
   mtrBus,
   bus,
   /** TD section fares: co|ROUTE → variants with stop lists + triangular matrices (HKD×10) */
-  busSection: busSection || undefined,
+  busSection: busSectionFinal || undefined,
   note:
     "MTR open data multi-type. TD FARE_BUS.mdb section fares for franchised bus/GMB. hk-bus-crawling full-journey fallback + ferry. Child bus ≈ half adult when no child column.",
 };
@@ -573,5 +601,5 @@ console.log(
   `  bus co|route=${Object.keys(bus.byCoRoute).length} unique-route=${Object.keys(bus.byRoute).length}`,
 );
 console.log(
-  `  busSection keys=${busSection ? Object.keys(busSection).length : 0}`,
+  `  busSection keys=${busSectionFinal ? Object.keys(busSectionFinal).length : 0}`,
 );
