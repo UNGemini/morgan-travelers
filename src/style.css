@@ -705,6 +705,12 @@ body.mobile-ui [data-acrylic]::before {
   box-sizing: border-box;
 }
 
+/* Trip Plan form — match Nearby's 24px card inset (16px panel + 8px list) */
+#trip-plan-sidebar-panel {
+  padding-left: 24px;
+  padding-right: 24px;
+}
+
 .app-shell[data-toolbar="closed"] .main-toolbar {
   transform: translateY(calc(100% + 24px));
   opacity: 0;
@@ -1498,13 +1504,14 @@ body.mobile-ui [data-acrylic]::before {
   height: 100%;
 }
 
-/* Pinned routes page — plan-card style (multiple cards stack) */
+/* Pinned routes page — plan-card style (multiple cards stack)
+ * Side inset matches Nearby's 24px card inset (16px panel + 8px list) */
 .pinned-route-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   /* Clear floating nav (pills hidden on pinned) */
-  padding: 4px 8px calc(var(--toolbar-h, 58px) + 16px);
+  padding: 4px 24px calc(var(--toolbar-h, 58px) + 16px);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -4419,8 +4426,8 @@ body.contrib-submitting .bg-orb {
   margin-top: 12px;
   display: grid;
   gap: 8px;
-  /* Side padding matches the ETA list; the scroll container clears the dock */
-  padding: 0 8px;
+  /* Side padding matches the ETA list inset (24px); scroll container clears dock */
+  padding: 0 24px;
 }
 
 /* Section label replacing the old debug meta line / divider */
