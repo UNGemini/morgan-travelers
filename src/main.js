@@ -13505,10 +13505,31 @@ const bootSplashDonePromise = new Promise((resolve) => {
   resolveBootSplashDone = resolve;
 });
 
+/**
+ * Paint page + map backgrounds black while the cover is up. On iOS PWA the
+ * fixed splash can stop short of the Dynamic Island band, and the near-black
+ * glass/map backgrounds (#12161c / #0a0c10) would read as an unpainted strip
+ * beside the pure-black cover. Restored once the cover is removed.
+ */
+const bootBlackened = [
+  document.documentElement,
+  document.body,
+  document.querySelector(".map-stage"),
+  document.getElementById("map"),
+]
+  .filter(Boolean)
+  .map((el) => ({ el, bg: el.style.background }));
+for (const { el } of bootBlackened) el.style.background = "#000";
+
+function restoreBootBackgrounds() {
+  for (const { el, bg } of bootBlackened) el.style.background = bg;
+}
+
 /** Bounce + fade the splash mark, fade the cover, then remove it. */
 function dismissBootSplash() {
   const splash = document.getElementById("app-splash");
   if (!splash) {
+    restoreBootBackgrounds();
     resolveBootSplashDone();
     return;
   }
@@ -13518,6 +13539,7 @@ function dismissBootSplash() {
   window.setTimeout(() => splash.classList.add("is-fading"), 560);
   window.setTimeout(() => {
     splash.remove();
+    restoreBootBackgrounds();
     resolveBootSplashDone();
   }, 1250);
 }

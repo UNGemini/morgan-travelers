@@ -64,7 +64,13 @@
          main.js removes #app-splash after bounce + fade. */
       #app-splash {
         position: fixed;
-        inset: 0;
+        top: 0;
+        left: 0;
+        /* Explicit vh sizing instead of inset:0 — on iOS PWA the fixed
+           inset cover can leave an unpainted strip (visual viewport
+           larger than the layout viewport); vh always spans the screen. */
+        width: 100vw;
+        height: 100vh;
         z-index: 9999;
         display: flex;
         flex-direction: column;
