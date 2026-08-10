@@ -10718,6 +10718,8 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
   }
 
   if (opts.fit && coords.length >= 2) {
+    // TEMP DIAG: trace fit pipeline
+    showToast(`[fit] gate ${opts.fit} ${coords.length}`, 1500);
     fitMapToRouteCoords(coords, { maxZoom: 15, duration: 900 });
   }
 }
@@ -10729,6 +10731,8 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
  */
 function fitMapToRouteCoords(coords, opts = {}) {
   if (!map || !coords?.length) return;
+  // TEMP DIAG
+  showToast(`[fit] called ${coords.length}`, 1500);
   let minLon = Infinity;
   let minLat = Infinity;
   let maxLon = -Infinity;
@@ -10756,6 +10760,8 @@ function fitMapToRouteCoords(coords, opts = {}) {
   const run = () => {
     try {
       if (!map?.getStyle?.()) return;
+      // TEMP DIAG
+      showToast(`[fit] run ${coords.length}pts`, 1500);
       // stop()+resize() disengage a live locate lock (it would otherwise
       // re-centre on the user at the next position fix, undoing the fit).
       disengageGeolocateFollow();
@@ -10777,6 +10783,8 @@ function fitMapToRouteCoords(coords, opts = {}) {
           maxZoom,
         });
         if (camera?.center && Number.isFinite(camera?.zoom)) {
+          // TEMP DIAG
+          showToast(`[fit] flyTo z=${camera.zoom.toFixed(2)}`, 1500);
           // cameraForBounds already framed the bounds inside `padding` —
           // do NOT pass padding to flyTo again or the view shifts by the
           // padding delta (route ends up off-centre / under the sheet).
@@ -10790,6 +10798,8 @@ function fitMapToRouteCoords(coords, opts = {}) {
           return;
         }
       }
+      // TEMP DIAG
+      showToast(`[fit] fitBounds fallback`, 1500);
       map.fitBounds(bounds, {
         padding,
         maxZoom,
@@ -10799,6 +10809,8 @@ function fitMapToRouteCoords(coords, opts = {}) {
         curve: 1.2,
       });
     } catch (e) {
+      // TEMP DIAG
+      showToast(`[fit] ERR ${String(e?.message || e).slice(0, 80)}`, 2600);
       console.warn("[eta] fitMapToRouteCoords", e);
     }
   };
