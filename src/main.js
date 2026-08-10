@@ -6600,7 +6600,7 @@ function fitRouteBounds(geo) {
     // fix and undo this fit — drop it first (see disengageGeolocateFollow).
     disengageGeolocateFollow();
     map.fitBounds(bounds, {
-      padding: mapVisiblePadding({ top: 24, right: 24, bottom: 24, left: 24 }),
+      padding: netFitPadding(mapVisiblePadding({ top: 24, right: 24, bottom: 24, left: 24 })),
       maxZoom: 15,
       duration: 600,
     });
@@ -10718,8 +10718,6 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
   }
 
   if (opts.fit && coords.length >= 2) {
-    // TEMP DIAG: trace fit pipeline
-    showToast(`[fit] gate ${opts.fit} ${coords.length}`, 1500);
     fitMapToRouteCoords(coords, { maxZoom: 15, duration: 900 });
   }
 }
@@ -10729,10 +10727,23 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
  * @param {number[][]} coords [lon,lat][]
  * @param {{ duration?: number, maxZoom?: number }} [opts]
  */
+function netFitPadding(desired = {}) {
+  // MapLibre's cameraForBounds ADDS the transform's persisted padding (left
+  // behind by any earlier easeTo/flyTo that carried padding, e.g. the nearby
+  // override ease) to the requested padding; when the two together exceed
+  // the canvas it returns undefined and cameraForBounds AND fitBounds both
+  // silently no-op ("map stays put"). Request only the difference above the
+  // current padding so the total inset is what we actually want.
+  const cur = map.getPadding?.() ?? {};
+  const out = {};
+  for (const k of ["top", "bottom", "left", "right"]) {
+    out[k] = Math.max(0, (desired[k] ?? 0) - (cur[k] ?? 0));
+  }
+  return out;
+}
+
 function fitMapToRouteCoords(coords, opts = {}) {
   if (!map || !coords?.length) return;
-  // TEMP DIAG
-  showToast(`[fit] called ${coords.length}`, 1500);
   let minLon = Infinity;
   let minLat = Infinity;
   let maxLon = -Infinity;
@@ -10760,8 +10771,6 @@ function fitMapToRouteCoords(coords, opts = {}) {
   const run = () => {
     try {
       if (!map?.getStyle?.()) return;
-      // TEMP DIAG
-      showToast(`[fit] run ${coords.length}pts`, 1500);
       // stop()+resize() disengage a live locate lock (it would otherwise
       // re-centre on the user at the next position fix, undoing the fit).
       disengageGeolocateFollow();
@@ -10769,12 +10778,14 @@ function fitMapToRouteCoords(coords, opts = {}) {
         [minLon, minLat],
         [maxLon, maxLat],
       ];
-      const padding = mapVisiblePadding({
-        top: 28,
-        right: 8,
-        bottom: 20,
-        left: 8,
-      });
+      const padding = netFitPadding(
+        mapVisiblePadding({
+          top: 28,
+          right: 8,
+          bottom: 20,
+          left: 8,
+        })
+      );
       const duration = opts.duration ?? 900;
       const maxZoom = opts.maxZoom ?? 15;
       if (typeof map.cameraForBounds === "function") {
@@ -10783,8 +10794,6 @@ function fitMapToRouteCoords(coords, opts = {}) {
           maxZoom,
         });
         if (camera?.center && Number.isFinite(camera?.zoom)) {
-          // TEMP DIAG
-          showToast(`[fit] flyTo z=${camera.zoom.toFixed(2)}`, 1500);
           // cameraForBounds already framed the bounds inside `padding` —
           // do NOT pass padding to flyTo again or the view shifts by the
           // padding delta (route ends up off-centre / under the sheet).
@@ -10798,8 +10807,6 @@ function fitMapToRouteCoords(coords, opts = {}) {
           return;
         }
       }
-      // TEMP DIAG
-      showToast(`[fit] fitBounds fallback`, 1500);
       map.fitBounds(bounds, {
         padding,
         maxZoom,
@@ -10809,8 +10816,6 @@ function fitMapToRouteCoords(coords, opts = {}) {
         curve: 1.2,
       });
     } catch (e) {
-      // TEMP DIAG
-      showToast(`[fit] ERR ${String(e?.message || e).slice(0, 80)}`, 2600);
       console.warn("[eta] fitMapToRouteCoords", e);
     }
   };
