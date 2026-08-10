@@ -6018,6 +6018,33 @@ function setPlanPinButton(btn, pinned) {
 
 
 /**
+ * Sheet title follows the current page/mode; while the ETA search pill is
+ * open the Nearby browse title reads “Search” instead.
+ */
+function syncDetailTitle() {
+  if (!els.detailTitle) return;
+  const searchOpen = Boolean(
+    els.appNavSearchWrap?.classList.contains("is-open") ||
+      els.appBottomNav?.classList.contains("is-search-open"),
+  );
+  if (sidebarPage === "trip") {
+    els.detailTitle.textContent = "Trip detail";
+  } else if (sidebarPage === "eta-route") {
+    els.detailTitle.textContent = "Route detail";
+  } else if (sidebarPage === "pinned") {
+    els.detailTitle.textContent = "Pinned";
+  } else if (sidebarPage === "settings") {
+    els.detailTitle.textContent = "Settings";
+  } else if (sidebarPage === "about") {
+    els.detailTitle.textContent = "About";
+  } else {
+    const mode = getUiMode();
+    els.detailTitle.textContent =
+      mode === "eta" ? (searchOpen ? "Search" : "Nearby") : "Trip Plan";
+  }
+}
+
+/**
  * Sidebar navigation: search ↔ trip / route / pinned / settings / about.
  * @param {"search"|"trip"|"eta-route"|"pinned"|"settings"|"about"} page
  */
@@ -6047,23 +6074,7 @@ function setSidebarPage(page) {
   if (els.sidebarPageAbout) {
     els.sidebarPageAbout.hidden = sidebarPage !== "about";
   }
-  if (els.detailTitle) {
-    if (sidebarPage === "trip") {
-      els.detailTitle.textContent = "Trip detail";
-    } else if (sidebarPage === "eta-route") {
-      els.detailTitle.textContent = "Route detail";
-    } else if (sidebarPage === "pinned") {
-      els.detailTitle.textContent = "Pinned";
-    } else if (sidebarPage === "settings") {
-      els.detailTitle.textContent = "Settings";
-    } else if (sidebarPage === "about") {
-      els.detailTitle.textContent = "About";
-    } else {
-      const mode = getUiMode();
-      els.detailTitle.textContent =
-        mode === "eta" ? "Nearby" : "Trip Plan";
-    }
-  }
+  syncDetailTitle();
   // Don't force full sheet — user may need map route shape visible
   if (
     sidebarPage === "trip" ||
@@ -7251,10 +7262,7 @@ function setUiMode(mode) {
   if (els.tripPlanSidebarPanel) {
     els.tripPlanSidebarPanel.hidden = next === "eta";
   }
-  if (els.detailTitle) {
-    els.detailTitle.textContent =
-      next === "eta" ? "Nearby" : "Trip Plan";
-  }
+  syncDetailTitle();
 
   // plan-results is a sibling of the mode panels — hide in ETA so it doesn't
   // stack under the route list and collapse/break the flex sidebar.
@@ -12713,8 +12721,14 @@ function setEtaSearchOpen(open) {
     els.appBottomNav.classList.toggle("is-search-open", want);
   }
   if (!want) {
+    // Leaving search mode — drop the query and bounce back to the browse
+    // list so the pill never reopens with a stale search (tab switch,
+    // pinned tap, Escape, mode change, collapse-on-empty).
+    if (els.inputEtaRoute) els.inputEtaRoute.value = "";
     els.appNavSearchWrap?.classList.remove("is-open");
     els.appBottomNav?.classList.remove("is-search-open");
+    void refreshEtaRouteSuggest();
+    syncDetailTitle();
   }
   if (els.appNavSearchField) {
     // Never use [hidden] — it fights the expand animation
@@ -12754,6 +12768,7 @@ function setEtaSearchOpen(open) {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => els.inputEtaRoute?.focus?.());
     });
+    syncDetailTitle();
   }
 }
 
@@ -12851,9 +12866,8 @@ function initEtaRouteSearchUi() {
       if (getUiMode() !== "eta") return;
       if (e.key === "Escape") {
         e.preventDefault();
-        if (els.inputEtaRoute) els.inputEtaRoute.value = "";
+        // setEtaSearchOpen(false) clears the query and restores browse
         setEtaSearchOpen(false);
-        void refreshEtaRouteSuggest();
         return;
       }
       if (e.key === "ArrowDown") {
@@ -12882,6 +12896,15 @@ function initEtaRouteSearchUi() {
       void refreshEtaRouteSuggest();
     });
   }
+
+  // Reopening the PWA (iOS WebView state restoration after the app was
+  // closed) must not resurrect a stale search query — clear the field and
+  // collapse back to the tab switcher.
+  window.addEventListener("pageshow", (e) => {
+    if (!e.persisted) return;
+    if (els.inputEtaRoute) els.inputEtaRoute.value = "";
+    collapseEtaSearchIfEmpty();
+  });
 
   if (getUiMode() === "eta") {
     if (els.etaSidebarPanel) els.etaSidebarPanel.hidden = false;
