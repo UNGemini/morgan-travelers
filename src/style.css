@@ -5439,6 +5439,12 @@ body.contrib-submitting .bg-orb {
   pointer-events: none;
 }
 
+/* TEMP DIAG: lift toasts above the route-detail sheet while tracing [fit] */
+.toast {
+  position: fixed !important;
+  z-index: 10000 !important;
+}
+
 /* ── MapLibre chrome ────────────────────────────────────────── */
 .maplibregl-ctrl-group {
   border-radius: 12px !important;
