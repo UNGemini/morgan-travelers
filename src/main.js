@@ -13650,7 +13650,7 @@ function notifyDataCachePref() {
 
 /**
  * Report the SW data cache (Settings → Data cache status line).
- * Cache name must stay in sync with public/sw.js DATA_CACHE.
+ * Cache names must stay in sync with public/sw.js DATA_CACHE / TILES_CACHE.
  */
 async function updateDataCacheStatus() {
   const el = document.getElementById("data-cache-status");
@@ -13669,17 +13669,21 @@ async function updateDataCacheStatus() {
       el.textContent = `Data cache: ${state} — ${why}`;
       return;
     }
-    const cache = await caches.open("mtravelers-data-v1");
-    const keys = await cache.keys();
+    const cachesList = await Promise.all([
+      caches.open("mtravelers-data-v1"),
+      caches.open("mtravelers-tiles-v1"),
+    ]);
+    let keys = 0;
     let bytes = 0;
-    for (const req of keys) {
-      const res = await cache.match(req);
-      const len = Number(res?.headers?.get("content-length") || 0);
-      if (Number.isFinite(len) && len > 0) bytes += len;
+    for (const cache of cachesList) {
+      for (const req of await cache.keys()) {
+        keys += 1;
+        const res = await cache.match(req);
+        const len = Number(res?.headers?.get("content-length") || 0);
+        if (Number.isFinite(len) && len > 0) bytes += len;
+      }
     }
-    el.textContent = `Data cache: ${keys.length} assets · ${(
-      bytes / 1048576
-    ).toFixed(1)} MB`;
+    el.textContent = `Data cache: ${keys} assets · ${(bytes / 1048576).toFixed(1)} MB`;
   } catch {
     el.textContent = "Data cache: unavailable";
   }

@@ -11,12 +11,22 @@
  *     hashes the SW saw on the same visit). This is what makes the app
  *     boot offline. MapLibre files (/maplibre/*) keep fixed filenames, so
  *     they use stale-while-revalidate instead: cache-first within 24h,
- *     network-first with stale fallback beyond that.
+ *     network-first with stale fallback beyond that. Google Fonts
+ *     (cross-origin, CORS-enabled) use the same SWR contract with a 30d
+ *     window so offline typography keeps working.
  *
  *  3. OPT-IN data cache (router graph, fares, map data) — controlled by
  *     the Settings "Data cache" toggle via DATA_CACHE_PREF messages.
  *     Same SWR contract as /maplibre/, but with a 12h window and the
  *     toggle decides whether it runs at all.
+ *
+ *     Map tiles (hongkong.pmtiles, ~30 MB) are cached as ONE full archive
+ *     on first use: the PMTiles client always asks with Range headers and
+ *     throws on a 200 full-body reply, so the SW answers every Range
+ *     request with a synthesized 206 slice (ETag + CORS headers copied).
+ *     The full archive refreshes in the background when its ETag matches
+ *     the cached copy — a changed ETag is left for the next visit to pick
+ *     up, keeping the slice/ETag pair consistent within a session.
  *
  * The historical rule was "NEVER intercept CSS/JS/wasm" because cache-first
  * HTML left the shell unstyled. That cannot recur here: HTML stays
@@ -28,8 +38,14 @@
  */
 const CACHE = "mtravelers-shell-v13";
 const DATA_CACHE = "mtravelers-data-v1";
+const TILES_CACHE = "mtravelers-tiles-v1";
 const DATA_TTL_MS = 12 * 60 * 60 * 1000; // serve-from-cache window (data)
 const SHELL_SWR_TTL_MS = 24 * 60 * 60 * 1000; // /maplibre/ freshness window
+const FONT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // Google Fonts freshness window
+const TILES_TTL_MS = 30 * 24 * 60 * 60 * 1000; // basemap archive freshness window
+
+/** Cross-origin hosts whose CORS-enabled responses we cache (fonts). */
+const FONT_HOSTS = ["fonts.googleapis.com", "fonts.gstatic.com"];
 
 /** Same-origin static data the app may cache. Excludes APIs, ETA, /edge. */
 const DATA_PREFIXES = ["/data/", "/fares/", "/overrides/", "/mtr/"];
@@ -95,7 +111,9 @@ self.addEventListener("message", (event) => {
     dataCacheEnabled = !!event.data.enabled;
     console.info("[sw] data cache pref", dataCacheEnabled);
     if (!dataCacheEnabled) {
-      event.waitUntil(caches.delete(DATA_CACHE));
+      event.waitUntil(
+        Promise.all([caches.delete(DATA_CACHE), caches.delete(TILES_CACHE)]),
+      );
     }
   }
 });
@@ -116,6 +134,11 @@ function isImmutableShellPath(pathname) {
 /** @param {string} pathname */
 function isSwrShellPath(pathname) {
   return SHELL_SWR_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+/** @param {string} pathname */
+function isTilesPath(pathname) {
+  return pathname.endsWith("/hongkong.pmtiles");
 }
 
 /** Age of a cached response via its Date header; Infinity when absent. */
@@ -177,6 +200,102 @@ async function immutableFetch(event) {
   return res;
 }
 
+/**
+ * Serve a cached full response, answering Range requests with a 206 slice.
+ * Returns a Promise<Response> — the slice body comes from the cached archive.
+ */
+function sliceOrFull(full, range) {
+  if (!range) return Promise.resolve(full);
+  const m = /^bytes=(\d+)-(\d*)$/.exec(range.trim());
+  if (!m) return Promise.resolve(full);
+  return full.arrayBuffer().then((buf) => {
+    const start = parseInt(m[1], 10);
+    const end = m[2] ? Math.min(parseInt(m[2], 10), buf.byteLength - 1) : buf.byteLength - 1;
+    if (start > end || start >= buf.byteLength) {
+      return new Response(null, {
+        status: 416,
+        headers: { "content-range": `bytes */${buf.byteLength}` },
+      });
+    }
+    const slice = buf.slice(start, end + 1);
+    const headers = new Headers();
+    for (const h of [
+      "access-control-allow-origin",
+      "access-control-expose-headers",
+      "content-type",
+      "etag",
+      "last-modified",
+      "cache-control",
+    ]) {
+      const v = full.headers.get(h);
+      if (v) headers.set(h, v);
+    }
+    headers.set("content-range", `bytes ${start}-${end}/${buf.byteLength}`);
+    headers.set("content-length", String(slice.byteLength));
+    headers.set("accept-ranges", "bytes");
+    return new Response(slice, { status: 206, headers });
+  });
+}
+
+/**
+ * Basemap archive cache. The client only ever sends Range requests, so the
+ * full ~30 MB file is fetched once by the SW and re-served as 206 slices.
+ * Refreshes keep the cached ETag stable within a session (see header note).
+ */
+async function tilesFetch(event) {
+  const { request } = event;
+  const url = new URL(request.url);
+  const key = url.origin + url.pathname;
+  const cache = await caches.open(TILES_CACHE);
+  const hit = await cache.match(key);
+  const range = request.headers.get("range");
+  const fresh = hit != null && cachedAgeMs(hit) < TILES_TTL_MS;
+
+  if (fresh) {
+    event.waitUntil(
+      fetch(key, { cache: "reload" })
+        .then((res) => {
+          if (
+            res &&
+            res.ok &&
+            res.status === 200 &&
+            res.headers.get("etag") === hit.headers.get("etag")
+          ) {
+            cache.put(key, res.clone());
+          }
+        })
+        .catch(() => {}),
+    );
+    return sliceOrFull(hit, range);
+  }
+
+  // Miss or stale → pass the range request upstream; backfill the full
+  // archive in the background (same ETag only) for offline use.
+  try {
+    const res = await fetch(request);
+    if (res && res.ok) {
+      event.waitUntil(
+        fetch(key, { cache: "no-store" })
+          .then((full) => {
+            if (
+              full &&
+              full.ok &&
+              full.status === 200 &&
+              (!hit || full.headers.get("etag") === hit.headers.get("etag"))
+            ) {
+              cache.put(key, full.clone());
+            }
+          })
+          .catch(() => {}),
+      );
+    }
+    return res;
+  } catch (err) {
+    if (hit) return sliceOrFull(hit, range);
+    throw err;
+  }
+}
+
 /** @param {string} url */
 function urlPath(url) {
   try {
@@ -197,7 +316,20 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Never touch cross-origin (data edge, fonts, APIs, etc.)
+  // Google Fonts (cross-origin but CORS-enabled) — SWR for offline typography.
+  if (FONT_HOSTS.includes(url.hostname)) {
+    event.respondWith(swrFetch(event, CACHE, FONT_TTL_MS, "font"));
+    return;
+  }
+
+  // Map tiles (cross-origin archive on the data edge, same-origin /edge
+  // proxy in preview) — full-archive cache answered as 206 slices.
+  if (dataCacheEnabled && isTilesPath(url.pathname)) {
+    event.respondWith(tilesFetch(event));
+    return;
+  }
+
+  // Never touch other cross-origin (data edge, APIs, etc.)
   if (url.origin !== self.location.origin) return;
 
   // Never intercept the worker script
