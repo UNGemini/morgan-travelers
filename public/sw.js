@@ -1,27 +1,56 @@
 /* MORGAN Travelers PWA service worker
  *
- * Two jobs, deliberately narrow:
- *  1. Offline fallback for navigations (HTML only) — as before.
- *  2. OPT-IN data-asset cache (router graph, fares, map data) so repeat
- *     launches skip re-downloading ~25 MB. Controlled by the Settings
- *     "Data cache" toggle via DATA_CACHE_PREF messages.
+ * Three layers, each with a different freshness contract:
  *
- * NEVER intercept CSS/JS/wasm — mobile Safari + aggressive caching was
- * leaving the shell unstyled (HTML without matching assets). The data
- * allowlist below excludes /assets/ and /src/ entirely.
+ *  1. Navigation fallback — network-first HTML; a copy of the last good
+ *     index.html is kept so cold starts still work offline.
  *
- * Freshness: cache-first while the response Date header is younger than
- * DATA_TTL_MS, with a background refresh (stale-while-revalidate); stale
- * or missing Date → network first, stale copy as offline fallback.
- * Bumping CACHE (below) wipes every cache on next activation — that is
- * the deploy path for "force fresh data".
+ *  2. Shell assets — the JS/CSS bundles and the WASM router. Cache-first,
+ *     no TTL: these URLs are content-hashed or declared immutable, so a
+ *     cached copy can never go stale (the fresh HTML only ever references
+ *     hashes the SW saw on the same visit). This is what makes the app
+ *     boot offline. MapLibre files (/maplibre/*) keep fixed filenames, so
+ *     they use stale-while-revalidate instead: cache-first within 24h,
+ *     network-first with stale fallback beyond that.
+ *
+ *  3. OPT-IN data cache (router graph, fares, map data) — controlled by
+ *     the Settings "Data cache" toggle via DATA_CACHE_PREF messages.
+ *     Same SWR contract as /maplibre/, but with a 12h window and the
+ *     toggle decides whether it runs at all.
+ *
+ * The historical rule was "NEVER intercept CSS/JS/wasm" because cache-first
+ * HTML left the shell unstyled. That cannot recur here: HTML stays
+ * network-first, and asset URLs are content-addressed.
+ *
+ * Bumping CACHE (below) wipes older shell caches on activation — the
+ * deploy path for "force fresh shell". The data cache survives upgrades
+ * unless the user clears it.
  */
-const CACHE = "mtravelers-shell-v12";
+const CACHE = "mtravelers-shell-v13";
 const DATA_CACHE = "mtravelers-data-v1";
-const DATA_TTL_MS = 12 * 60 * 60 * 1000; // serve-from-cache window
+const DATA_TTL_MS = 12 * 60 * 60 * 1000; // serve-from-cache window (data)
+const SHELL_SWR_TTL_MS = 24 * 60 * 60 * 1000; // /maplibre/ freshness window
 
 /** Same-origin static data the app may cache. Excludes APIs, ETA, /edge. */
 const DATA_PREFIXES = ["/data/", "/fares/", "/overrides/", "/mtr/"];
+
+/** Content-hashed or immutable shell assets — safe to cache forever. */
+const SHELL_IMMUTABLE_PREFIXES = ["/assets/", "/src/pkg/"];
+
+/** Fixed-filename shell assets that change on deploy — SWR instead. */
+const SHELL_SWR_PREFIXES = ["/maplibre/"];
+
+/** Root-level icons and manifest (cache-first, tiny). */
+const SHELL_FILES = [
+  "/icon-192.png",
+  "/icon-512.png",
+  "/siteicon.png",
+  "/logo.svg",
+  "/topbarlogo.svg",
+  "/logowithtext.png",
+  "/developedbymorgan.png",
+  "/manifest.webmanifest",
+];
 
 let dataCacheEnabled = true;
 
@@ -35,7 +64,13 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+      .then((keys) =>
+        Promise.all(
+          keys
+            .filter((k) => k.startsWith("mtravelers-shell-") && k !== CACHE)
+            .map((k) => caches.delete(k)),
+        ),
+      )
       .then(() => self.clients.claim())
       .then(() =>
         self.clients.matchAll({ type: "window" }).then((clients) => {
@@ -70,6 +105,19 @@ function isDataPath(pathname) {
   return DATA_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
+/** @param {string} pathname */
+function isImmutableShellPath(pathname) {
+  return (
+    SHELL_IMMUTABLE_PREFIXES.some((p) => pathname.startsWith(p)) ||
+    SHELL_FILES.includes(pathname)
+  );
+}
+
+/** @param {string} pathname */
+function isSwrShellPath(pathname) {
+  return SHELL_SWR_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
 /** Age of a cached response via its Date header; Infinity when absent. */
 function cachedAgeMs(response) {
   const date = response?.headers?.get?.("date");
@@ -77,16 +125,17 @@ function cachedAgeMs(response) {
   return Number.isFinite(t) ? Date.now() - t : Infinity;
 }
 
-/** Fresh from cache (SWR) or network-first with stale fallback. */
-async function dataCachedFetch(event) {
+/** Cache-first within TTL, network-first with stale fallback beyond. */
+async function swrFetch(event, cacheName, ttlMs, logTag) {
   const { request } = event;
-  const cache = await caches.open(DATA_CACHE);
+  const cache = await caches.open(cacheName);
   const hit = await cache.match(request);
 
-  if (hit && cachedAgeMs(hit) < DATA_TTL_MS) {
+  if (hit && cachedAgeMs(hit) < ttlMs) {
     // Serve instantly; revalidate in the background.
     console.info(
-      "[sw] data cache hit",
+      "[sw] cache hit",
+      logTag,
       urlPath(event.request.url),
       Math.round(cachedAgeMs(hit) / 60000),
       "min old",
@@ -105,7 +154,7 @@ async function dataCachedFetch(event) {
   try {
     const res = await fetch(request);
     if (res && res.ok) {
-      console.info("[sw] data cached", urlPath(event.request.url));
+      console.info("[sw] cached", logTag, urlPath(event.request.url));
       event.waitUntil(cache.put(request, res.clone()));
     }
     return res;
@@ -113,6 +162,19 @@ async function dataCachedFetch(event) {
     if (hit) return hit;
     throw err;
   }
+}
+
+/** Cache-first forever — only safe for content-hashed/immutable URLs. */
+async function immutableFetch(event) {
+  const { request } = event;
+  const cache = await caches.open(CACHE);
+  const hit = await cache.match(request);
+  if (hit) return hit;
+  const res = await fetch(request);
+  if (res && res.ok) {
+    event.waitUntil(cache.put(request, res.clone()));
+  }
+  return res;
 }
 
 /** @param {string} url */
@@ -146,10 +208,20 @@ self.addEventListener("fetch", (event) => {
   const isNavigate =
     request.mode === "navigate" || request.destination === "document";
 
-  // Non-navigation: only the opt-in data allowlist is handled here.
   if (!isNavigate) {
+    // Data allowlist (opt-in toggle) → SWR with the data cache.
     if (dataCacheEnabled && isDataPath(url.pathname)) {
-      event.respondWith(dataCachedFetch(event));
+      event.respondWith(swrFetch(event, DATA_CACHE, DATA_TTL_MS, "data"));
+      return;
+    }
+    // Shell assets → cache-first (hashed) or SWR (fixed filenames).
+    if (isImmutableShellPath(url.pathname)) {
+      event.respondWith(immutableFetch(event));
+      return;
+    }
+    if (isSwrShellPath(url.pathname)) {
+      event.respondWith(swrFetch(event, CACHE, SHELL_SWR_TTL_MS, "shell"));
+      return;
     }
     return;
   }
