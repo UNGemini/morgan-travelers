@@ -149,9 +149,11 @@ function projectOnSegment(a, b, lon, lat) {
 /**
  * Forward-monotonic projection of one stop onto a polyline: nearest segment
  * at or after searchFrom, with far-ahead segments penalised by 30% of their
- * distance-along gap — on circular routes the loop closure re-approaches the
- * terminus, and without the penalty an early stop can snap onto the return
- * leg, corrupting orientation scoring (and later passed/remaining cuts).
+ * distance-along gap beyond a 1500 m free zone — on circular routes the loop
+ * closure re-approaches the terminus, and without the penalty an early stop
+ * can snap onto the return leg, corrupting orientation scoring (and later
+ * passed/remaining cuts). The free zone keeps the penalty from biasing a
+ * genuine visit a few hundred metres ahead of the search floor.
  * Returns the segment-end vertex index + cut point.
  * @param {LngLat[]} coords
  * @param {number} lon
@@ -176,8 +178,9 @@ function projectStopMonotonic(coords, lon, lat, searchFrom) {
     const p = projectOnSegment(a, b, lon, lat);
     if (p) {
       // Nearest wins, but segments far ahead of the search floor pay a
-      // distance penalty so a loop closure cannot beat the real visit.
-      const score = p.d + along * 0.3;
+      // distance penalty (1500 m free zone) so a loop closure cannot beat
+      // the real visit.
+      const score = p.d + Math.max(0, along - 1500) * 0.3;
       if (!best || score < best.score) {
         best = { segEnd: i + 1, d: p.d, score, lon: p.lon, lat: p.lat };
       }

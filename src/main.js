@@ -11082,31 +11082,22 @@ function nearestLineVertexIndex(coords, lon, lat) {
 /**
  * Map each stop to a polyline vertex, searching only forward so circular
  * routes that revisit the same lat/lon (S64 airport loop) use the N-th visit.
- * Far-ahead vertices are penalised by 30% of their distance-along gap: on a
- * loop the closure brings vertices back near the terminus, and a raw
- * nearest-vertex search lets early stops snap onto the return leg — the cut
- * then lands at the loop end and almost the whole route greys out.
+ * Far-ahead vertices are penalised by 30% of their distance-along gap beyond
+ * a 1500 m free zone: on a loop the closure brings vertices back near the
+ * terminus, and a raw nearest-vertex search lets early stops snap onto the
+ * return leg — the cut then lands at the loop end and almost the whole route
+ * greys out. The free zone keeps the penalty from biasing a real visit that
+ * sits a few hundred metres ahead of the search floor.
  * @param {number[][]} lineCoords
  * @param {Array<{ lon: number, lat: number }>} named
+ * @param {number[]} cum cumulative distance along the polyline (metres)
  * @returns {number[]} vertex index per stop
  */
-function projectStopsOntoLineMonotonic(lineCoords, named) {
+function projectStopsOntoLineMonotonic(lineCoords, named, cum) {
   /** @type {number[]} */
   const verts = [];
   let searchFrom = 0;
   const n = lineCoords.length;
-  // Cumulative distance along the polyline (metres) for the far-ahead penalty.
-  const cum = [0];
-  for (let i = 1; i < n; i++) {
-    const a = lineCoords[i - 1];
-    const b = lineCoords[i];
-    cum.push(
-      cum[i - 1] +
-        (Number.isFinite(a?.[0]) && Number.isFinite(b?.[0])
-          ? haversineMEta(a[1], a[0], b[1], b[0])
-          : 0),
-    );
-  }
   for (const s of named) {
     if (!Number.isFinite(s.lat) || !Number.isFinite(s.lon)) {
       verts.push(searchFrom);
@@ -11119,9 +11110,9 @@ function projectStopsOntoLineMonotonic(lineCoords, named) {
       if (!c || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) continue;
       const d = haversineMEta(s.lat, s.lon, c[1], c[0]);
       // Nearest wins, but vertices far ahead of the previous visit pay a
-      // distance penalty so the closure of a circular route cannot beat
-      // the stop's real (earlier) visit.
-      const score = d + Math.max(0, cum[i] - cum[searchFrom]) * 0.3;
+      // distance penalty (1500 m free zone) so the closure of a circular
+      // route cannot beat the stop's real (earlier) visit.
+      const score = d + Math.max(0, cum[i] - cum[searchFrom] - 1500) * 0.3;
       if (score < bestScore) {
         bestScore = score;
         bestI = i;
@@ -11168,45 +11159,42 @@ function projectLonLatOnSegment(a, b, lon, lat) {
 }
 
 /**
- * Cut a decimated polyline exactly at the board stop: the monotonic vertex
- * index vi gives the corridor position; the cut point is the segment-level
- * projection onto the adjacent segments, so the grey boundary lands on the
- * stop instead of the nearest (~100 m+) vertex. Falls back to null when the
- * vertex anchor is poor.
+ * Cut a decimated polyline exactly at the board stop: a monotonic scan of the
+ * segments at or after the previous stop's vertex (floorAlong) takes the
+ * segment-level projection closest to the stop, so the grey boundary lands on
+ * the stop instead of the nearest (~100 m+) vertex. Segments far ahead of the
+ * floor pay a distance penalty (1500 m free zone) so a circular route's
+ * closure cannot beat the real visit. Falls back to null when nothing fits.
  * @param {number[][]} lineCoords
- * @param {number} vi
  * @param {{ lon?: number, lat?: number }} stop
+ * @param {number[]} cumArr cumulative distance along the polyline (metres)
+ * @param {number} floorAlong lower bound (metres) — previous stop's vertex
  * @returns {{ passed: number[][], remaining: number[][] } | null}
  */
-function refineEtaCutAtStop(lineCoords, vi, stop) {
+function refineEtaCutAtStop(lineCoords, stop, cumArr, floorAlong) {
   if (!lineCoords?.length || !stop) return null;
   let best = null;
-  for (const [a, b] of [
-    [vi - 1, vi],
-    [vi, vi + 1],
-  ]) {
-    if (a < 0 || b >= lineCoords.length) continue;
-    const ca = lineCoords[a];
-    const cb = lineCoords[b];
+  for (let i = 0; i < lineCoords.length - 1; i++) {
+    if (cumArr[i + 1] + 1 < floorAlong) continue;
+    const ca = lineCoords[i];
+    const cb = lineCoords[i + 1];
     if (!ca || !cb || !Number.isFinite(ca[0]) || !Number.isFinite(cb[0])) {
       continue;
     }
     const p = projectLonLatOnSegment(ca, cb, stop.lon, stop.lat);
-    if (p && (!best || p.d < best.d)) best = { ...p, a, b };
+    if (!p) continue;
+    // Nearest wins, but segments far ahead of the previous stop's vertex pay
+    // a distance penalty (1500 m free zone) so a loop closure cannot beat
+    // the stop's real visit.
+    const ahead = Math.max(0, cumArr[i] - floorAlong);
+    const score = p.d + Math.max(0, ahead - 1500) * 0.3;
+    if (!best || score < best.score) best = { ...p, i, score };
   }
   if (!best || best.d > 400) return null;
   const pt = [best.lon, best.lat];
-  if (best.b === vi) {
-    // pt between vertex vi-1 and vi → boundary before vertex vi
-    return {
-      passed: lineCoords.slice(0, vi).concat([pt]),
-      remaining: [pt].concat(lineCoords.slice(vi)),
-    };
-  }
-  // pt between vertex vi and vi+1 → boundary after vertex vi
   return {
-    passed: lineCoords.slice(0, vi + 1).concat([pt]),
-    remaining: [pt].concat(lineCoords.slice(vi + 1)),
+    passed: lineCoords.slice(0, best.i + 1).concat([pt]),
+    remaining: [pt].concat(lineCoords.slice(best.i + 1)),
   };
 }
 
@@ -11241,12 +11229,30 @@ function splitEtaLineAtBoard(lineCoords, stops, boardIndex) {
     };
   }
 
-  // Dense path (circular-safe): project every stop forward, cut at board visit
-  const verts = projectStopsOntoLineMonotonic(lineCoords, named);
+  // Dense path (circular-safe): project every stop forward, cut at board visit.
+  // Cumulative distance along the polyline (metres) — shared by the vertex
+  // search's far-ahead penalty and the segment cut's monotonic floor.
+  const cum = [0];
+  for (let i = 1; i < lineCoords.length; i++) {
+    const a = lineCoords[i - 1];
+    const b = lineCoords[i];
+    cum.push(
+      cum[i - 1] +
+        (Number.isFinite(a?.[0]) && Number.isFinite(b?.[0])
+          ? haversineMEta(a[1], a[0], b[1], b[0])
+          : 0),
+    );
+  }
+  const verts = projectStopsOntoLineMonotonic(lineCoords, named, cum);
   const vi =
     verts[bi] ??
     nearestLineVertexIndex(lineCoords, named[bi].lon, named[bi].lat);
-  const cut = refineEtaCutAtStop(lineCoords, vi, named[bi]);
+  const cut = refineEtaCutAtStop(
+    lineCoords,
+    named[bi],
+    cum,
+    bi > 0 ? cum[verts[bi - 1]] : 0,
+  );
   if (cut) return cut;
   return {
     passed: lineCoords.slice(0, vi + 1),
