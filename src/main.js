@@ -2925,6 +2925,69 @@ function initFareTypeUi() {
 }
 initFareTypeUi();
 
+/** Count entries + decoded bytes across the offline data caches. */
+async function dataCacheStats() {
+  const cachesList = await Promise.all([
+    caches.open("mtravelers-data-v3"),
+    caches.open("mtravelers-tiles-v1"),
+  ]);
+  let keys = 0;
+  let bytes = 0;
+  for (const cache of cachesList) {
+    for (const req of await cache.keys()) {
+      keys += 1;
+      const res = await cache.match(req);
+      const len = Number(res?.headers?.get("content-length") || 0);
+      if (Number.isFinite(len) && len > 0) bytes += len;
+    }
+  }
+  return { keys, bytes };
+}
+
+/** Delete every offline-data cache (data, tiles, and any staging). */
+async function clearOfflineCaches() {
+  const names = await caches.keys();
+  await Promise.all(
+    names
+      .filter((n) => /^mtravelers-(data|tiles|stage)-/.test(n))
+      .map((n) => caches.delete(n)),
+  );
+}
+
+/**
+ * Turning the Data cache off deletes the downloaded set — ask first.
+ * @param {HTMLInputElement} onRadio the “On” radio, re-checked on cancel
+ * @param {(enabled: boolean) => void} applyPref
+ */
+async function confirmDisableCache(onRadio, applyPref) {
+  let sizeNote = "";
+  try {
+    const { keys, bytes } = await dataCacheStats();
+    sizeNote = ` (${keys} assets · ${(bytes / 1048576).toFixed(1)} MB)`;
+  } catch {
+    /* caches unavailable — fall back to generic copy */
+  }
+  const opened = showUpdateDialog({
+    title: "Turn off data cache?",
+    message: `Your downloaded offline data${sizeNote} will be deleted from this device. You can download it again any time.`,
+    confirmLabel: "Delete data",
+    cancelLabel: "Keep data",
+    onConfirm: async () => {
+      applyPref(false);
+      try {
+        await clearOfflineCaches();
+      } catch {
+        /* ignore */
+      }
+      updateDataCacheStatus();
+    },
+    onCancel: () => {
+      onRadio.checked = true;
+    },
+  });
+  if (!opened) onRadio.checked = true;
+}
+
 function initDataCacheUi() {
   const on = document.getElementById("data-cache-on");
   const off = document.getElementById("data-cache-off");
@@ -2936,18 +2999,26 @@ function initDataCacheUi() {
     if (btn) btn.hidden = !on.checked;
   };
   syncButtonVisibility();
-  const sync = () => {
-    const next = saveDataCachePref(on.checked);
+  const applyPref = (enabled) => {
+    const next = saveDataCachePref(enabled);
     notifyDataCachePref();
     showToast(`Data cache ${next ? "enabled" : "disabled"}`, 1800);
     syncButtonVisibility();
+  };
+  const sync = () => {
+    if (!on.checked) {
+      // Turning the cache off deletes the downloaded set — ask first.
+      void confirmDisableCache(on, applyPref);
+      return;
+    }
+    applyPref(true);
   };
   on.addEventListener("change", sync);
   off.addEventListener("change", sync);
 }
 initDataCacheUi();
 
-/** Top strip shown while the app runs entirely on cached data (offline). */
+/** Floating banner while the app runs entirely on cached data (offline). */
 function initOfflineBanner() {
   const banner = document.getElementById("offline-banner");
   if (!banner) return;
@@ -13936,7 +14007,14 @@ function notifyDataCachePref() {
  * prompt is already open (callers should skip).
  */
 let updateDialogOpen = false;
-function showUpdateDialog({ title, message, confirmLabel, onConfirm }) {
+function showUpdateDialog({
+  title,
+  message,
+  confirmLabel,
+  cancelLabel = "Later",
+  onConfirm,
+  onCancel,
+}) {
   const overlay = document.getElementById("update-overlay");
   if (!overlay || updateDialogOpen) return false;
   updateDialogOpen = true;
@@ -13947,19 +14025,24 @@ function showUpdateDialog({ title, message, confirmLabel, onConfirm }) {
   if (titleEl) titleEl.textContent = title;
   if (msgEl) msgEl.textContent = message;
   if (nowBtn) nowBtn.textContent = confirmLabel;
+  if (laterBtn) laterBtn.textContent = cancelLabel;
   overlay.hidden = false;
   const close = () => {
     overlay.hidden = true;
     updateDialogOpen = false;
     nowBtn?.removeEventListener("click", confirm);
-    laterBtn?.removeEventListener("click", close);
+    laterBtn?.removeEventListener("click", cancel);
   };
   const confirm = () => {
     close();
     onConfirm();
   };
+  const cancel = () => {
+    close();
+    onCancel?.();
+  };
   nowBtn?.addEventListener("click", confirm);
-  laterBtn?.addEventListener("click", close);
+  laterBtn?.addEventListener("click", cancel);
   return true;
 }
 
@@ -14009,7 +14092,13 @@ function maybePromptDataUpdate(meta) {
  */
 async function updateDataCacheStatus() {
   const el = document.getElementById("data-cache-status");
+  const details = document.getElementById("data-cache-details");
   if (!el) return;
+  const showStatus = (text) => {
+    el.textContent = text;
+    el.hidden = false;
+    if (details) details.hidden = true;
+  };
   const sw = "serviceWorker" in navigator ? navigator.serviceWorker : null;
   try {
     const controlled = !!sw?.controller;
@@ -14021,26 +14110,20 @@ async function updateDataCacheStatus() {
         : reg
           ? "service worker registered but not controlling — reload once"
           : "no service worker registered (dev mode or registration blocked)";
-      el.textContent = `Data cache: ${state} — ${why}`;
+      showStatus(`Data cache: ${state} — ${why}`);
       return;
     }
-    const cachesList = await Promise.all([
-      caches.open("mtravelers-data-v3"),
-      caches.open("mtravelers-tiles-v1"),
-    ]);
-    let keys = 0;
-    let bytes = 0;
-    for (const cache of cachesList) {
-      for (const req of await cache.keys()) {
-        keys += 1;
-        const res = await cache.match(req);
-        const len = Number(res?.headers?.get("content-length") || 0);
-        if (Number.isFinite(len) && len > 0) bytes += len;
-      }
+    const { keys, bytes } = await dataCacheStats();
+    if (details) {
+      // Same label/value style as the Dataset status card above
+      details.innerHTML = `<div><dt>Data cache</dt><dd>${keys} assets · ${(bytes / 1048576).toFixed(1)} MB</dd></div>`;
+      details.hidden = false;
+      el.hidden = true;
+    } else {
+      showStatus(`Data cache: ${keys} assets · ${(bytes / 1048576).toFixed(1)} MB`);
     }
-    el.textContent = `Data cache: ${keys} assets · ${(bytes / 1048576).toFixed(1)} MB`;
   } catch {
-    el.textContent = "Data cache: unavailable";
+    showStatus("Data cache: unavailable");
   }
 }
 

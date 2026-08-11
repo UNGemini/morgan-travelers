@@ -4006,6 +4006,9 @@ body.contrib-submitting .bg-orb {
   display: grid;
   gap: 8px;
 }
+.meta-grid[hidden] {
+  display: none;
+}
 
 .meta-grid div {
   display: grid;
@@ -5787,20 +5790,24 @@ body.contrib-submitting .bg-orb {
 }
 
 
-/* ── Offline banner — fixed top strip while running on cached data ── */
+/* ── Offline banner — floating card while running on cached data ── */
 .offline-banner {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
+  top: 12px; /* fallback before env() support */
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 9500;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 7px 14px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(22, 24, 32, 0.92);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
   color: #ffd479;
   font: 500 12px/1.4 var(--font);
   text-align: center;
@@ -5809,6 +5816,27 @@ body.contrib-submitting .bg-orb {
 }
 .offline-banner .material-symbols-outlined {
   font-size: 15px;
+}
+.offline-banner[hidden] {
+  display: none !important;
+}
+
+/* Desktop browser: notification card top-right */
+@media (min-width: 900px) {
+  .offline-banner {
+    left: auto;
+    right: 16px;
+    top: 16px;
+    transform: none;
+  }
+}
+
+/* Installed PWA: floating card below the Dynamic Island / status bar */
+html.pwa .offline-banner {
+  left: 50%;
+  right: auto;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  transform: translateX(-50%);
 }
 
 /* ── Download cover — full-screen black while the dataset downloads ── */
@@ -6560,7 +6588,8 @@ body.contrib-submitting .bg-orb {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 4px 8px 16px;
+  /* Tall bottom blank so the last card scrolls clear of the dock */
+  padding: 4px 8px calc(var(--nav-dock-h) + 24px);
   -webkit-overflow-scrolling: touch;
 }
 .panel-page-scroll .panel-section {
@@ -6576,6 +6605,11 @@ body.contrib-submitting .bg-orb {
   margin-top: 0;
   padding-top: 14px;
   border-top: none;
+}
+/* Download offline data — full card width, like the Downloads stack */
+#btn-download-offline {
+  display: flex;
+  width: 100%;
 }
 .panel-page-scroll .panel-section h3 {
   margin: 0 0 8px;
