@@ -78,6 +78,9 @@ import {
   loadEalFirstClass,
   setEalFirstClass,
   getEalFirstClass,
+  loadRbsResidentFare,
+  setRbsResidentFare,
+  getRbsResidentFare,
   getFarePack,
   formatHkd,
   estimateBusBoardFare,
@@ -2196,6 +2199,8 @@ let departTime = loadDepartTime();
 let fareType = loadFareType();
 /** East Rail Line First Class premium on/off */
 let ealFirstClass = loadEalFirstClass();
+/** Resident (registered Octopus) fare on Residents' Bus Services on/off */
+let rbsResidentFare = loadRbsResidentFare();
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function formatBytes(n) {
@@ -3333,6 +3338,32 @@ function initEalFirstClassUi() {
   });
 }
 initEalFirstClassUi();
+
+function initRbsResidentFareUi() {
+  rbsResidentFare = loadRbsResidentFare();
+  setRbsResidentFare(rbsResidentFare);
+  const radios = document.querySelectorAll('input[name="rbs-resident-fare"]');
+  if (!radios.length) return;
+  radios.forEach((el) => {
+    if (!(el instanceof HTMLInputElement)) return;
+    el.checked =
+      (rbsResidentFare && el.value === "on") ||
+      (!rbsResidentFare && el.value === "off");
+    el.addEventListener("change", () => {
+      if (!el.checked) return;
+      rbsResidentFare = setRbsResidentFare(el.value === "on");
+      showToast(
+        rbsResidentFare
+          ? "RBS · Resident fare on"
+          : "RBS · Resident fare off",
+        1600,
+      );
+      if (repricePlansForFareType()) return;
+      if (origin && destination && isRouterReady()) runPlan();
+    });
+  });
+}
+initRbsResidentFareUi();
 
 function updatePlanButton() {
   const ready = isRouterReady() && origin && destination;
@@ -8758,6 +8789,7 @@ function etaCompanyColorClass(r) {
   if (co === "ctb") return "co-ctb";
   if (co === "nlb") return "co-nlb";
   if (co === "lwb") return "co-lwb";
+  if (co === "rbs") return "co-rbs";
   if (co === "kmb" || !co) return "co-kmb";
   return "co-kmb";
 }
@@ -8774,6 +8806,7 @@ const ETA_AGENCY_GTFS_COLORS = {
   gmb: "#34C759",
   lrtfeeder: "#AE2A42",
   mtrbus: "#AE2A42",
+  rbs: "#0F766E", // Residents' Bus Services (NR/DB) teal — no live ETA
 };
 
 /**

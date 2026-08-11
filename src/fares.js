@@ -39,6 +39,7 @@ import {
 
 export const FARE_TYPE_STORAGE_KEY = "morgan.fareType";
 export const EAL_FIRST_CLASS_STORAGE_KEY = "morgan.ealFirstClass";
+export const RBS_RESIDENT_FARE_STORAGE_KEY = "morgan.rbsResidentFare";
 
 /** @type {FareType[]} */
 export const FARE_TYPES = [
@@ -140,6 +141,9 @@ let activeFareType = loadFareType();
 /** @type {boolean} */
 let ealFirstClassOn = loadEalFirstClass();
 
+/** @type {boolean} */
+let rbsResidentFareOn = loadRbsResidentFare();
+
 export function getFareType() {
   return activeFareType;
 }
@@ -187,6 +191,43 @@ export function getEalFirstClass() {
  */
 export function setEalFirstClass(on) {
   return saveEalFirstClass(!!on);
+}
+
+/** @returns {boolean} */
+export function loadRbsResidentFare() {
+  try {
+    return localStorage.getItem(RBS_RESIDENT_FARE_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {boolean} on
+ * @returns {boolean}
+ */
+export function saveRbsResidentFare(on) {
+  rbsResidentFareOn = !!on;
+  try {
+    localStorage.setItem(
+      RBS_RESIDENT_FARE_STORAGE_KEY,
+      rbsResidentFareOn ? "1" : "0",
+    );
+  } catch {
+    /* ignore */
+  }
+  return rbsResidentFareOn;
+}
+
+export function getRbsResidentFare() {
+  return rbsResidentFareOn;
+}
+
+/**
+ * @param {boolean} [on]
+ */
+export function setRbsResidentFare(on) {
+  return saveRbsResidentFare(!!on);
 }
 
 /**
@@ -305,6 +346,27 @@ function isMtrBusAgency(opt) {
 }
 
 /**
+ * Residents' Bus Services route codes: NR (estate residents' services,
+ * e.g. Ma Wan NR330…) and DB (Discovery Bay DB01R…) prefixes.
+ * @param {string} [code]
+ */
+function isRbsRoute(code) {
+  const c = String(code || "").trim().toUpperCase();
+  return /^(NR|DB)\d/i.test(c);
+}
+
+/**
+ * @param {object} [opt]
+ */
+function isRbsAgency(opt) {
+  if (!opt) return false;
+  const kind = String(opt.kind || opt.etaKind || "").toLowerCase();
+  if (kind === "rbs") return true;
+  const agency = `${opt.agency?.id || ""} ${opt.agency?.name || ""}`.toLowerCase();
+  return /residents|居民|estate\s*bus/.test(agency) || /(?:^|\s)(pi|db|xb)(?:\s|$)/.test(agency);
+}
+
+/**
  * Map plan agency → hkbus company code.
  * @param {object} opt
  * @returns {string[]}
@@ -323,6 +385,7 @@ function agencyCompanies(opt) {
   if (/sun\s*ferry|新渡輪/.test(blob)) out.push("sunferry");
   if (/hkkf|香港油麻地|h\.?k\.?\s*ferry/.test(blob)) out.push("hkkf");
   if (/star\s*ferry/.test(blob)) out.push("starferry");
+  if (isRbsRoute(opt?.route_short_name || opt?.route_name || "")) out.push("rbs");
   return out;
 }
 
@@ -780,6 +843,42 @@ function mtrBusFare(routeShort, type = activeFareType) {
   if (pack.mtrBus?.[id] != null) return pack.mtrBus[id];
   const adult = mapsFor(pack.mtrBus, "octopus_adult", "bus");
   return adult?.[id] ?? null;
+}
+
+/**
+ * Residents' Bus Services flat full-journey fares (HKD), from operator PDFs.
+ * Resident fare requires a registered Octopus card; NR334 publishes no
+ * resident discount (visitor rate applies). NR338S also publishes child
+ * fares; other routes charge the same flat fare to all aged 3+.
+ * PITCL notes: $2 concession scheme applies to NR330/NR332/NR338 (not NR334).
+ */
+const RBS_FLAT_FARES = {
+  NR330: { visitor: 13.8, resident: 8.5 },
+  NR332: { visitor: 14.5, resident: 9.8 },
+  NR334: { visitor: 32.5, resident: 32.5 },
+  NR338: { visitor: 32.0, resident: 24.5 },
+  NR338S: {
+    visitor: 39.0,
+    resident: 24.1,
+    childVisitor: 19.5,
+    childResident: 12.1,
+  },
+};
+
+/**
+ * @param {string} routeShort
+ * @param {FareType} [type]
+ */
+function rbsFare(routeShort, type = activeFareType) {
+  const id = String(routeShort || "").trim().toUpperCase().replace(/\s+/g, "");
+  const f = RBS_FLAT_FARES[id];
+  if (!f) return null;
+  const resident = rbsResidentFareOn && f.resident != null;
+  if (type === "octopus_child" || type === "qr_child") {
+    const child = resident ? f.childResident : f.childVisitor;
+    if (child != null) return child;
+  }
+  return resident ? f.resident : f.visitor;
 }
 
 /**
@@ -1402,6 +1501,12 @@ function busOrFerryFare(opt, type = activeFareType) {
     .toUpperCase()
     .replace(/\s+/g, "");
   if (!route) return null;
+
+  // Flat Residents' Bus Services fares (visitor / resident Octopus)
+  if (isRbsRoute(route) || isRbsAgency(opt)) {
+    const r = rbsFare(route, type);
+    if (r != null) return r;
+  }
 
   // Official MTR Bus table first (has multi-type)
   if (isMtrBusRoute(route)) {
@@ -2259,6 +2364,12 @@ export function estimateBusBoardToTerminusByStop(
     if (m != null) return m;
   }
 
+  // Flat Residents' Bus Services fares
+  if (isRbsRoute(route) || isRbsAgency(baseOpt)) {
+    const r = rbsFare(route, fareType);
+    if (r != null) return r;
+  }
+
   if (!pack?.busSection) return null;
   const keys = tdBusSectionKeys(
     { ...baseOpt, bound: baseOpt.bound || "" },
@@ -2353,6 +2464,12 @@ export function estimateBusBoardFare(
   if (isMtrBusRoute(routeShort) || isMtrBusAgency(baseOpt)) {
     const m = mtrBusFare(routeShort, fareType);
     if (m != null) return m;
+  }
+
+  // Flat Residents' Bus Services fares (visitor / resident Octopus)
+  if (isRbsRoute(routeShort) || isRbsAgency(baseOpt)) {
+    const r = rbsFare(routeShort, fareType);
+    if (r != null) return r;
   }
 
   const mode = String(baseOpt.mode || "").toLowerCase();

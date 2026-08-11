@@ -2826,6 +2826,9 @@ body.mobile-ui [data-acrylic]::before {
 .eta-card-route.co-mtrbus {
   color: #ae2a42; /* MTR Bus */
 }
+.eta-card-route.co-rbs {
+  color: #0f766e; /* Residents' Bus Services */
+}
 
 .eta-card-dest {
   display: flex;

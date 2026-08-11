@@ -74,7 +74,7 @@ export function stripOperatorStopId(raw) {
 
 /**
  * @param {object} [opt]
- * @returns {"kmb"|"ctb"|"nlb"|"mtr"|"lrt"|"mtr_bus"|"unknown"}
+ * @returns {"kmb"|"ctb"|"nlb"|"mtr"|"lrt"|"mtr_bus"|"rbs"|"unknown"}
  */
 export function etaOperator(opt) {
   if (!opt) return "unknown";
@@ -88,6 +88,17 @@ export function etaOperator(opt) {
   const agency = `${opt.agency?.id || ""} ${opt.agency?.name || ""}`.toLowerCase();
   const routeId = String(opt.route_id || "");
   const short = routeShort(opt);
+  // Residents' Bus Services (NR / DB routes, e.g. Ma Wan NR330, Discovery
+  // Bay DB01R; agency ids PI / DB / XB) — no live ETA feed exists, so these
+  // must never be sent to the KMB/CTB/NLB fetchers (checked before agency).
+  if (
+    kind === "rbs" ||
+    /^(NR|DB)\d/i.test(short) ||
+    /residents|居民|estate\s*bus/.test(agency) ||
+    /(?:^|\s)(pi|db|xb)(?:\s|$)/i.test(agency)
+  ) {
+    return "rbs";
+  }
   // MTR Bus / LRT Feeder (K51, 506, …) — not heavy-rail MTR
   if (
     /lrt\s*feeder|mtr\s*bus|mtrb|mtr_bus|港鐵巴士|輕鐵接駁/.test(agency) ||
@@ -2355,7 +2366,8 @@ export function etaOperatorShowsPlatform(operator) {
     op === "bus" ||
     op === "mtr_bus" ||
     op === "mtr-bus" ||
-    op === "lrtfeeder"
+    op === "lrtfeeder" ||
+    op === "rbs"
   ) {
     return false;
   }
