@@ -53,9 +53,18 @@ const BASE = () =>
 const cache = new Map();
 
 async function fetchJson(url, signal) {
-  const res = await fetch(url, { signal, cache: "force-cache" });
+  const res = await fetch(url, { signal, cache: "no-cache" });
   if (!res.ok) throw new Error(`bus-shapes ${res.status} ${url}`);
-  return res.json();
+  try {
+    return await res.json();
+  } catch (e) {
+    // Truncated/corrupt cached body (HTTP cache or SW) — retry once with
+    // caches bypassed so a bad copy can't silently kill every route's path.
+    console.warn("[bus-shapes] json parse failed, retrying uncached", url, e);
+    const res2 = await fetch(url, { signal, cache: "reload" });
+    if (!res2.ok) throw new Error(`bus-shapes ${res2.status} ${url}`);
+    return res2.json();
+  }
 }
 
 /** @returns {Promise<any|null>} */

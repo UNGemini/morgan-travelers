@@ -116,6 +116,11 @@ self.addEventListener("message", (event) => {
       );
     }
   }
+  if (event?.data?.type === "PRECACHE_DATA") {
+    event.waitUntil(
+      precacheData(event.data.urls || [], event.ports?.[0] || null),
+    );
+  }
 });
 
 /** @param {string} pathname */
@@ -148,43 +153,119 @@ function cachedAgeMs(response) {
   return Number.isFinite(t) ? Date.now() - t : Infinity;
 }
 
+/** True when a cached body's bytes match its content-length header. */
+async function cachedBodyComplete(response) {
+  const len = Number(response?.headers?.get?.("content-length"));
+  if (!Number.isFinite(len) || len <= 0) return true; // cannot verify
+  try {
+    const buf = await response.clone().arrayBuffer();
+    return buf.byteLength === len;
+  } catch {
+    return false;
+  }
+}
+
 /** Cache-first within TTL, network-first with stale fallback beyond. */
 async function swrFetch(event, cacheName, ttlMs, logTag) {
   const { request } = event;
   const cache = await caches.open(cacheName);
-  const hit = await cache.match(request);
+  let hit = await cache.match(request);
 
   if (hit && cachedAgeMs(hit) < ttlMs) {
-    // Serve instantly; revalidate in the background.
-    console.info(
-      "[sw] cache hit",
-      logTag,
-      urlPath(event.request.url),
-      Math.round(cachedAgeMs(hit) / 60000),
-      "min old",
-    );
-    event.waitUntil(
-      fetch(request)
-        .then((res) => {
-          if (res && res.ok) cache.put(request, res.clone());
-        })
-        .catch(() => {}),
-    );
-    return hit;
+    // A truncated body (interrupted download, cache.put race) would break
+    // every downstream JSON parse — verify byte length and heal via network.
+    if (cacheName === DATA_CACHE && !(await cachedBodyComplete(hit))) {
+      console.warn(
+        "[sw] corrupt data cache entry, refetching",
+        urlPath(event.request.url),
+      );
+      await cache.delete(request);
+      hit = null;
+    } else {
+      // Serve instantly; revalidate in the background.
+      console.info(
+        "[sw] cache hit",
+        logTag,
+        urlPath(event.request.url),
+        Math.round(cachedAgeMs(hit) / 60000),
+        "min old",
+      );
+      event.waitUntil(
+        fetch(request)
+          .then((res) => {
+            if (res && res.ok) cache.put(request, res.clone());
+          })
+          .catch(() => {}),
+      );
+      return hit;
+    }
   }
 
-  // Miss or stale → network first; keep the stale copy for offline.
+  // Miss or stale → network first; keep the copy for offline. The page's
+  // stream and cache.put must not consume the body concurrently (Safari can
+  // truncate either side), so the full copy lands in the cache first.
   try {
     const res = await fetch(request);
     if (res && res.ok) {
       console.info("[sw] cached", logTag, urlPath(event.request.url));
-      event.waitUntil(cache.put(request, res.clone()));
+      try {
+        await cache.put(request, res.clone());
+      } catch (err) {
+        console.warn("[sw] cache put failed", urlPath(event.request.url), err);
+      }
     }
     return res;
   } catch (err) {
     if (hit) return hit;
     throw err;
   }
+}
+
+/**
+ * Explicit one-shot download of the offline dataset (Settings button).
+ * Each URL is fetched fresh (caches bypassed), verified byte-complete, then
+ * stored in the data or tiles cache. The page never shares a body stream
+ * with this write, so a partial file cannot surface to the app nor poison
+ * the cache. Reports progress + result over the message port.
+ * @param {string[]} urls
+ * @param {MessagePort|null} port
+ */
+async function precacheData(urls, port) {
+  let done = 0;
+  let totalBytes = 0;
+  const failures = [];
+  for (const href of urls) {
+    try {
+      const key = new URL(href, self.location.href).href;
+      const res = await fetch(key, { cache: "reload" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buf = await res.arrayBuffer();
+      const len = Number(res.headers.get("content-length"));
+      if (Number.isFinite(len) && buf.byteLength !== len) {
+        throw new Error(`incomplete body (${buf.byteLength}/${len} bytes)`);
+      }
+      // Body is decoded — drop transfer-encoding so the stored response
+      // matches its (now uncompressed) bytes.
+      const headers = new Headers(res.headers);
+      headers.delete("content-encoding");
+      headers.delete("content-length");
+      headers.set("content-length", String(buf.byteLength));
+      const cacheName = key.endsWith("/hongkong.pmtiles")
+        ? TILES_CACHE
+        : DATA_CACHE;
+      const cache = await caches.open(cacheName);
+      await cache.put(
+        key,
+        new Response(buf, { status: res.status, headers }),
+      );
+      totalBytes += buf.byteLength;
+    } catch (err) {
+      failures.push({ url: href, error: String(err?.message || err) });
+    }
+    done += 1;
+    port?.postMessage({ type: "PRECACHE_PROGRESS", done, total: urls.length });
+  }
+  port?.postMessage({ type: "PRECACHE_DONE", totalBytes, failures });
 }
 
 /** Cache-first forever — only safe for content-hashed/immutable URLs. */

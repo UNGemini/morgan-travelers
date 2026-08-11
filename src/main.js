@@ -2939,6 +2939,127 @@ function initDataCacheUi() {
 }
 initDataCacheUi();
 
+/**
+ * Settings → “Download offline data”: one explicit fetch of the whole
+ * dataset into the SW data/tiles caches (verified byte-complete). Unlike
+ * first-use caching, the page never reads a body the SW is also writing,
+ * so a partial file cannot break a route path. See sw.js PRECACHE_DATA.
+ */
+function initOfflineDownloadUi() {
+  const btn = document.getElementById("btn-download-offline");
+  const sub = document.getElementById("offline-download-sub");
+  if (!btn || !sub) return;
+  const statusEl = document.getElementById("data-cache-status");
+
+  btn.addEventListener("click", async () => {
+    const sw = navigator.serviceWorker?.controller;
+    if (!sw) {
+      showToast("Reload once so the service worker is active", 2600);
+      return;
+    }
+    btn.disabled = true;
+    const origSub = sub.textContent;
+    try {
+      const urls = await offlineDataManifest();
+      // Downloading implies caching stays on — enable it explicitly.
+      saveDataCachePref(true);
+      notifyDataCachePref();
+      const on = document.getElementById("data-cache-on");
+      if (on) on.checked = true;
+      sub.textContent = `Downloading… 0/${urls.length}`;
+      await precacheOfflineData(sw, urls, (done, total) => {
+        sub.textContent = `Downloading… ${done}/${total}`;
+      });
+      if (statusEl) statusEl.textContent = "Verifying…";
+      await updateDataCacheStatus();
+      showToast("Offline data ready", 2600);
+    } catch (e) {
+      console.warn("[offline] dataset download failed", e);
+      showToast(`Offline download failed: ${e?.message || e}`, 3600);
+      await updateDataCacheStatus();
+    } finally {
+      btn.disabled = false;
+      sub.textContent = origSub;
+    }
+  });
+}
+
+/** URLs the app reads for launch + routes — everything needed fully offline. */
+function offlineDataManifest() {
+  const url = (p) => new URL(p, window.location.href).href;
+  const urls = [
+    url("data/eta-nearby-stops.json"),
+    url("data/hk.wheelsrouter.gz"),
+    url("data/light_rail_routes_and_stops.csv"),
+    url("data/mtr_bus_routes.csv"),
+    url("data/mtr_bus_stops.csv"),
+    url("fares/bbi-compact.json?v=1"),
+    url("fares/hk-fares.json?v=5"),
+    url("overrides/bus-shapes.json"),
+    url("overrides/lrt.json"),
+    url("overrides/mtr-access-pins.json"),
+    url("mtr/exits.geojson"),
+    url("mtr/lrt-platforms.geojson"),
+    url("mtr/platforms.geojson"),
+    url("mtr/stations.geojson"),
+  ];
+  return (async () => {
+    // Bus-shape agency files (kmb/ctb/nlb/…) come from the index manifest.
+    try {
+      const idxRes = await fetch(url("data/bus-shapes/index.json"), {
+        cache: "no-cache",
+      });
+      if (idxRes.ok) {
+        const idx = await idxRes.json();
+        const seen = new Set();
+        for (const f of Object.values(idx.files || {})) {
+          const u = url(`data/bus-shapes/${f}`);
+          if (!seen.has(u)) {
+            seen.add(u);
+            urls.push(u);
+          }
+        }
+        urls.push(url("data/bus-shapes/stops.json"));
+      }
+    } catch (e) {
+      console.warn("[offline] bus-shapes index", e);
+    }
+    urls.push(PMTILES_URL);
+    return urls;
+  })();
+}
+
+/** Drive the SW precache with progress; resolves on PRECACHE_DONE. */
+function precacheOfflineData(sw, urls, onProgress) {
+  return new Promise((resolve, reject) => {
+    const chan = new MessageChannel();
+    const timer = setTimeout(
+      () => reject(new Error("service worker timed out")),
+      10 * 60_000,
+    );
+    chan.port1.onmessage = (ev) => {
+      const d = ev.data || {};
+      if (d.type === "PRECACHE_PROGRESS") {
+        onProgress?.(d.done, d.total);
+      } else if (d.type === "PRECACHE_DONE") {
+        clearTimeout(timer);
+        chan.port1.close();
+        const failed = (d.failures || []).length;
+        if (failed) {
+          const names = d.failures
+            .slice(0, 3)
+            .map((f) => f.url)
+            .join(", ");
+          reject(new Error(`${failed} file(s) failed: ${names}`));
+        } else {
+          resolve(d);
+        }
+      }
+    };
+    sw.postMessage({ type: "PRECACHE_DATA", urls }, [chan.port2]);
+  });
+}
+
 function initEalFirstClassUi() {
   ealFirstClass = loadEalFirstClass();
   setEalFirstClass(ealFirstClass);

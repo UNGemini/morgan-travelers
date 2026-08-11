@@ -8,9 +8,32 @@ export async function onRequest(context) {
   const target = new URL(`https://router.project-osrm.org${path}`);
   target.search = url.search;
 
-  const res = await fetch(target.toString(), {
-    headers: { Accept: "application/json" },
-  });
+  // The public demo server is slow — cap the upstream so a hung request
+  // becomes a fast structured 504 instead of a stuck worker.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  let res;
+  try {
+    res = await fetch(target.toString(), {
+      headers: { Accept: "application/json" },
+      signal: ctrl.signal,
+    });
+  } catch {
+    return Response.json(
+      { ok: false, error: "osrm upstream unavailable" },
+      {
+        status: 504,
+        headers: {
+          "Cache-Control": "no-store",
+          "Access-Control-Allow-Origin": "*",
+          "Cross-Origin-Resource-Policy": "cross-origin",
+        },
+      },
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+
   const body = await res.arrayBuffer();
   return new Response(body, {
     status: res.status,

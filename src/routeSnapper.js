@@ -240,7 +240,7 @@ export async function densifyStopsViaOsrm(stops, opts = {}) {
       );
     }
   } catch (e) {
-    if (e?.name === "AbortError") throw e;
+    if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
     console.warn("[routeSnapper] multi-waypoint OSRM failed, trying pairs", e);
   }
 
@@ -1004,7 +1004,7 @@ async function densifyOsrmPairs(waypoints, signal) {
     try {
       path = await osrmRoute([a, b], signal);
     } catch (e) {
-      if (e?.name === "AbortError") throw e;
+      if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
       path = null;
     }
     const isFirstHop = i === 0;
@@ -1364,6 +1364,10 @@ function osrmBase() {
   return `${location.origin}/osrm`;
 }
 
+/** Cap OSRM latency: a hung upstream falls back to stop chords instead of
+ *  blocking the route paint forever (no caller supplies a timeout signal). */
+const OSRM_TIMEOUT_MS = 12000;
+
 /**
  * @param {Array<{ lon: number, lat: number }>} points
  * @param {AbortSignal} [signal]
@@ -1376,14 +1380,30 @@ async function osrmRoute(points, signal) {
   const url =
     `${osrmBase()}/route/v1/driving/${coordStr}` +
     `?overview=full&geometries=geojson&steps=false`;
-  const res = await fetch(url, { signal });
-  if (!res.ok) throw new Error(`OSRM ${res.status}`);
-  const data = await res.json();
-  const coords = data?.routes?.[0]?.geometry?.coordinates;
-  if (!Array.isArray(coords) || coords.length < 2) {
-    return points.map((p) => ({ lon: p.lon, lat: p.lat }));
+  // Own abort controller: hard timeout + forward the caller's signal.
+  const ctrl = new AbortController();
+  const timer = setTimeout(
+    () => ctrl.abort(new DOMException("OSRM timeout", "TimeoutError")),
+    OSRM_TIMEOUT_MS,
+  );
+  const onAbort = () => ctrl.abort(signal?.reason);
+  if (signal) {
+    if (signal.aborted) ctrl.abort(signal.reason);
+    else signal.addEventListener("abort", onAbort, { once: true });
   }
-  return coords.map(([lon, lat]) => ({ lon, lat }));
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (!res.ok) throw new Error(`OSRM ${res.status}`);
+    const data = await res.json();
+    const coords = data?.routes?.[0]?.geometry?.coordinates;
+    if (!Array.isArray(coords) || coords.length < 2) {
+      return points.map((p) => ({ lon: p.lon, lat: p.lat }));
+    }
+    return coords.map(([lon, lat]) => ({ lon, lat }));
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+  }
 }
 
 function cumulativeDistances(route) {
