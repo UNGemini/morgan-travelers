@@ -283,12 +283,17 @@ async function resolveShapeData(opt, signal) {
 }
 
 /**
- * Best shape for a bus leg: headsign (terminal) match on the destination,
- * then origin, then first entry of the direction.
+ * Best shape for a bus leg. Direction-aware: when the wanted GTFS direction
+ * is known (ETA bound O/I or explicit direction_id), shapes of that direction
+ * win — the same direction grouping that built the st stop sequences, so the
+ * picked corridor always matches the stop list. Headsign (terminal) matching
+ * on the destination, then origin, stays as tiebreak / fallback for legs
+ * without a known direction (e.g. trip-plan options).
  * @param {any} routeEntry
  * @param {{ from?: string, to?: string }} names
+ * @param {string|null} [wantDir] "0" | "1" | null
  */
-function pickShape(routeEntry, names) {
+function pickShape(routeEntry, names, wantDir = null) {
   const shapes = routeEntry?.shapes;
   if (!Array.isArray(shapes) || !shapes.length) return null;
   const to = String(names?.to || "").toLowerCase();
@@ -299,6 +304,7 @@ function pickShape(routeEntry, names) {
   let bestScore = -1;
   for (const s of shapes) {
     let score = 0;
+    if (wantDir != null && String(s.d) === String(wantDir)) score += 50;
     for (const h of s.h || []) {
       const hs = String(h).toLowerCase();
       if (to && hs && (hs.includes(to) || to.includes(hs))) score += 20;
@@ -332,7 +338,7 @@ export async function preloadGtfsBusShape(opt, opts = {}) {
 /**
  * Resolve the GTFS polyline for a bus leg, or null when unavailable.
  * Never throws — returns null on any failure so callers fall back.
- * @param {{ route_id?: string, route_short_name?: string, agency?: { id?: string, name?: string }, from?: any, to?: any }} opt
+ * @param {{ route_id?: string, route_short_name?: string, agency?: { id?: string, name?: string }, from?: any, to?: any, bound?: string, direction_id?: string|number, headsign?: string, stops?: any[] }} opt
  * @param {{ signal?: AbortSignal }} [opts]
  * @returns {Promise<{ coords: LngLat[], route_id: string, headsign?: string } | null>}
  */
@@ -343,11 +349,29 @@ export async function getGtfsBusShape(opt, opts = {}) {
     if (!resolved?.entry) return null;
     const { entry, ridKey } = resolved;
 
+    // Wanted GTFS direction: ETA bound (O/I) or an explicit direction_id.
+    // Matches the direction grouping that built the st stop sequences, so
+    // prefer that corridor over headsign guessing (stop-name vs headsign
+    // substring matches are fragile — parens, suffixes, cross-direction
+    // terminal names). Trip-plan options without a bound fall back to
+    // headsign matching below.
+    const wantDir =
+      opt.direction_id != null
+        ? String(opt.direction_id)
+        : opt.bound === "I"
+          ? "1"
+          : opt.bound === "O"
+            ? "0"
+            : null;
     const names = {
-      to: opt?.to?.stop_name || opt?.to?.name || "",
+      to:
+        opt?.to?.stop_name ||
+        opt?.to?.name ||
+        opt?.headsign ||
+        "",
       from: opt?.from?.stop_name || opt?.from?.name || "",
     };
-    const shape = pickShape(entry, names);
+    const shape = pickShape(entry, names, wantDir);
     const coords = shape ? decodeCoords(shape.c) : null;
     if (!coords || coords.length < 2) return null;
 

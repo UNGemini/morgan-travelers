@@ -11301,6 +11301,9 @@ function etaRouteAsOption(route, stops, dir = {}, boardStop = null) {
     mode,
     agency,
     headsign: dir.dest || "",
+    // Direction hint for GTFS shape selection: "O"/"I" → direction_id 0/1,
+    // matching the stop-sequence grouping (see routeShapes.getGtfsBusShape).
+    bound: dir.bound || "",
     from: from || {
       stop_name: dir.orig || "",
       location: { lon: 0, lat: 0 },
