@@ -11082,6 +11082,10 @@ function nearestLineVertexIndex(coords, lon, lat) {
 /**
  * Map each stop to a polyline vertex, searching only forward so circular
  * routes that revisit the same lat/lon (S64 airport loop) use the N-th visit.
+ * Far-ahead vertices are penalised by 30% of their distance-along gap: on a
+ * loop the closure brings vertices back near the terminus, and a raw
+ * nearest-vertex search lets early stops snap onto the return leg — the cut
+ * then lands at the loop end and almost the whole route greys out.
  * @param {number[][]} lineCoords
  * @param {Array<{ lon: number, lat: number }>} named
  * @returns {number[]} vertex index per stop
@@ -11091,19 +11095,35 @@ function projectStopsOntoLineMonotonic(lineCoords, named) {
   const verts = [];
   let searchFrom = 0;
   const n = lineCoords.length;
+  // Cumulative distance along the polyline (metres) for the far-ahead penalty.
+  const cum = [0];
+  for (let i = 1; i < n; i++) {
+    const a = lineCoords[i - 1];
+    const b = lineCoords[i];
+    cum.push(
+      cum[i - 1] +
+        (Number.isFinite(a?.[0]) && Number.isFinite(b?.[0])
+          ? haversineMEta(a[1], a[0], b[1], b[0])
+          : 0),
+    );
+  }
   for (const s of named) {
     if (!Number.isFinite(s.lat) || !Number.isFinite(s.lon)) {
       verts.push(searchFrom);
       continue;
     }
     let bestI = searchFrom;
-    let bestD = Infinity;
+    let bestScore = Infinity;
     for (let i = searchFrom; i < n; i++) {
       const c = lineCoords[i];
       if (!c || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) continue;
       const d = haversineMEta(s.lat, s.lon, c[1], c[0]);
-      if (d < bestD) {
-        bestD = d;
+      // Nearest wins, but vertices far ahead of the previous visit pay a
+      // distance penalty so the closure of a circular route cannot beat
+      // the stop's real (earlier) visit.
+      const score = d + Math.max(0, cum[i] - cum[searchFrom]) * 0.3;
+      if (score < bestScore) {
+        bestScore = score;
         bestI = i;
       }
     }
