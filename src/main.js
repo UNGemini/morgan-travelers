@@ -3145,6 +3145,7 @@ async function recordDataUpdatedAt() {
 function offlineDataManifest() {
   const url = (p) => new URL(p, window.location.href).href;
   const urls = [
+    url("data/bus-shapes/index.json"),
     url("data/eta-nearby-stops.json"),
     url("data/hk.wheelsrouter.gz"),
     url("data/light_rail_routes_and_stops.csv"),
@@ -3162,6 +3163,8 @@ function offlineDataManifest() {
   ];
   return (async () => {
     // Bus-shape agency files (kmb/ctb/nlb/…) come from the index manifest.
+    // index.json itself is queued above — routeShapes.js reads it at runtime
+    // to resolve agency files, so it must be part of the offline set too.
     try {
       const idxRes = await fetch(url("data/bus-shapes/index.json"), {
         cache: "no-cache",
