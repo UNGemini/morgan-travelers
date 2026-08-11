@@ -11536,6 +11536,41 @@ async function loadEtaRouteStops(route) {
     }
   }
 
+  // ── GTFS stop-sequence fallback (offline / operator API down) ──────────
+  // KMB/CTB/NLB/GMB only — MTR/LRT/MTR Bus have their own local data above.
+  const busCo = co || (route.kind === "bus" ? "kmb" : "");
+  if (
+    busCo &&
+    (route.kind === "bus" ||
+      ["kmb", "lwb", "ctb", "nlb", "gmb"].includes(busCo))
+  ) {
+    try {
+      const { getGtfsRouteStopSequence } = await import("./routeShapes.js");
+      const rid = String(route.id || "");
+      // GMB route codes are region-agnostic ("69") but the feed splits them
+      // per region ("GMB-HKI-69") — try each region, first hit wins.
+      const candidates = [`${busCo.toUpperCase()}-${rid}`];
+      if (busCo === "gmb") {
+        for (const region of ["HKI", "KLN", "NT"]) {
+          candidates.push(`GMB-${region}-${rid}`);
+        }
+      }
+      for (const routeId of candidates) {
+        const seq = await getGtfsRouteStopSequence(
+          {
+            route_id: routeId,
+            route_short_name: rid,
+            agency: { id: busCo.toUpperCase(), name: busCo.toUpperCase() },
+          },
+          bound,
+        );
+        if (seq.length >= 2) return seq;
+      }
+    } catch (e) {
+      console.warn("[eta] gtfs stop-sequence fallback", e);
+    }
+  }
+
   // MTR line stations — official line order (not nearest-neighbour)
   if (route.kind === "mtr") {
     const line = String(route.id).toUpperCase();

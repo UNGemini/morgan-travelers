@@ -322,9 +322,16 @@ export async function searchPlaces(query, opts = {}) {
   }
 
   const fetchLimit = Math.min(limit * 4, 25);
-  let data = await nominatimSearch(searchQ, fetchLimit);
+  let data = [];
+  let nominatimOk = true;
+  try {
+    data = await nominatimSearch(searchQ, fetchLimit);
+  } catch (e) {
+    nominatimOk = false;
+    console.warn("[geocode] Nominatim unavailable — using local directories", e);
+  }
 
-  if (stationIntent || mode === "mtr") {
+  if (nominatimOk && (stationIntent || mode === "mtr")) {
     const placeToken = q
       .replace(/\b(station|stn|mtr|站|鐵路|railway)\b/gi, "")
       .replace(/,?\s*hong\s*kong\s*/gi, "")
@@ -345,13 +352,13 @@ export async function searchPlaces(query, opts = {}) {
     }
   }
 
-  if (mode === "bus") {
+  if (nominatimOk && mode === "bus") {
     const placeToken = q.replace(/\bbus\b|巴士|stop|站/gi, "").trim() || q;
     const extras = await nominatimSearch(`${placeToken} bus stop, Hong Kong`, 12);
     data = [...data, ...extras];
   }
 
-  if (mode === "lrt") {
+  if (nominatimOk && mode === "lrt") {
     const placeToken = q.replace(/light\s*rail|輕鐵/gi, "").trim() || q;
     const extras = await Promise.all([
       nominatimSearch(`${placeToken} Light Rail, Hong Kong`, 10),
@@ -469,6 +476,13 @@ export async function searchPlaces(query, opts = {}) {
   }
   for (const p of list) push(p);
 
+  // Local GTFS bus-stop fallback — offline (Nominatim down) or zero OSM bus
+  // hits: search the shipped stop directory (KMB/CTB/NLB/GMB) instead.
+  if (q.length >= 2 && (mode === "bus" || !mode) && (!nominatimOk || !list.length)) {
+    const local = await localGtfsStopsSearch(q, limit);
+    for (const p of local) push(p);
+  }
+
   if (mode === "mtr") {
     const railOnly = merged.filter((p) => p.isMtr && !p.isLrt);
     if (railOnly.length) return railOnly.slice(0, limit);
@@ -493,6 +507,33 @@ export async function searchPlaces(query, opts = {}) {
   }
 
   return merged.filter((p) => !isBusFacility(p) || !stationIntent).slice(0, limit);
+}
+
+/**
+ * Local GTFS bus-stop fallback for searchPlaces: prefix/substring matches in
+ * the shipped stop directory (works offline from the SW data cache).
+ * @param {string} q
+ * @param {number} limit
+ * @returns {Promise<Array<{ lat: number, lon: number, name: string, label: string }>>}
+ */
+async function localGtfsStopsSearch(q, limit) {
+  try {
+    const { searchGtfsStopsLocal } = await import("./routeShapes.js");
+    const hits = await searchGtfsStopsLocal(q, limit);
+    return hits.map((s) => ({
+      lat: s.lat,
+      lon: s.lon,
+      name: s.name,
+      label: `${s.name} · Bus stop`,
+      category: "bus_stop",
+      type: "stop",
+      isBus: true,
+      source: "gtfs-local",
+    }));
+  } catch (e) {
+    console.warn("[geocode] local GTFS stop search failed", e);
+    return [];
+  }
 }
 
 /**

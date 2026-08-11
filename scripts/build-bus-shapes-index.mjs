@@ -13,6 +13,10 @@
  * Encoding (keeps the index small enough to commit + lazy-fetch):
  *   coordinates → flat int array: [lon0e5, lat0e5, dLon1, dLat1, ...]
  *   (absolute first point at 1e-5 deg ≈ 1.1 m, then integer deltas).
+ *   stop sequences → per-route st { dir: [stopIndex, ...] } into the shared
+ *   stops.json directory (s: [[id, lonE5, latE5, nameIdx], ...], n: names).
+ *   Sequences use the longest trip per (route, direction); KMB/CTB/NLB/GMB
+ *   are shipped, others (MTR, LR, MTRB) keep their own local data.
  *
  * Usage:
  *   node scripts/build-bus-shapes-index.mjs            # download + build
@@ -53,6 +57,8 @@ const DECIMATE_EPS_M = Number(process.env.SHAPE_DECIMATE_M || 3);
 const SCALE = 1e5;
 /** Douglas-Peucker tolerance in metres (feed shapes are 2-3 m dense) */
 const SIMPLIFY_M = Number(process.env.SHAPE_SIMPLIFY_M || 6);
+/** Agencies whose stop sequences we ship (others have local CSVs/static). */
+const STOP_AGENCIES = new Set(["kmb", "ctb", "nlb", "gmb"]);
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
@@ -226,18 +232,24 @@ async function main() {
   }
   console.log(`[bus-shapes] routes.txt: ${routes.size} routes`);
 
-  // trips.txt: (route_id, direction, shape_id) → headsigns, trip count
+  // trips.txt: (route_id, direction, shape_id) → headsigns, trip count.
+  // Also records trip_id → route/direction for the stop-sequence pass.
   /** @type {Map<string, { headsigns: Set<string>, trips: number }>} */
   const tripGroups = new Map();
+  /** @type {Map<string, { routeId: string, dir: string }>} */
+  const tripMeta = new Map();
   head = true;
   for await (const row of zipCsvRows(zip, "trips.txt")) {
     if (head) {
       head = false;
       continue;
     }
-    const [routeId, , , dirRaw, headsign, shapeId] = row;
+    // Columns: route_id, service_id, trip_id, trip_headsign, direction_id, shape_id
+    const [routeId, , tripId, headsign, dirRaw, shapeId] = row;
+    const dir = String(dirRaw ?? "0");
+    if (tripId) tripMeta.set(tripId, { routeId, dir });
     if (!routeId || !shapeId) continue;
-    const key = `${routeId}\u0000${dirRaw ?? "0"}\u0000${shapeId}`;
+    const key = `${routeId}\u0000${dir}\u0000${shapeId}`;
     let g = tripGroups.get(key);
     if (!g) {
       g = { headsigns: new Set(), trips: 0 };
@@ -285,6 +297,49 @@ async function main() {
   }
   console.log(`[bus-shapes] shapes.txt: ${shapes.size} shapes (simplify ${SIMPLIFY_M} m)`);
 
+  // stop_times.txt: trip_id → (seq, stop_id) rows, file-ordered per trip.
+  /** @type {Map<string, Array<{ seq: number, stopId: string }>>} */
+  const tripStops = new Map();
+  head = true;
+  for await (const row of zipCsvRows(zip, "stop_times.txt")) {
+    if (head) {
+      head = false;
+      continue;
+    }
+    const tripId = row[0];
+    const stopId = row[3];
+    if (!tripId || !stopId) continue;
+    let arr = tripStops.get(tripId);
+    if (!arr) {
+      arr = [];
+      tripStops.set(tripId, arr);
+    }
+    const seq = Number(row[4]);
+    arr.push({ seq: Number.isFinite(seq) ? seq : arr.length + 1, stopId });
+  }
+  console.log(`[bus-shapes] stop_times.txt: ${tripStops.size} trips`);
+
+  // stops.txt: stop_id → name + coordinates (for the shared directory).
+  /** @type {Map<string, { name: string, lat: number, lon: number }>} */
+  const stopMeta = new Map();
+  head = true;
+  for await (const row of zipCsvRows(zip, "stops.txt")) {
+    if (head) {
+      head = false;
+      continue;
+    }
+    const [stopId, name, latRaw, lonRaw] = row;
+    if (!stopId) continue;
+    const lat = Number(latRaw);
+    const lon = Number(lonRaw);
+    stopMeta.set(stopId, {
+      name: String(name || "").trim() || stopId,
+      lat,
+      lon,
+    });
+  }
+  console.log(`[bus-shapes] stops.txt: ${stopMeta.size} stops`);
+
   // Group per (route, direction), keep representative shapes (most trips)
   /** @type {Map<string, Map<string, Array<{ shapeId: string, pts: number[][], headsigns: string[], trips: number }>>>> */
   const byRouteDir = new Map();
@@ -312,12 +367,69 @@ async function main() {
     });
   }
 
+  // Stop sequences per (route, direction): keep the longest trip so
+  // short-working variants never truncate the list; sort by stop_sequence.
+  /** @type {Map<string, Map<string, string[]>>} routeId → dir → stopIds */
+  const stopSeqByRouteDir = new Map();
+  for (const [tripId, meta] of tripMeta) {
+    const agency = routes.get(meta.routeId)?.agency;
+    if (!STOP_AGENCIES.has(agency)) continue;
+    const arr = tripStops.get(tripId);
+    if (!arr || arr.length < 2) continue;
+    arr.sort((a, b) => a.seq - b.seq);
+    let dirs = stopSeqByRouteDir.get(meta.routeId);
+    if (!dirs) {
+      dirs = new Map();
+      stopSeqByRouteDir.set(meta.routeId, dirs);
+    }
+    const cur = dirs.get(meta.dir);
+    if (!cur || arr.length > cur.length) {
+      dirs.set(meta.dir, arr.map((s) => s.stopId));
+    }
+  }
+  console.log(
+    `[bus-shapes] stop sequences: ${stopSeqByRouteDir.size} routes`,
+  );
+
+  // Shared stop directory: index every referenced stop (sorted, stable),
+  // dedupe names into a string table.
+  const referenced = new Set();
+  for (const dirs of stopSeqByRouteDir.values()) {
+    for (const ids of dirs.values()) {
+      for (const id of ids) referenced.add(id);
+    }
+  }
+  const stopIds = [...referenced].sort();
+  const stopIndex = new Map(stopIds.map((id, i) => [id, i]));
+  const nameIndex = new Map();
+  const names = [];
+  const stopList = [];
+  for (const id of stopIds) {
+    const m = stopMeta.get(id);
+    let nameIdx = nameIndex.get(m?.name);
+    if (nameIdx === undefined) {
+      nameIdx = names.length;
+      nameIndex.set(m?.name, nameIdx);
+      names.push(m?.name);
+    }
+    stopList.push([
+      id,
+      Math.round((m?.lon || 0) * SCALE),
+      Math.round((m?.lat || 0) * SCALE),
+      nameIdx,
+    ]);
+  }
+
   /** @type {Map<string, object>} agency → file payload */
   const agencies = new Map();
   let routesIndexed = 0;
   let shapesIndexed = 0;
 
-  for (const [routeId, dirs] of byRouteDir) {
+  const allRouteIds = new Set([
+    ...byRouteDir.keys(),
+    ...stopSeqByRouteDir.keys(),
+  ]);
+  for (const routeId of allRouteIds) {
     const meta = routes.get(routeId);
     const agency = meta?.agency || agencyKey(routeId.split("_")[0] || "");
     const short = meta?.short || routeId;
@@ -327,40 +439,50 @@ async function main() {
       agencies.set(agency, payload);
     }
     const dirEntries = [];
-    for (const [dir, list] of dirs) {
-      const sorted = [...list]
-        .sort((a, b) => b.trips - a.trips)
-        .slice(0, MAX_SHAPES_PER_DIR);
-      for (const s of sorted) {
-        const pts = simplifyPathM(s.pts, SIMPLIFY_M);
-        if (pts.length < 3) continue;
-        const ints = [
-          Math.round(pts[0][0] * SCALE),
-          Math.round(pts[0][1] * SCALE),
-        ];
-        for (let i = 1; i < pts.length; i++) {
-          ints.push(
-            Math.round((pts[i][0] - pts[i - 1][0]) * SCALE),
-            Math.round((pts[i][1] - pts[i - 1][1]) * SCALE),
-          );
+    const shapeDirs = byRouteDir.get(routeId);
+    if (shapeDirs) {
+      for (const [dir, list] of shapeDirs) {
+        const sorted = [...list]
+          .sort((a, b) => b.trips - a.trips)
+          .slice(0, MAX_SHAPES_PER_DIR);
+        for (const s of sorted) {
+          const pts = simplifyPathM(s.pts, SIMPLIFY_M);
+          if (pts.length < 3) continue;
+          const ints = [
+            Math.round(pts[0][0] * SCALE),
+            Math.round(pts[0][1] * SCALE),
+          ];
+          for (let i = 1; i < pts.length; i++) {
+            ints.push(
+              Math.round((pts[i][0] - pts[i - 1][0]) * SCALE),
+              Math.round((pts[i][1] - pts[i - 1][1]) * SCALE),
+            );
+          }
+          dirEntries.push({
+            d: String(dir),
+            h: s.headsigns.slice(0, 6),
+            c: ints,
+          });
+          shapesIndexed++;
         }
-        dirEntries.push({
-          d: String(dir),
-          h: s.headsigns.slice(0, 6),
-          c: ints,
-        });
-        shapesIndexed++;
       }
     }
-    if (!dirEntries.length) continue;
-    payload.routes[routeId] = {
-      sn: short,
-      shapes: dirEntries,
-    };
+    const stEntries = {};
+    const seqDirs = stopSeqByRouteDir.get(routeId);
+    if (seqDirs) {
+      for (const [dir, ids] of seqDirs) {
+        stEntries[dir] = ids.map((id) => stopIndex.get(id));
+      }
+    }
+    if (!dirEntries.length && !Object.keys(stEntries).length) continue;
+    const routeEntry = { sn: short };
+    if (dirEntries.length) routeEntry.shapes = dirEntries;
+    if (Object.keys(stEntries).length) routeEntry.st = stEntries;
+    payload.routes[routeId] = routeEntry;
     routesIndexed++;
   }
 
-  // Write per-agency files + index
+  // Write per-agency files + index + shared stop directory
   mkdirSync(outDir, { recursive: true });
   const updatedAt = new Date().toISOString();
   /** @type {Record<string, string>} */
@@ -384,6 +506,14 @@ async function main() {
   }
 
   writeFileSync(
+    join(outDir, "stops.json"),
+    JSON.stringify({ v: 1, updated_at: updatedAt, n: names, s: stopList }),
+  );
+  console.log(
+    `[bus-shapes] stops.json: ${stopList.length} stops, ${names.length} names`,
+  );
+
+  writeFileSync(
     join(outDir, "index.json"),
     JSON.stringify({ v: 1, updated_at: updatedAt, files, route_file: routeFile }),
   );
@@ -391,15 +521,18 @@ async function main() {
   // Sanity + report
   const totalBytes = [...agencies.keys()].reduce(
     (acc, a) => acc + statSync(join(outDir, files[a])).size,
-    0,
+    statSync(join(outDir, "stops.json")).size,
   );
 
   console.log(
     `\n[bus-shapes] done: ${routesIndexed} routes, ${shapesIndexed} shapes, ` +
-      `${agencies.size} agencies, ${(totalBytes / 1e6).toFixed(1)} MB → ${outDir}`,
+      `${stopList.length} stops, ${agencies.size} agencies, ` +
+      `${(totalBytes / 1e6).toFixed(1)} MB → ${outDir}`,
   );
-  if (routesIndexed === 0) {
-    console.error("[bus-shapes] no routes indexed — feed shape format changed?");
+  if (routesIndexed === 0 || (stopSeqByRouteDir.size > 0 && stopList.length === 0)) {
+    console.error(
+      "[bus-shapes] no routes indexed or stops missing — feed format changed?",
+    );
     process.exit(1);
   }
 }

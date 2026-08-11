@@ -11,9 +11,13 @@
  *
  * Index layout (public/data/bus-shapes/):
  *   index.json      → { v, updated_at, files: {agency: file}, route_file: {ROUTE_ID: agency} }
- *   <agency>.json   → { v, updated_at, routes: { <route_id>: { sn, shapes: [ {d,h,c} ] } } }
+ *   <agency>.json   → { v, updated_at, routes: { <route_id>: { sn, shapes: [ {d,h,c} ], st } } }
  *     c = flat int array [lon0e5, lat0e5, dLon, dLat, …] (1e-5 deg ≈ 1.1 m)
  *     h = headsigns (terminal names) used for direction disambiguation
+ *     d = GTFS direction_id ("0" / "1")
+ *     st = stop sequences per direction: { dir: [stopIndex, …] } into stops.json
+ *   stops.json      → { v, updated_at, n: [names], s: [[id, lonE5, latE5, nameIdx], …] }
+ *     shared directory; lets route-detail render stop lists + map pins offline
  */
 
 /** @typedef {{ lon: number, lat: number }} LngLat */
@@ -368,5 +372,122 @@ export async function getGtfsBusShape(opt, opts = {}) {
     if (e?.name === "AbortError") throw e;
     console.warn("[bus-shapes] shape lookup failed, falling back", e);
     return null;
+  }
+}
+
+/**
+ * Load the shared stop directory (stops.json) once per session.
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<{ list: Array<{ id: string, lon: number, lat: number, name: string }>, byId: Map<string, number> }>}
+ */
+async function loadGtfsStopDirectory(signal) {
+  const url = `${BASE()}stops.json`;
+  if (!cache.has(url)) {
+    cache.set(
+      url,
+      fetchJson(url, signal).then((j) => {
+        const list = (j.s || []).map((row) => ({
+          id: String(row[0]),
+          lon: Number(row[1]) / 1e5,
+          lat: Number(row[2]) / 1e5,
+          name: j.n?.[row[3]] ?? "",
+        }));
+        const byId = new Map(list.map((s, i) => [s.id, i]));
+        return { list, byId };
+      }).catch((e) => {
+        cache.delete(url);
+        throw e;
+      }),
+    );
+  }
+  return cache.get(url);
+}
+
+/**
+ * Official GTFS stop sequence for a route direction, or [] when unavailable.
+ * Shares the same index/agency resolution as getGtfsBusShape, so it works
+ * fully offline from the SW data cache. Never throws — returns [] on failure
+ * so callers fall back to operator APIs / nearest-neighbour.
+ * @param {{ route_id?: string, route_short_name?: string, agency?: { id?: string, name?: string } }} opt
+ * @param {string} [bound] "O" | "I"
+ * @param {{ signal?: AbortSignal }} [opts]
+ * @returns {Promise<Array<{ seq: number, name: string, nameEn: string, nameTc: string, stopId: string, lon: number, lat: number }>>}
+ */
+export async function getGtfsRouteStopSequence(opt, bound = "O", opts = {}) {
+  try {
+    const signal = opts.signal;
+    const resolved = await resolveShapeData(opt, signal);
+    if (!resolved?.entry?.st) return [];
+    const dir = await loadGtfsStopDirectory(signal);
+    const st = resolved.entry.st;
+    const want = bound === "I" ? "1" : "0";
+    let idxs = st[want] || st[String(want)];
+    if (!idxs?.length) {
+      // Cross-direction fallback: some one-way feeds store the opposite dir
+      idxs = st[want === "1" ? "0" : "1"] || [];
+    }
+    const stops = [];
+    for (let i = 0; i < idxs.length; i++) {
+      const s = dir.list[idxs[i]];
+      if (!s) continue;
+      stops.push({
+        seq: i + 1,
+        name: s.name,
+        nameEn: s.name,
+        nameTc: "",
+        stopId: s.id,
+        lon: s.lon,
+        lat: s.lat,
+      });
+    }
+    if (stops.length >= 2) {
+      console.info(
+        "[bus-shapes] gtfs stop seq",
+        resolved.entry.sn || resolved.ridKey,
+        want,
+        "→",
+        stops.length,
+        "stops",
+      );
+    }
+    return stops;
+  } catch (e) {
+    if (e?.name === "AbortError") throw e;
+    console.warn("[bus-shapes] stop-sequence lookup failed, falling back", e);
+    return [];
+  }
+}
+
+/**
+ * Local bus-stop search over the shared GTFS stop directory (offline-ready).
+ * Prefix matches rank before substring matches; returns up to `limit` hits.
+ * @param {string} query
+ * @param {number} [limit]
+ * @returns {Promise<Array<{ stopId: string, name: string, lat: number, lon: number }>>}
+ */
+export async function searchGtfsStopsLocal(query, limit = 8) {
+  const q = String(query || "").trim().toLowerCase();
+  if (q.length < 2) return [];
+  try {
+    const dir = await loadGtfsStopDirectory();
+    const prefix = [];
+    const sub = [];
+    for (const s of dir.list) {
+      const name = String(s.name || "").toLowerCase();
+      if (!name) continue;
+      if (name.startsWith(q)) prefix.push(s);
+      else if (name.includes(q)) sub.push(s);
+      if (prefix.length >= limit) break;
+    }
+    const hits = [...prefix, ...sub].slice(0, limit);
+    return hits.map((s) => ({
+      stopId: s.id,
+      name: s.name,
+      lat: s.lat,
+      lon: s.lon,
+    }));
+  } catch (e) {
+    console.warn("[bus-shapes] local stop search failed", e);
+    return [];
   }
 }
