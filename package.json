@@ -12,6 +12,7 @@
     "build": "vite build",
     "build:fares": "node scripts/build-fares.mjs",
     "build:bus-shapes": "node scripts/build-bus-shapes-index.mjs",
+    "build:rbs": "node scripts/build-rbs-data.mjs",
     "schemes:sync": "node scripts/sync-interchange-schemes.mjs",
     "schemes:summarize": "node scripts/summarize-bbi.mjs",
     "schemes:summarize:download": "node scripts/summarize-bbi.mjs --download",

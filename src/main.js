@@ -7870,6 +7870,25 @@ function buildEtaRouteCatalog() {
       });
     }
   }
+
+  // RBS (NR/DB residents' bus, TD headway GTFS) — no live ETA
+  if (rbsRouteData) {
+    for (const [rid, rr] of Object.entries(rbsRouteData.routes)) {
+      const dirs = rbsRouteDirs(rid);
+      const destHint = dirs[0]?.dest || "";
+      add({
+        id: String(rid).toUpperCase(),
+        label: destHint ? `RBS ${rid} · ${destHint}` : `RBS ${rid}`,
+        kind: "bus",
+        co: "rbs",
+        aliases: [
+          ...(rr.nameZh ? [String(rr.nameZh)] : []),
+          ...(rr.nameEn ? [String(rr.nameEn)] : []),
+          ...dirs.map((d) => d.destZh).filter(Boolean),
+        ],
+      });
+    }
+  }
   const byCo = pack?.bus?.byCoRoute || {};
   for (const key of Object.keys(byCo)) {
     const [co, route] = key.split("|");
@@ -8054,6 +8073,12 @@ function etaRouteDirectionsFromOd(r) {
   // Official MTR Bus stop sequences (not KMB)
   if (r.kind === "mtr_bus" || co === "lrtfeeder" || co === "mtrbus") {
     const dirs = mtrBusRouteDirections(rid);
+    if (dirs.length) return dirs;
+  }
+
+  // RBS (residents' bus) — TD headway GTFS directions
+  if (co === "rbs") {
+    const dirs = rbsRouteDirs(rid);
     if (dirs.length) return dirs;
   }
 
@@ -8833,6 +8858,40 @@ async function ensureEtaNearbyIndex() {
         stops: Array.isArray(j.stops) ? j.stops : [],
       };
       console.info("[eta] nearby index stops", etaNearbyIndex.stops.length);
+      // Fold in RBS stops (NR/DB residents' bus, TD headway GTFS) so Nearby
+      // browse finds them geographically; existing stop ids get extra pairs.
+      try {
+        const rbsRes = await fetch("/data/rbs-stops.json", {
+          headers: { Accept: "application/json" },
+        });
+        if (rbsRes.ok) {
+          const rj = await rbsRes.json();
+          const rows = Array.isArray(rj.stops) ? rj.stops : [];
+          if (rows.length) {
+            const byId = new Map(
+              etaNearbyIndex.stops.map((s) => [String(s[3]), s]),
+            );
+            for (const row of rows) {
+              const sid = String(row[3]);
+              const pairs = Array.isArray(row[4]) ? row[4] : [];
+              if (!pairs.length) continue;
+              const ex = byId.get(sid);
+              if (ex && Array.isArray(ex[4])) {
+                for (const p of pairs) {
+                  if (!ex[4].some((q) => q[0] === p[0] && q[1] === p[1]))
+                    ex[4].push(p);
+                }
+              } else {
+                byId.set(sid, row);
+                etaNearbyIndex.stops.push(row);
+              }
+            }
+            console.info("[eta] nearby index + RBS stops", rows.length);
+          }
+        }
+      } catch (e) {
+        console.warn("[eta] RBS nearby", e);
+      }
     } catch (e) {
       console.warn("[eta] nearby index", e);
       etaNearbyIndex = { v: 1, stops: [] };
@@ -8840,6 +8899,75 @@ async function ensureEtaNearbyIndex() {
     return etaNearbyIndex;
   })();
   return etaNearbyIndexPromise;
+}
+
+/**
+ * Compact RBS route data (TD headway GTFS): route id → per-direction
+ * { dest/orig, headwayMins, first/last, stops }. No live ETA exists for
+ * RBS — this powers catalog labels, stop lists and headway “Timetable” slots.
+ * @type {{ v: number, routes: Record<string, any> } | null}
+ */
+let rbsRouteData = null;
+/** @type {Promise<any> | null} */
+let rbsRouteDataPromise = null;
+
+async function ensureRbsRouteData() {
+  if (rbsRouteData) return rbsRouteData;
+  if (rbsRouteDataPromise) return rbsRouteDataPromise;
+  rbsRouteDataPromise = (async () => {
+    try {
+      const res = await fetch("/data/rbs-routes.json", {
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const j = await res.json();
+      rbsRouteData = {
+        v: Number(j.v) || 1,
+        routes: j.routes && typeof j.routes === "object" ? j.routes : {},
+      };
+      console.info("[eta] RBS routes", Object.keys(rbsRouteData.routes).length);
+    } catch (e) {
+      console.warn("[eta] RBS routes", e);
+      rbsRouteData = { v: 1, routes: {} };
+    }
+    return rbsRouteData;
+  })();
+  return rbsRouteDataPromise;
+}
+
+/** RBS direction rows (dest/orig/bound + headway service window). */
+function rbsRouteDirs(rid) {
+  const rr = rbsRouteData?.routes?.[String(rid || "").toUpperCase()];
+  if (!rr?.dirs) return [];
+  return Object.entries(rr.dirs).map(([bound, d]) => ({
+    bound: bound === "I" ? "I" : "O",
+    dest: String(d.dest || ""),
+    destZh: String(d.destZh || ""),
+    orig: String(d.orig || ""),
+    origZh: String(d.origZh || ""),
+    headwayMins: Number(d.headwayMins) || undefined,
+    first: d.first != null ? Number(d.first) : undefined,
+    last: d.last != null ? Number(d.last) : undefined,
+    overnight: !!d.overnight,
+  }));
+}
+
+/** Stop sequence for one RBS route direction (from the TD headway GTFS). */
+function rbsRouteStops(rid, bound) {
+  const rr = rbsRouteData?.routes?.[String(rid || "").toUpperCase()];
+  const d = rr?.dirs?.[bound === "I" ? "I" : "O"];
+  const list = Array.isArray(d?.stops) ? d.stops : [];
+  return list
+    .map((s, i) => ({
+      seq: Number(s.seq) || i + 1,
+      name: s.name || s.nameTc || s.nameEn || "",
+      nameEn: String(s.nameEn || ""),
+      nameTc: String(s.nameTc || ""),
+      stopId: String(s.id || ""),
+      lon: Number(s.lon),
+      lat: Number(s.lat),
+    }))
+    .filter((s) => Number.isFinite(s.lon) && Number.isFinite(s.lat));
 }
 
 /**
@@ -8855,6 +8983,7 @@ function etaCoRouteLabel(co, route) {
   if (c === "gmb") return `GMB ${r}`;
   if (c === "lwb") return `LWB ${r}`;
   if (c === "lrtfeeder" || c === "mtrbus") return `MTR Bus ${r}`;
+  if (c === "rbs") return `RBS ${r}`;
   if (c === "kmb") return `KMB ${r}`;
   return `Bus ${r}`;
 }
@@ -9806,6 +9935,9 @@ async function browseEtaRoutes(limit = 28, opts = {}) {
       // Rebuild catalog once MTR Bus CSVs arrive (dest names + stop lists)
       if (mtrBusRouteIds().length) buildEtaRouteCatalog();
     });
+    void ensureRbsRouteData().then(() => {
+      if (!etaRouteCatalog.some((x) => x.co === "rbs")) buildEtaRouteCatalog();
+    });
     const hits = catalogSorted.slice(0, limit);
     return {
       hits,
@@ -9818,6 +9950,10 @@ async function browseEtaRoutes(limit = 28, opts = {}) {
   // Warm MTR Bus open data (catalog may already include fare-pack routes)
   await ensureMtrBusData().catch(() => {});
   if (mtrBusRouteIds().length) buildEtaRouteCatalog();
+  // Warm RBS route data (NR/DB residents' bus) and refresh the catalog once
+  // it arrives so browse includes RBS without a second visit.
+  await ensureRbsRouteData().catch(() => {});
+  if (!etaRouteCatalog.some((x) => x.co === "rbs")) buildEtaRouteCatalog();
 
   // ── Nearby MTR lines ──
   /** @type {Map<string, { dist: number, station: string }>} */
@@ -10048,6 +10184,9 @@ function prefersRoutesSearch(s) {
   if (/^\d{1,2}[A-Za-z]/.test(q)) return true;
   // "117", "A21", "K51", "E31", "506"
   if (/^[A-Za-z]?\d/.test(q) || /^\d/.test(q)) return true;
+  // Multi-letter prefix routes — RBS residents' buses (NR330, DB01R) and
+  // HR/KR-style services: "NR3", "DB01" while typing.
+  if (/^[A-Za-z]{2,}\d/i.test(q)) return true;
   // Letter-only ids like "TKL", "EAL" — MTR line codes (falls back to
   // places when no route matches, so place-ish words still work)
   if (/^[A-Za-z]{2,4}$/.test(q)) return true;
@@ -10066,6 +10205,9 @@ async function runUnifiedSearch(query) {
   if (!s) return { kind: "empty" };
 
   if (prefersRoutesSearch(s)) {
+    // RBS (NR/DB) routes live in a separate static data file — ensure it's
+    // loaded before matching so “NR330” finds them on the first keystroke.
+    await ensureRbsRouteData();
     const routes = searchEtaRoutes(s, 16);
     if (routes.length) return { kind: "routes", routes };
     // No routes — fall through to places
@@ -10287,6 +10429,11 @@ function etaRouteCardInnerHtml(r, dir, eta = {}, opts = {}) {
         mode: r.kind === "mtr" ? "subway" : r.kind === "lrt" ? "tram" : "bus",
         route: r.id,
         count: 1,
+        // RBS: real headway + service window from the TD GTFS data
+        headwayMins: dir.headwayMins || undefined,
+        first: dir.first != null ? dir.first : undefined,
+        last: dir.last != null ? dir.last : undefined,
+        overnight: dir.overnight || undefined,
       });
       if (slots[0]) {
         mins = slots[0].waitMins;
@@ -10297,6 +10444,9 @@ function etaRouteCardInnerHtml(r, dir, eta = {}, opts = {}) {
           operator: r.co || r.kind,
           mode: r.kind === "mtr" ? "subway" : r.kind === "lrt" ? "tram" : "bus",
           route: r.id,
+          first: dir.first != null ? dir.first : undefined,
+          last: dir.last != null ? dir.last : undefined,
+          overnight: dir.overnight || undefined,
         })
       ) {
         outsideService = true;
@@ -11735,6 +11885,12 @@ function etaRouteAsOption(route, stops, dir = {}, boardStop = null) {
     // Direction hint for GTFS shape selection: "O"/"I" → direction_id 0/1,
     // matching the stop-sequence grouping (see routeShapes.getGtfsBusShape).
     bound: dir.bound || "",
+    // RBS has no live ETA — carry its headway + service window so the
+    // scheduled-fallback in eta.js shows a realistic “Timetable” grid.
+    headwayMins: dir.headwayMins || undefined,
+    first: dir.first != null ? dir.first : undefined,
+    last: dir.last != null ? dir.last : undefined,
+    overnight: dir.overnight || undefined,
     from: from || {
       stop_name: dir.orig || "",
       location: { lon: 0, lat: 0 },
@@ -11763,6 +11919,9 @@ async function loadEtaRouteStops(route) {
   }
   if (route.kind === "mtr") {
     await ensureMtrStationLinesMap();
+  }
+  if (coPre === "rbs") {
+    await ensureRbsRouteData();
   }
 
   // Full OD bounds so Opposite (card dir 0|1) maps to real O/I sequences
@@ -11806,6 +11965,17 @@ async function loadEtaRouteStops(route) {
     }
     if (seq.length >= 2) return seq;
     console.warn("[eta] MTR Bus stops empty for", route.id, "bound", bound);
+  }
+
+  // ── RBS (residents' bus, TD headway GTFS — no live ETA) ──
+  if (co === "rbs") {
+    await ensureRbsRouteData();
+    let seq = rbsRouteStops(route.id, bound);
+    if (seq.length < 2) {
+      seq = rbsRouteStops(route.id, bound === "I" ? "O" : "I");
+    }
+    if (seq.length >= 2) return seq;
+    console.warn("[eta] RBS stops empty for", route.id, "bound", bound);
   }
 
   // ── KMB / LWB only (never fall through for CTB/NLB/MTR Bus) ──
@@ -11971,10 +12141,11 @@ async function loadEtaRouteStops(route) {
   }
 
   // ── GTFS stop-sequence fallback (offline / operator API down) ──────────
-  // KMB/CTB/NLB/GMB only — MTR/LRT/MTR Bus have their own local data above.
+  // KMB/CTB/NLB/GMB only — MTR/LRT/MTR Bus/RBS have their own local data above.
   const busCo = co || (route.kind === "bus" ? "kmb" : "");
   if (
     busCo &&
+    busCo !== "rbs" &&
     (route.kind === "bus" ||
       ["kmb", "lwb", "ctb", "nlb", "gmb"].includes(busCo))
   ) {

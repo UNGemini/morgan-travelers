@@ -266,11 +266,14 @@ export function defaultHeadwayMins(opt, operator = "") {
   if (op === "nlb") return 15;
   if (op === "gmb") return 10;
   if (op === "ctb") return 12;
+  if (op === "rbs") return 15; // Residents' bus — TD headway data supplies real values
   return 12; // KMB / default bus
 }
 
 /**
  * Overnight franchised bus (N-routes) — in service at midnight.
+ * Excludes RBS NR/DB codes: NR-prefixed residents' buses are day routes
+ * (NR330/NR332/…) whose own service windows come from the TD GTFS data.
  * @param {string} [route]
  */
 export function isOvernightRouteCode(route) {
@@ -279,8 +282,8 @@ export function isOvernightRouteCode(route) {
     .toUpperCase()
     // Strip operator prefixes: KMB-N64 → N64
     .replace(/^[A-Z]+[-_]/, "");
-  // N64, NA21, N11, NB3, N260…
-  return /^N[A-Z]?\d/.test(r);
+  // N64, NA21, N11, NB3, N260… (not NR330 — that's RBS, a day route)
+  return /^N(?!R)(?:[A-Z]?)\d/.test(r);
 }
 
 /**
@@ -319,6 +322,8 @@ function mtrPredictionEndMins(route) {
  * Rough Hong Kong service window for inventing headways / showing “outside service”.
  * Not a full GTFS calendar — only gates placeholder times.
  *
+ *  · Data-driven: opts.first/opts.last (minutes after midnight, last may
+ *    exceed 1440) gate exactly, e.g. RBS routes from the TD headway GTFS.
  *  · Day routes: ~05:30–01:15 (covers last trains/buses after midnight)
  *  · Overnight N-routes: ~23:00–06:30
  *  · MTR (subway): ends per line, a few minutes before its last 3 trains
@@ -328,6 +333,9 @@ function mtrPredictionEndMins(route) {
  *   mode?: string,
  *   route?: string,
  *   route_short_name?: string,
+ *   first?: number,
+ *   last?: number,
+ *   overnight?: boolean,
  * }} [opts]
  * @param {Date} [now]
  * @returns {boolean}
@@ -338,6 +346,21 @@ export function isTypicalServiceWindow(opts = {}, now = new Date()) {
   const route = String(
     opts.route || opts.route_short_name || "",
   ).toUpperCase();
+
+  // Exact service window from route data (RBS NR/DB — TD headway GTFS).
+  const first = Number(opts.first);
+  const last = Number(opts.last);
+  if (Number.isFinite(first) && Number.isFinite(last)) {
+    // last may exceed 1440 (departures after midnight)
+    return (
+      (mins >= first && mins <= last) ||
+      (last > 24 * 60 && mins <= last - 24 * 60)
+    );
+  }
+  if (opts.overnight === true) {
+    // Overnight: late evening through early morning
+    return mins >= 23 * 60 || mins <= 6 * 60 + 30;
+  }
 
   if (isOvernightRouteCode(route)) {
     // Overnight: late evening through early morning
@@ -609,6 +632,9 @@ export function headwayTimetableSlots(opts = {}, now = new Date()) {
         operator: opts.operator,
         mode: opts.mode,
         route: opts.route,
+        first: opts.first,
+        last: opts.last,
+        overnight: opts.overnight,
       },
       now,
     )
@@ -1906,7 +1932,9 @@ export function hasAnyEtaSlots(result) {
  */
 export function withScheduledFallback(result, opt, plan = null, legIndex = 0) {
   const now = new Date();
-  const headway = defaultHeadwayMins(opt, result?.operator);
+  // RBS passes a real headway from the TD GTFS data; everyone else falls
+  // back to the operator default.
+  const headway = opt?.headwayMins ?? defaultHeadwayMins(opt, result?.operator);
   const routeCode = String(
     routeShort(opt) || result?.route || opt?.route_short_name || "",
   );
@@ -1915,6 +1943,9 @@ export function withScheduledFallback(result, opt, plan = null, legIndex = 0) {
       operator: result?.operator || etaOperator(opt),
       mode: opt?.mode,
       route: routeCode,
+      first: opt?.first,
+      last: opt?.last,
+      overnight: opt?.overnight,
     },
     now,
   );
@@ -2000,6 +2031,7 @@ export function withScheduledFallback(result, opt, plan = null, legIndex = 0) {
         mode: opt?.mode,
         route: routeCode,
         count: 3,
+        headwayMins: headway,
         force: true, // already gated by inService
       },
       now,
