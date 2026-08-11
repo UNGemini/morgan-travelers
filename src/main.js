@@ -3004,6 +3004,16 @@ function initDataCacheUi() {
   // The download option and data-source picker only make sense while
   // caching is enabled.
   const sourceField = document.getElementById("data-source-field");
+  const cloud = document.getElementById("data-source-cloud");
+  const local = document.getElementById("data-source-local");
+  /** No downloaded set can exist with the cache off — force Cloud back. */
+  const resetDataSourceToCloud = () => {
+    if (cloud) cloud.checked = true;
+    if (local) local.checked = false;
+    saveDataSourcePref("cloud");
+    notifyDataSourcePref();
+  };
+  if (!loadDataCachePref()) resetDataSourceToCloud();
   const syncButtonVisibility = () => {
     if (btn) btn.hidden = !on.checked;
     if (sourceField) {
@@ -3017,7 +3027,13 @@ function initDataCacheUi() {
   const applyPref = (enabled) => {
     const next = saveDataCachePref(enabled);
     notifyDataCachePref();
-    showToast(`Data cache ${next ? "enabled" : "disabled"}`, 1800);
+    if (!next) resetDataSourceToCloud();
+    showToast(
+      next
+        ? "Data cache enabled"
+        : "Data cache disabled — data source reset to Cloud",
+      next ? 1800 : 2600,
+    );
     syncButtonVisibility();
   };
   const sync = () => {
@@ -3220,6 +3236,10 @@ function offlineDataManifest() {
   const urls = [
     url("data/bus-shapes/index.json"),
     url("data/eta-nearby-stops.json"),
+    // RBS (NR/DB residents' bus, TD headway GTFS) — browse/search/detail and
+    // headway timetable cards depend on these; keep them in the offline set.
+    url("data/rbs-routes.json"),
+    url("data/rbs-stops.json"),
     url("data/hk.wheelsrouter.gz"),
     url("data/light_rail_routes_and_stops.csv"),
     url("data/mtr_bus_routes.csv"),

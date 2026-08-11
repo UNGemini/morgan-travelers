@@ -4517,6 +4517,16 @@ body.contrib-submitting .bg-orb {
   }
 }
 
+.pref-segment-6 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+@media (min-width: 380px) {
+  .pref-segment-6 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
 .pref-segment-2 {
   grid-template-columns: repeat(2, 1fr);
 }

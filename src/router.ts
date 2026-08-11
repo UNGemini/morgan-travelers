@@ -67,7 +67,7 @@ export interface RouteQuery {
   trafficMethods?: string[];
   /**
    * Allowed bus companies (multi-select).
-   * kmb_lwb | ctb | nlb | gmb — empty/missing = all allowed.
+   * kmb_lwb | ctb | nlb | gmb | mtr_bus | rbs — empty/missing = all allowed.
    */
   busCompanies?: string[];
   /** Override RAPTOR modes string (comma-separated). */
@@ -384,12 +384,16 @@ function planTouchesAelCorridor(plan: Plan): boolean {
 
 function classifyBusCompanyId(opt?: RouteOption | null): string | null {
   if (!opt) return null;
+  // Residents' Bus Services (NR / DB routes) — a route-level class that wins
+  // over the operator: NR61/NR88 are CTB-operated but still RBS services.
+  if (/^(NR|DB)\d/i.test(String(opt.route_short_name || ""))) return "rbs";
   const blob = `${opt.agency?.id || ""} ${opt.agency?.name || ""}`.toLowerCase();
   if (/gmb|green\s*mini|minibus|專線|专线/.test(blob)) return "gmb";
   if (/\bnlb\b|new\s*lanto/.test(blob)) return "nlb";
   if (/\bctb\b|citybus|nwfb|new\s*world/.test(blob)) return "ctb";
+  if (/\bmtrb\b|mtr\s*bus|港鐵巴士/.test(blob)) return "mtr_bus";
   if (
-    /\bkmb\b|lwb|long\s*win|kowloon\s*motor|lrt\s*feeder|mtr\s*bus|港鐵巴士/.test(
+    /\bkmb\b|lwb|long\s*win|kowloon\s*motor|lrt\s*feeder/.test(
       blob,
     )
   ) {
@@ -972,7 +976,8 @@ export function perceivedCost(
 
 /**
  * HK night-bus short names: N182, NA11, N8X, N960P, …
- * Does not match company code "NLB" (no digit after N + optional letter).
+ * Does not match company code "NLB" (no digit after N + optional letter),
+ * nor residents' services (NR330 etc. are RBS, not overnight routes).
  */
 export function isNightBusRouteName(name?: string | null): boolean {
   const s = String(name || "")
@@ -980,8 +985,8 @@ export function isNightBusRouteName(name?: string | null): boolean {
     .toUpperCase();
   if (!s) return false;
   // Bare short name, or embedded after agency/id separators (KMB-N182, …/N11)
-  if (/^N([A-Z]?\d)/.test(s)) return true;
-  if (/(?:^|[^A-Z0-9])N([A-Z]?\d)/.test(s)) return true;
+  if (/^N(?!R\d)[A-Z]?\d/.test(s)) return true;
+  if (/(?:^|[^A-Z0-9])N(?!R\d)[A-Z]?\d/.test(s)) return true;
   return false;
 }
 

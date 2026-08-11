@@ -17,7 +17,7 @@ export const DATA_CACHE_STORAGE_KEY = "morgan.dataCache";
 export const DATA_UPDATED_AT_STORAGE_KEY = "morgan.dataUpdatedAt";
 
 /** @typedef {"fastest" | "simplest" | "cheapest"} RoutePreference */
-/** @typedef {"kmb_lwb" | "ctb" | "nlb" | "gmb"} BusCompanyId */
+/** @typedef {"kmb_lwb" | "ctb" | "nlb" | "gmb" | "mtr_bus" | "rbs"} BusCompanyId */
 /** @typedef {"bus" | "gmb" | "lrt" | "mtr" | "walk" | "ael"} TrafficMethodId */
 /** @typedef {"usual" | "holiday"} ServiceDayId */
 /** @typedef {"now" | string} DepartTimeValue  "now" or "HH:MM" */
@@ -43,6 +43,8 @@ export const BUS_COMPANIES = [
   { id: "ctb", label: "CTB" },
   { id: "nlb", label: "NLB" },
   { id: "gmb", label: "GMB" },
+  { id: "mtr_bus", label: "MTR Bus" },
+  { id: "rbs", label: "RBS" },
 ];
 
 /** @type {{ id: TrafficMethodId, label: string }[]} */
@@ -377,7 +379,17 @@ export function loadBusCompanies() {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         const list = parsed.filter(isBusCompany);
-        if (list.length) return [...new Set(list)];
+        if (list.length) {
+          const uniq = [...new Set(list)];
+          // Migration: the old four-company list was the default "all" — keep
+          // MTR Bus + RBS enabled for those users instead of silently dropping
+          // the newly added companies from their plans.
+          const LEGACY_ALL = ["kmb_lwb", "ctb", "nlb", "gmb"];
+          if (LEGACY_ALL.every((id) => uniq.includes(id))) {
+            return BUS_COMPANIES.map((c) => c.id);
+          }
+          return uniq;
+        }
       }
     }
   } catch {
@@ -533,20 +545,20 @@ export function formatTrafficMethodsLabel(methods) {
 
 /**
  * Classify a transit option into a bus company id (or null if not bus/GMB).
- * @param {{ agency?: { id?: string, name?: string }, mode?: string } | null | undefined} opt
+ * @param {{ agency?: { id?: string, name?: string }, mode?: string, route_short_name?: string } | null | undefined} opt
  * @returns {BusCompanyId | null}
  */
 export function classifyBusCompany(opt) {
   if (!opt) return null;
+  // Residents' Bus Services (NR / DB routes) — a route-level class that wins
+  // over the operator: NR61/NR88 are CTB-operated but still RBS services.
+  if (/^(NR|DB)\d/i.test(String(opt.route_short_name || ""))) return "rbs";
   const blob = `${opt.agency?.id || ""} ${opt.agency?.name || ""}`.toLowerCase();
   if (/gmb|green\s*mini|minibus|專線|专线/.test(blob)) return "gmb";
   if (/\bnlb\b|new\s*lanto/.test(blob)) return "nlb";
   if (/\bctb\b|citybus|nwfb|new\s*world/.test(blob)) return "ctb";
-  if (
-    /\bkmb\b|lwb|long\s*win|kowloon\s*motor|lrt\s*feeder|mtr\s*bus|港鐵巴士/.test(
-      blob,
-    )
-  ) {
+  if (/\bmtrb\b|mtr\s*bus|港鐵巴士/.test(blob)) return "mtr_bus";
+  if (/\bkmb\b|lwb|long\s*win|kowloon\s*motor|lrt\s*feeder/.test(blob)) {
     return "kmb_lwb";
   }
   const mode = String(opt.mode || "").toLowerCase();

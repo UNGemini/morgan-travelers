@@ -472,11 +472,14 @@ export function injectShuttlePlans(query, existingPlans = []) {
 /**
  * Companies present on a route option (joint ops).
  * @param {object} [opt]
- * @returns {string[]} preference ids: ctb | kmb_lwb | nlb | gmb
+ * @returns {string[]} preference ids: ctb | kmb_lwb | nlb | gmb | mtr_bus | rbs
  */
 export function routeOptionCompanyIds(opt) {
   /** @type {Set<string>} */
   const out = new Set();
+  // Residents' Bus Services are one route-level class even when operated by
+  // CTB (NR61/NR88) — never split them by agency.
+  if (/^(NR|DB)\d/i.test(String(opt?.route_short_name || ""))) return ["rbs"];
   const agencies = [
     ...(Array.isArray(opt?.agencies) ? opt.agencies : []),
     opt?.agency?.id,
@@ -489,6 +492,7 @@ export function routeOptionCompanyIds(opt) {
     if (/\bkmb\b|lwb|long\s*win|kowloon\s*motor/.test(b)) out.add("kmb_lwb");
     if (/\bnlb\b|new\s*lanto/.test(b)) out.add("nlb");
     if (/gmb|minibus|專線/.test(b)) out.add("gmb");
+    if (/\bmtrb\b|mtr\s*bus/.test(b)) out.add("mtr_bus");
   }
   // "CTB / KMB (joint)" style name
   const blob = `${opt?.agency?.name || ""} ${opt?.route_long_name || ""}`;
