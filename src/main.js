@@ -14229,11 +14229,11 @@ async function updateDataCacheStatus() {
     const { keys, bytes } = await dataCacheStats();
     if (details) {
       // Same label/value style as the Dataset status card above
-      details.innerHTML = `<div><dt>Data cache</dt><dd>${keys} assets · ${(bytes / 1048576).toFixed(1)} MB</dd></div>`;
+      details.innerHTML = `<div><dt>Cache</dt><dd>${keys} assets · ${(bytes / 1048576).toFixed(1)} MB</dd></div>`;
       details.hidden = false;
       el.hidden = true;
     } else {
-      showStatus(`Data cache: ${keys} assets · ${(bytes / 1048576).toFixed(1)} MB`);
+      showStatus(`Cache: ${keys} assets · ${(bytes / 1048576).toFixed(1)} MB`);
     }
   } catch {
     showStatus("Data cache: unavailable");

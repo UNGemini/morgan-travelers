@@ -973,62 +973,6 @@
             <!-- Page: Settings -->
             <div id="sidebar-page-settings" class="sidebar-page" hidden>
               <div class="panel-page-scroll" id="settings-page-body">
-<section class="panel-section">
-              <h3>Dataset status</h3>
-              <p id="meta-status" class="status-line">Checking edge metadata…</p>
-              <dl id="meta-details" class="meta-grid" hidden></dl>
-            </section>
-            <section class="panel-section">
-              <h3>Downloads</h3>
-              <div class="btn-stack">
-                <button
-                  type="button"
-                  id="btn-download-gtfs"
-                  class="btn btn-ghost"
-                  data-acrylic
-                  disabled
-                >
-                  <span class="btn-row">
-                    <span class="material-symbols-outlined" aria-hidden="true">folder_zip</span>
-                    Download GTFS
-                  </span>
-                  <span class="btn-sub" id="gtfs-size-label">—</span>
-                </button>
-                <button
-                  type="button"
-                  id="btn-download-pmtiles"
-                  class="btn btn-ghost"
-                  data-acrylic
-                  disabled
-                >
-                  <span class="btn-row">
-                    <span class="material-symbols-outlined" aria-hidden="true">map</span>
-                    Download PMTiles
-                  </span>
-                  <span class="btn-sub" id="pmtiles-size-label">—</span>
-                </button>
-                <a
-                  id="link-metadata"
-                  class="btn btn-ghost"
-                  data-acrylic
-                  href="https://hk-gtfsdata.morgandev.cc/metadata.json"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <span class="btn-row">
-                    <span class="material-symbols-outlined" aria-hidden="true">data_object</span>
-                    Open metadata.json
-                  </span>
-                </a>
-              </div>
-            </section>
-            <section class="panel-section">
-              <h3>Map</h3>
-              <p class="hint">
-                Vector basemap <code>hongkong.pmtiles</code> · WASM RAPTOR
-                <code>hk.wheelsrouter</code>
-              </p>
-            </section>
             <section class="panel-section" id="settings-fare-section">
               <h3>Fare</h3>
               <p class="hint">
@@ -1140,6 +1084,62 @@
                     Fetch the full dataset for offline use. This will be the main data source if preferred in the “Prefer data source” setting above.
                 </p>
               </div>
+            </section>
+<section class="panel-section">
+              <h3>Dataset status</h3>
+              <p id="meta-status" class="status-line">Checking edge metadata…</p>
+              <dl id="meta-details" class="meta-grid" hidden></dl>
+            </section>
+            <section class="panel-section">
+              <h3>Downloads</h3>
+              <div class="btn-stack">
+                <button
+                  type="button"
+                  id="btn-download-gtfs"
+                  class="btn btn-ghost"
+                  data-acrylic
+                  disabled
+                >
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">folder_zip</span>
+                    Download GTFS
+                  </span>
+                  <span class="btn-sub" id="gtfs-size-label">—</span>
+                </button>
+                <button
+                  type="button"
+                  id="btn-download-pmtiles"
+                  class="btn btn-ghost"
+                  data-acrylic
+                  disabled
+                >
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">map</span>
+                    Download PMTiles
+                  </span>
+                  <span class="btn-sub" id="pmtiles-size-label">—</span>
+                </button>
+                <a
+                  id="link-metadata"
+                  class="btn btn-ghost"
+                  data-acrylic
+                  href="https://hk-gtfsdata.morgandev.cc/metadata.json"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <span class="btn-row">
+                    <span class="material-symbols-outlined" aria-hidden="true">data_object</span>
+                    Open metadata.json
+                  </span>
+                </a>
+              </div>
+            </section>
+            <section class="panel-section">
+              <h3>Map</h3>
+              <p class="hint">
+                Vector basemap <code>hongkong.pmtiles</code> · WASM RAPTOR
+                <code>hk.wheelsrouter</code>
+              </p>
             </section>
               </div>
             </div>
