@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from "vite";
 
 import fs from "node:fs";
+import https from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -766,6 +767,32 @@ function crossOriginIsolation() {
         next();
       });
       server.middlewares.use(overridesApiMiddleware);
+      // vite preview does not run `server.proxy` — mirror the /edge proxy so
+      // the PMTiles basemap / graph fetch work identically to production.
+      server.middlewares.use("/edge", (req, res) => {
+        const target = "https://hk-gtfsdata.morgandev.cc";
+        const upstream = https.request(
+          {
+            host: new URL(target).host,
+            path: (req.url || "/").replace(/^\/edge/, "") || "/",
+            method: req.method,
+            headers: { ...req.headers, host: new URL(target).host },
+          },
+          (upRes) => {
+            upRes.headers["cross-origin-resource-policy"] = "cross-origin";
+            upRes.headers["access-control-allow-origin"] = "*";
+            // Keep .pmtiles/.gz edge objects raw — no HTTP Content-Encoding
+            delete upRes.headers["content-encoding"];
+            res.writeHead(upRes.statusCode || 502, upRes.headers);
+            upRes.pipe(res);
+          },
+        );
+        upstream.on("error", () => {
+          res.writeHead(502, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "edge proxy unavailable" }));
+        });
+        req.pipe(upstream);
+      });
     },
   };
 }

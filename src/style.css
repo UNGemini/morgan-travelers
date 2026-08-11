@@ -2,6 +2,23 @@
    MORGAN Travelers — Acrylic UI (aligned with morgandev.cc)
    ================================================================ */
 
+/* DEV-only banner — only ever shown by vite dev servers; the preview/
+   production build never renders it. Warns that the SW (and thus the
+   data cache) is disabled on dev ports like 5173/5174. */
+#dev-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  padding: 6px 12px;
+  background: rgba(160, 30, 30, 0.92);
+  color: #fff;
+  font: 500 12px/1.4 var(--font);
+  text-align: center;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+
 /* ── Design tokens (from Morgandev acrylic.css) ─────────────── */
 :root {
   color-scheme: dark;

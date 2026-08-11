@@ -58,6 +58,8 @@ import {
   isDepartTimeHm,
   parseDepartTimeHm,
   hongKongHmString,
+  loadDataCachePref,
+  saveDataCachePref,
 } from "./preferences.js";
 import { resolveRouteColor } from "./mtrColors.js";
 import {
@@ -210,6 +212,17 @@ const HK_CENTER = [114.1694, 22.3193];
 const DEFAULT_ZOOM = 11;
 
 // ── DOM ──────────────────────────────────────────────────────────────────────
+
+// Dev servers deliberately unregister the service worker, so the data cache
+// can never work there — flag the tab so it can't be mistaken for preview.
+if (import.meta.env.DEV) {
+  const banner = document.getElementById("dev-banner");
+  if (banner) {
+    banner.textContent = `DEV MODE — port ${location.port}: service worker disabled, no data cache. Use "npm run preview" (port 4173) to test caching.`;
+    banner.hidden = false;
+  }
+}
+
 const els = {
   app: document.getElementById("app"),
   metaStatus: document.getElementById("meta-status"),
@@ -2910,6 +2923,21 @@ function initFareTypeUi() {
   });
 }
 initFareTypeUi();
+
+function initDataCacheUi() {
+  const on = document.getElementById("data-cache-on");
+  const off = document.getElementById("data-cache-off");
+  if (!on || !off) return;
+  (loadDataCachePref() ? on : off).checked = true;
+  const sync = () => {
+    const next = saveDataCachePref(on.checked);
+    notifyDataCachePref();
+    showToast(`Data cache ${next ? "enabled" : "disabled"}`, 1800);
+  };
+  on.addEventListener("change", sync);
+  off.addEventListener("change", sync);
+}
+initDataCacheUi();
 
 function initEalFirstClassUi() {
   ealFirstClass = loadEalFirstClass();
@@ -10715,6 +10743,82 @@ function projectStopsOntoLineMonotonic(lineCoords, named) {
 }
 
 /**
+ * Project lon/lat onto segment a→b (equirectangular, metres) — returns the
+ * projected point and distance.
+ * @param {number[]} a
+ * @param {number[]} b
+ * @param {number} lon
+ * @param {number} lat
+ */
+function projectLonLatOnSegment(a, b, lon, lat) {
+  const cos = Math.cos((((a[1] + b[1] + lat) / 3) * Math.PI) / 180);
+  const ax = a[0] * cos;
+  const ay = a[1];
+  const bx = b[0] * cos;
+  const by = b[1];
+  const px = lon * cos;
+  const py = lat;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1e-12) return null;
+  let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  const qlon = a[0] + (b[0] - a[0]) * t;
+  const qlat = a[1] + (b[1] - a[1]) * t;
+  const dLat = (lat - qlat) * (Math.PI / 180);
+  const dLon = (lon - qlon) * (Math.PI / 180);
+  return {
+    lon: qlon,
+    lat: qlat,
+    d: 6371000 * Math.hypot(dLat, dLon * Math.cos((lat * Math.PI) / 180)),
+  };
+}
+
+/**
+ * Cut a decimated polyline exactly at the board stop: the monotonic vertex
+ * index vi gives the corridor position; the cut point is the segment-level
+ * projection onto the adjacent segments, so the grey boundary lands on the
+ * stop instead of the nearest (~100 m+) vertex. Falls back to null when the
+ * vertex anchor is poor.
+ * @param {number[][]} lineCoords
+ * @param {number} vi
+ * @param {{ lon?: number, lat?: number }} stop
+ * @returns {{ passed: number[][], remaining: number[][] } | null}
+ */
+function refineEtaCutAtStop(lineCoords, vi, stop) {
+  if (!lineCoords?.length || !stop) return null;
+  let best = null;
+  for (const [a, b] of [
+    [vi - 1, vi],
+    [vi, vi + 1],
+  ]) {
+    if (a < 0 || b >= lineCoords.length) continue;
+    const ca = lineCoords[a];
+    const cb = lineCoords[b];
+    if (!ca || !cb || !Number.isFinite(ca[0]) || !Number.isFinite(cb[0])) {
+      continue;
+    }
+    const p = projectLonLatOnSegment(ca, cb, stop.lon, stop.lat);
+    if (p && (!best || p.d < best.d)) best = { ...p, a, b };
+  }
+  if (!best || best.d > 400) return null;
+  const pt = [best.lon, best.lat];
+  if (best.b === vi) {
+    // pt between vertex vi-1 and vi → boundary before vertex vi
+    return {
+      passed: lineCoords.slice(0, vi).concat([pt]),
+      remaining: [pt].concat(lineCoords.slice(vi)),
+    };
+  }
+  // pt between vertex vi and vi+1 → boundary after vertex vi
+  return {
+    passed: lineCoords.slice(0, vi + 1).concat([pt]),
+    remaining: [pt].concat(lineCoords.slice(vi + 1)),
+  };
+}
+
+/**
  * Split full route polyline at the selected board stop (same idea as list is-before).
  * Circular-safe: revisits use monotonic projection, not nearest-first.
  * @param {number[][]} lineCoords
@@ -10747,7 +10851,11 @@ function splitEtaLineAtBoard(lineCoords, stops, boardIndex) {
 
   // Dense path (circular-safe): project every stop forward, cut at board visit
   const verts = projectStopsOntoLineMonotonic(lineCoords, named);
-  const vi = verts[bi] ?? nearestLineVertexIndex(lineCoords, named[bi].lon, named[bi].lat);
+  const vi =
+    verts[bi] ??
+    nearestLineVertexIndex(lineCoords, named[bi].lon, named[bi].lat);
+  const cut = refineEtaCutAtStop(lineCoords, vi, named[bi]);
+  if (cut) return cut;
   return {
     passed: lineCoords.slice(0, vi + 1),
     remaining: lineCoords.slice(vi),
@@ -11593,11 +11701,10 @@ async function paintEtaRouteOnMap(route, stops, opts = {}) {
   /** @type {number[][]} */
   let lineCoords = [];
 
-  const isRail =
-    route.kind === "mtr" || route.kind === "lrt" || route.kind === "mtr_bus";
+  // Rail: ordered stop chords + basemap rail snap (official sequences).
+  // Bus / MTR Bus share the trip-plan path: overrides → GTFS shapes → OSRM.
+  const isRail = route.kind === "mtr" || route.kind === "lrt";
 
-  // Bus: trip-plan path (contributed shapes + OSRM densify)
-  // Rail / MTR Bus: prefer ordered stop chords first (official sequences)
   if (!isRail) {
     try {
       const poly = await buildTransitPolyline(opt);
@@ -11662,6 +11769,12 @@ async function paintEtaRouteOnMap(route, stops, opts = {}) {
 
   // Official stop sequence as polyline (always works when stops loaded)
   if (lineCoords.length < 2) {
+    console.warn(
+      "[eta] no densified path for",
+      route.co || route.kind,
+      route.id,
+      "— stop chords",
+    );
     lineCoords = (stops || [])
       .filter((s) => Number.isFinite(s.lon) && Number.isFinite(s.lat) && !s._polylineOnly)
       .map((s) => [s.lon, s.lat]);
@@ -12509,6 +12622,24 @@ async function showEtaRouteDetailsPanel() {
   // Load stops first; draw path after board index is known (grey = already passed)
   try {
     setMapRouteLoading(true, `Loading ${coLabel} ${route.id}…`);
+    // Prefetch the GTFS bus-shape file in parallel with the operator stop
+    // sequence, so the map line paints as soon as stops arrive (previously
+    // the shape fetch only started after stops had loaded).
+    if (route.kind === "bus" || route.kind === "mtr_bus") {
+      try {
+        const { preloadGtfsBusShape } = await import("./routeShapes.js");
+        const coPre = String(
+          route.co || (route.kind === "mtr_bus" ? "LRTFEEDER" : "KMB"),
+        ).toUpperCase();
+        void preloadGtfsBusShape({
+          route_id: `${coPre}-${route.id}`,
+          route_short_name: String(route.id || ""),
+          agency: { id: coPre, name: coPre },
+        });
+      } catch {
+        /* best-effort — paint path falls back to OSRM */
+      }
+    }
     // When switching Opposite, reload stops for the active bound
     const stops = await loadEtaRouteStops(route);
     if (gen !== etaShapeGen) return;
@@ -13071,6 +13202,7 @@ els.btnSettings?.addEventListener("click", (e) => {
   e.stopPropagation();
   closeProfileMenu();
   setSidebarPage("settings");
+  void updateDataCacheStatus();
 });
 els.btnInfo?.addEventListener("click", (e) => {
   e.stopPropagation();
@@ -13434,7 +13566,7 @@ loadManifest().catch((err) => {
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
     // Query-bust so browsers re-fetch sw.js even when an old cache-first SW is live
-    const swUrl = `${import.meta.env.BASE_URL}sw.js?v=11`;
+    const swUrl = `${import.meta.env.BASE_URL}sw.js?v=12`;
     let refreshing = false;
     const reloadOnce = () => {
       if (refreshing) return;
@@ -13454,6 +13586,7 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
     navigator.serviceWorker
       .register(swUrl)
       .then((reg) => {
+        console.info("[sw] registered", reg.scope);
         const kick = () => {
           try {
             reg.update();
@@ -13467,6 +13600,8 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
           }
         };
         kick();
+        // Data cache is opt-in — sync the toggle state into the SW
+        notifyDataCachePref();
         // Standalone often stays warm — re-check when returning to the app
         document.addEventListener("visibilitychange", () => {
           if (document.visibilityState === "visible") kick();
@@ -13488,8 +13623,8 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
           });
         });
       })
-      .catch(() => {
-        /* optional */
+      .catch((err) => {
+        console.warn("[sw] register failed", err);
       });
   });
 } else if ("serviceWorker" in navigator) {
@@ -13497,6 +13632,57 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
   navigator.serviceWorker.getRegistrations?.().then((regs) => {
     regs.forEach((r) => r.unregister());
   });
+}
+
+/** Tell the service worker the current data-cache preference (safe when absent). */
+function notifyDataCachePref() {
+  const enabled = loadDataCachePref();
+  try {
+    navigator.serviceWorker?.controller?.postMessage({
+      type: "DATA_CACHE_PREF",
+      enabled,
+    });
+  } catch {
+    /* ignore */
+  }
+  return enabled;
+}
+
+/**
+ * Report the SW data cache (Settings → Data cache status line).
+ * Cache name must stay in sync with public/sw.js DATA_CACHE.
+ */
+async function updateDataCacheStatus() {
+  const el = document.getElementById("data-cache-status");
+  if (!el) return;
+  const sw = "serviceWorker" in navigator ? navigator.serviceWorker : null;
+  try {
+    const controlled = !!sw?.controller;
+    const reg = sw ? await sw.getRegistration() : null;
+    if (!("caches" in window) || !controlled) {
+      const state = loadDataCachePref() ? "inactive" : "off";
+      const why = !sw
+        ? "service worker unsupported"
+        : reg
+          ? "service worker registered but not controlling — reload once"
+          : "no service worker registered (dev mode or registration blocked)";
+      el.textContent = `Data cache: ${state} — ${why}`;
+      return;
+    }
+    const cache = await caches.open("mtravelers-data-v1");
+    const keys = await cache.keys();
+    let bytes = 0;
+    for (const req of keys) {
+      const res = await cache.match(req);
+      const len = Number(res?.headers?.get("content-length") || 0);
+      if (Number.isFinite(len) && len > 0) bytes += len;
+    }
+    el.textContent = `Data cache: ${keys.length} assets · ${(
+      bytes / 1048576
+    ).toFixed(1)} MB`;
+  } catch {
+    el.textContent = "Data cache: unavailable";
+  }
 }
 
 // Debug / E2E: expose map + stop helpers on window

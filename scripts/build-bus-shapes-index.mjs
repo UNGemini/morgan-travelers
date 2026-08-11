@@ -1,0 +1,410 @@
+/**
+ * Build a compact per-agency bus shape index from the published GTFS.
+ *
+ * Source: hk.gtfs.zip on the edge data plane (DATA_PUBLIC_BASE_URL).
+ * Output: public/data/bus-shapes/ (index.json + one compact JSON per agency).
+ *
+ * Why: the WASM routing graph drops geometry, so bus legs were previously
+ * densified with OSRM (car profile) — which misses bus-only terminal roads,
+ * snaps terminal stops to the wrong adjacent terminal, or picks a parallel
+ * wrong road. The GTFS shapes.txt contains the real operator polylines
+ * (incl. terminal loops) and is served lazily to the frontend instead.
+ *
+ * Encoding (keeps the index small enough to commit + lazy-fetch):
+ *   coordinates → flat int array: [lon0e5, lat0e5, dLon1, dLat1, ...]
+ *   (absolute first point at 1e-5 deg ≈ 1.1 m, then integer deltas).
+ *
+ * Usage:
+ *   node scripts/build-bus-shapes-index.mjs            # download + build
+ *   node scripts/build-bus-shapes-index.mjs --zip out/hk.gtfs.zip
+ * Env: DATA_PUBLIC_BASE_URL (default https://hk-gtfsdata.morgandev.cc)
+ */
+
+import { spawn, spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import { mkdirSync, existsSync, statSync } from "node:fs";
+import { createInterface } from "node:readline";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const OUT_DIR = join(ROOT, "public", "data", "bus-shapes");
+const DEFAULT_URL =
+  `${process.env.DATA_PUBLIC_BASE_URL || "https://hk-gtfsdata.morgandev.cc"}` +
+  "/hk.gtfs.zip";
+const TMP_ZIP = join(ROOT, "artifacts", "bus-shapes", "hk.gtfs.zip");
+
+/** Max entries kept per (route, direction) — branching variants */
+const MAX_SHAPES_PER_DIR = 3;
+/**
+ * Safety cap for one shape's point count AFTER decimation. Long trunk routes
+ * (cross-harbour / airport) exceed the old 20k cap and were dropped whole,
+ * losing exactly the popular routes. At 3 m decimation a 45 km route stays
+ * under 20k points, so 100k only catches pathological traces.
+ */
+const MAX_POINTS_PER_SHAPE = 100_000;
+/**
+ * Streamed decimation spacing in metres — feed shapes are 1-2 m dense.
+ * Skipping points < 3 m apart bounds memory; the 6 m Douglas-Peucker pass
+ * downstream is unaffected for display geometry.
+ */
+const DECIMATE_EPS_M = Number(process.env.SHAPE_DECIMATE_M || 3);
+/** 1e-5 deg ≈ 1.1 m — plenty for display geometry */
+const SCALE = 1e5;
+/** Douglas-Peucker tolerance in metres (feed shapes are 2-3 m dense) */
+const SIMPLIFY_M = Number(process.env.SHAPE_SIMPLIFY_M || 6);
+
+// ── CLI ─────────────────────────────────────────────────────────────────────
+
+const args = process.argv.slice(2);
+const zipArg = args.find((a) => a.startsWith("--zip="))?.slice(6);
+const outArg = args.find((a) => a.startsWith("--out="))?.slice(6);
+const zipPath = zipArg || (existsSync(TMP_ZIP) ? TMP_ZIP : null);
+const outDir = outArg || OUT_DIR;
+
+// ── helpers ─────────────────────────────────────────────────────────────────
+
+function checkUnzip() {
+  const r = spawnSync("unzip", ["-v"], { stdio: "ignore" });
+  if (r.error || r.status !== 0) {
+    console.error(
+      "[bus-shapes] `unzip` not found — install it (macOS: bundled; CI: apt-get install unzip)",
+    );
+    process.exit(1);
+  }
+}
+
+/** Minimal GTFS CSV row parser (handles quoted fields + CRLF). */
+async function* csvRows(stream) {
+  const rl = createInterface({ input: stream, crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (!line) continue;
+    const row = [];
+    let cur = "";
+    let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQ) {
+        if (ch === '"') {
+          if (line[i + 1] === '"') {
+            cur += '"';
+            i++;
+          } else inQ = false;
+        } else cur += ch;
+      } else if (ch === '"') inQ = true;
+      else if (ch === ",") {
+        row.push(cur);
+        cur = "";
+      } else cur += ch;
+    }
+    row.push(cur);
+    yield row;
+  }
+}
+
+/** Stream one table out of the zip as parsed rows. */
+async function* zipCsvRows(zipPath, member) {
+  const child = spawn("unzip", ["-p", zipPath, member], {
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  try {
+    yield* csvRows(child.stdout);
+  } finally {
+    child.kill();
+  }
+}
+
+/** Sanitize an agency id to a safe file name. */
+function agencyKey(id) {
+  const k = String(id || "").toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
+  return k || "default";
+}
+
+/**
+ * Douglas-Peucker simplification in metres (equirectangular local approx).
+ * Keeps terminal loops (they turn sharply) while dropping dense straight runs.
+ * @param {number[][]} pts [lon, lat] pairs
+ * @param {number} tolM
+ * @returns {number[][]}
+ */
+function simplifyPathM(pts, tolM) {
+  if (pts.length < 3) return pts;
+  const cosLat = Math.cos(
+    (((pts[0][1] + pts[pts.length - 1][1]) / 2) * Math.PI) / 180,
+  );
+  const mLat = 111320;
+  const mLon = 111320 * cosLat;
+  /** @type {Uint8Array} */
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  /** @type {Array<[number, number]>} */
+  const stack = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    if (b - a < 2) continue;
+    const ax = pts[a][0];
+    const ay = pts[a][1];
+    const dx = (pts[b][0] - ax) * mLon;
+    const dy = (pts[b][1] - ay) * mLat;
+    const len2 = dx * dx + dy * dy;
+    let maxD = 0;
+    let idx = -1;
+    for (let i = a + 1; i < b; i++) {
+      const px = (pts[i][0] - ax) * mLon;
+      const py = (pts[i][1] - ay) * mLat;
+      let t = len2 < 1e-9 ? 0 : (px * dx + py * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+      const d = Math.hypot(px - t * dx, py - t * dy);
+      if (d > maxD) {
+        maxD = d;
+        idx = i;
+      }
+    }
+    if (maxD > tolM && idx > 0) {
+      keep[idx] = 1;
+      stack.push([a, idx], [idx, b]);
+    }
+  }
+  const out = [];
+  for (let i = 0; i < pts.length; i++) if (keep[i]) out.push(pts[i]);
+  return out;
+}
+
+// ── main ────────────────────────────────────────────────────────────────────
+
+async function downloadZip() {
+  if (existsSync(TMP_ZIP)) {
+    console.log(`[bus-shapes] using cached ${TMP_ZIP} (${statSync(TMP_ZIP).size} bytes)`);
+    return TMP_ZIP;
+  }
+  console.log(`[bus-shapes] downloading ${DEFAULT_URL} …`);
+  mkdirSync(dirname(TMP_ZIP), { recursive: true });
+  const res = await fetch(DEFAULT_URL, {
+    headers: { "User-Agent": "MORGAN-Travelers/0.4 (bus-shapes-build)" },
+  });
+  if (!res.ok) throw new Error(`GTFS download failed: ${res.status}`);
+  const total = Number(res.headers.get("content-length")) || 0;
+  let got = 0;
+  const out = [];
+  const reader = res.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    out.push(value);
+    got += value.length;
+    if (total) {
+      process.stdout.write(
+        `\r[bus-shapes] ${Math.round((got / total) * 100)}% (${(got / 1e6).toFixed(1)}/${(total / 1e6).toFixed(1)} MB)`,
+      );
+    }
+  }
+  process.stdout.write("\n");
+  writeFileSync(TMP_ZIP, Buffer.concat(out));
+  console.log(`[bus-shapes] saved ${TMP_ZIP} (${got} bytes)`);
+  return TMP_ZIP;
+}
+
+async function main() {
+  checkUnzip();
+  const zip = zipPath || (await downloadZip());
+  console.log(`[bus-shapes] parsing ${zip}`);
+
+  // routes.txt: route_id → { agency, short }
+  /** @type {Map<string, { agency: string, short: string }>} */
+  const routes = new Map();
+  let head = true;
+  for await (const row of zipCsvRows(zip, "routes.txt")) {
+    if (head) {
+      head = false;
+      continue;
+    }
+    if (!row[0]) continue;
+    routes.set(row[0], {
+      agency: agencyKey(row[1] ?? ""),
+      short: String(row[2] ?? "").trim(),
+    });
+  }
+  console.log(`[bus-shapes] routes.txt: ${routes.size} routes`);
+
+  // trips.txt: (route_id, direction, shape_id) → headsigns, trip count
+  /** @type {Map<string, { headsigns: Set<string>, trips: number }>} */
+  const tripGroups = new Map();
+  head = true;
+  for await (const row of zipCsvRows(zip, "trips.txt")) {
+    if (head) {
+      head = false;
+      continue;
+    }
+    const [routeId, , , dirRaw, headsign, shapeId] = row;
+    if (!routeId || !shapeId) continue;
+    const key = `${routeId}\u0000${dirRaw ?? "0"}\u0000${shapeId}`;
+    let g = tripGroups.get(key);
+    if (!g) {
+      g = { headsigns: new Set(), trips: 0 };
+      tripGroups.set(key, g);
+    }
+    g.trips++;
+    if (headsign) g.headsigns.add(String(headsign).trim());
+  }
+  console.log(`[bus-shapes] trips.txt: ${tripGroups.size} shape groups`);
+
+  // shapes.txt: shape_id → points (streamed; could be 10M+ rows)
+  /** @type {Map<string, number[][]>} */
+  const shapes = new Map();
+  head = true;
+  for await (const row of zipCsvRows(zip, "shapes.txt")) {
+    if (head) {
+      head = false;
+      continue;
+    }
+    const [shapeId, latRaw, lonRaw] = row;
+    if (!shapeId) continue;
+    const lat = Number(latRaw);
+    const lon = Number(lonRaw);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    let pts = shapes.get(shapeId);
+    if (!pts) {
+      pts = [];
+      shapes.set(shapeId, pts);
+    }
+    // Streamed decimation: the feed samples shapes at 1-2 m, so long trunk
+    // routes previously blew the point cap and were dropped whole (losing
+    // their terminal loops). Keeping points ≥ DECIMATE_EPS_M apart bounds
+    // memory and the 6 m DP pass still produces identical display geometry.
+    if (pts.length) {
+      const last = pts[pts.length - 1];
+      const cosLat = Math.cos((((last[1] + lat) / 2) * Math.PI) / 180);
+      const dLon = (lon - last[0]) * 111320 * cosLat;
+      const dLat = (lat - last[1]) * 111320;
+      if (dLon * dLon + dLat * dLat < DECIMATE_EPS_M * DECIMATE_EPS_M) {
+        continue;
+      }
+    }
+    if (pts.length >= MAX_POINTS_PER_SHAPE) continue;
+    pts.push([lon, lat]);
+  }
+  console.log(`[bus-shapes] shapes.txt: ${shapes.size} shapes (simplify ${SIMPLIFY_M} m)`);
+
+  // Group per (route, direction), keep representative shapes (most trips)
+  /** @type {Map<string, Map<string, Array<{ shapeId: string, pts: number[][], headsigns: string[], trips: number }>>>> */
+  const byRouteDir = new Map();
+  for (const [key, g] of tripGroups) {
+    const [routeId, dir, shapeId] = key.split("\u0000");
+    const pts = shapes.get(shapeId);
+    // Drop shapes that hit the point cap — they were truncated mid-route and
+    // would lose their terminal loop; better to fall back to OSRM for them.
+    if (!pts || pts.length < 3 || pts.length >= MAX_POINTS_PER_SHAPE) continue;
+    let dirs = byRouteDir.get(routeId);
+    if (!dirs) {
+      dirs = new Map();
+      byRouteDir.set(routeId, dirs);
+    }
+    let list = dirs.get(dir);
+    if (!list) {
+      list = [];
+      dirs.set(dir, list);
+    }
+    list.push({
+      shapeId,
+      pts,
+      headsigns: [...g.headsigns],
+      trips: g.trips,
+    });
+  }
+
+  /** @type {Map<string, object>} agency → file payload */
+  const agencies = new Map();
+  let routesIndexed = 0;
+  let shapesIndexed = 0;
+
+  for (const [routeId, dirs] of byRouteDir) {
+    const meta = routes.get(routeId);
+    const agency = meta?.agency || agencyKey(routeId.split("_")[0] || "");
+    const short = meta?.short || routeId;
+    let payload = agencies.get(agency);
+    if (!payload) {
+      payload = { routes: {} };
+      agencies.set(agency, payload);
+    }
+    const dirEntries = [];
+    for (const [dir, list] of dirs) {
+      const sorted = [...list]
+        .sort((a, b) => b.trips - a.trips)
+        .slice(0, MAX_SHAPES_PER_DIR);
+      for (const s of sorted) {
+        const pts = simplifyPathM(s.pts, SIMPLIFY_M);
+        if (pts.length < 3) continue;
+        const ints = [
+          Math.round(pts[0][0] * SCALE),
+          Math.round(pts[0][1] * SCALE),
+        ];
+        for (let i = 1; i < pts.length; i++) {
+          ints.push(
+            Math.round((pts[i][0] - pts[i - 1][0]) * SCALE),
+            Math.round((pts[i][1] - pts[i - 1][1]) * SCALE),
+          );
+        }
+        dirEntries.push({
+          d: String(dir),
+          h: s.headsigns.slice(0, 6),
+          c: ints,
+        });
+        shapesIndexed++;
+      }
+    }
+    if (!dirEntries.length) continue;
+    payload.routes[routeId] = {
+      sn: short,
+      shapes: dirEntries,
+    };
+    routesIndexed++;
+  }
+
+  // Write per-agency files + index
+  mkdirSync(outDir, { recursive: true });
+  const updatedAt = new Date().toISOString();
+  /** @type {Record<string, string>} */
+  const files = {};
+  /** @type {Record<string, string>} */
+  const routeFile = {};
+
+  for (const [agency, payload] of agencies) {
+    const file = `${agency}.json`;
+    writeFileSync(
+      join(outDir, file),
+      JSON.stringify({ v: 1, updated_at: updatedAt, routes: payload.routes }),
+    );
+    files[agency] = file;
+    for (const routeId of Object.keys(payload.routes)) {
+      routeFile[routeId.toUpperCase().replace(/\s+/g, "")] = agency;
+    }
+    console.log(
+      `[bus-shapes] ${file}: ${Object.keys(payload.routes).length} routes`,
+    );
+  }
+
+  writeFileSync(
+    join(outDir, "index.json"),
+    JSON.stringify({ v: 1, updated_at: updatedAt, files, route_file: routeFile }),
+  );
+
+  // Sanity + report
+  const totalBytes = [...agencies.keys()].reduce(
+    (acc, a) => acc + statSync(join(outDir, files[a])).size,
+    0,
+  );
+
+  console.log(
+    `\n[bus-shapes] done: ${routesIndexed} routes, ${shapesIndexed} shapes, ` +
+      `${agencies.size} agencies, ${(totalBytes / 1e6).toFixed(1)} MB → ${outDir}`,
+  );
+  if (routesIndexed === 0) {
+    console.error("[bus-shapes] no routes indexed — feed shape format changed?");
+    process.exit(1);
+  }
+}
+
+main().catch((e) => {
+  console.error("[bus-shapes] failed:", e?.message || e);
+  process.exit(1);
+});

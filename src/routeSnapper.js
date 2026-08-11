@@ -188,6 +188,23 @@ const OSRM_ABSURD_TOTAL_M = 80_000;
 /** Reject multi path if any original stop is farther than this from the line */
 const OSRM_MAX_STOP_SNAP_M = 140;
 
+// ── Terminal / endpoint approach guards ──────────────────────────────────────
+// OSRM (car profile) misses bus-only terminal roads and often ends the route
+// at the nearest drivable road — the wrong adjacent terminal or a parallel
+// wrong road. These guards verify the approach of the FIRST and LAST hop of a
+// leg against the straight board/alight chord; a path that fails is replaced
+// with a short chord straight to the stop pin (same fallback OSRM already uses
+// for rejected hops), so bus legs always reach their terminal stops.
+
+/** OSRM path must end within this of the terminal stop, else reject */
+const TERMINAL_MAX_END_SNAP_M = 140;
+/** Approach points may drift this far sideways off the stop chord */
+const TERMINAL_MAX_LATERAL_M = 95;
+/** Approach bearing may deviate this much from the chord bearing */
+const TERMINAL_MAX_BEARING_DEG = 70;
+/** Within this end error the approach is trusted without further checks */
+const TERMINAL_END_OK_M = 60;
+
 /**
  * Densify stop sequence via OSRM driving (road-following bus approx).
  * Proxied at /osrm for COEP. Detour-rejects bad airport/HZMB legs.
@@ -210,12 +227,16 @@ export async function densifyStopsViaOsrm(stops, opts = {}) {
   // Prefer one multi-waypoint request when the path stays near every stop
   try {
     const path = await osrmRoute(waypoints, opts.signal);
-    if (path.length >= 2 && osrmMultiPathPlausible(path, waypoints, stops)) {
+    if (
+      path.length >= 2 &&
+      osrmMultiPathPlausible(path, waypoints, stops) &&
+      osrmMultiPathTerminalsOk(path, waypoints)
+    ) {
       return path;
     }
     if (path.length >= 2) {
       console.warn(
-        "[routeSnapper] OSRM multi-waypoint rejected (detour / far from stops) — pair densify",
+        "[routeSnapper] OSRM multi-waypoint rejected (detour / far from stops / terminal approach) — pair densify",
       );
     }
   } catch (e) {
@@ -986,7 +1007,14 @@ async function densifyOsrmPairs(waypoints, signal) {
       if (e?.name === "AbortError") throw e;
       path = null;
     }
-    if (!path || !osrmHopPlausible(a, b, path)) {
+    const isFirstHop = i === 0;
+    const isLastHop = i === waypoints.length - 2;
+    const endOk = path
+      ? osrmHopPlausible(a, b, path) &&
+        (!isFirstHop || terminalApproachOk(path, a, b, false)) &&
+        (!isLastHop || terminalApproachOk(path, b, a, true))
+      : false;
+    if (!endOk) {
       if (path?.length >= 2) {
         console.warn(
           "[routeSnapper] OSRM hop rejected",
@@ -1061,6 +1089,89 @@ function osrmMultiPathPlausible(path, waypoints, allStops) {
     if (!n || n.error > OSRM_MAX_STOP_SNAP_M) return false;
   }
   return true;
+}
+
+/**
+ * Verify the approach of a multi-waypoint path into its FIRST/LAST waypoint:
+ * the path must actually reach the endpoint (not stop on a parallel wrong
+ * road) and the final segment must head toward it, not off sideways.
+ * @param {LngLat[]} path
+ * @param {Array<{ lon: number, lat: number }>} waypoints
+ */
+function osrmMultiPathTerminalsOk(path, waypoints) {
+  if (!waypoints?.length || !path?.length) return false;
+  if (waypoints.length >= 2) {
+    // Start approach: orient so the terminal sits at the path END.
+    const startTerm = waypoints[0];
+    const startRoad = waypoints[1];
+    if (!terminalApproachOk(path, startTerm, startRoad, false)) return false;
+    // End approach.
+    const endTerm = waypoints[waypoints.length - 1];
+    const endRoad = waypoints[waypoints.length - 2];
+    if (!terminalApproachOk(path, endTerm, endRoad, true)) return false;
+  }
+  return true;
+}
+
+/**
+ * Is the OSRM path's approach into `term` (from neighbour stop `road`)
+ * plausible? The last ~320 m of the approach must end near the terminal stop
+ * and stay close to the straight chord, with a matching final bearing.
+ * @param {LngLat[]} path
+ * @param {{ lon: number, lat: number }} term terminal stop
+ * @param {{ lon: number, lat: number }} road neighbouring stop
+ * @param {boolean} atEnd true = terminal at path end, false = at path start
+ */
+function terminalApproachOk(path, term, road, atEnd) {
+  const oriented = atEnd ? path : [...path].reverse();
+  const sub = tailOfPathM(oriented, 320);
+  if (!sub || sub.length < 2) return false;
+
+  const endPt = sub[sub.length - 1];
+  const endErr = haversineM(endPt.lat, endPt.lon, term.lat, term.lon);
+  if (endErr <= TERMINAL_END_OK_M) return true;
+  if (endErr > TERMINAL_MAX_END_SNAP_M) return false;
+
+  // Suspicious band: approach must hug the chord toward the stop.
+  if (maxLateralDeviationM(sub, road, term) > TERMINAL_MAX_LATERAL_M) {
+    return false;
+  }
+  const appBearing = bearingDeg(sub[sub.length - 2], endPt);
+  const chordBearing = bearingDeg(road, term);
+  let diff = Math.abs(appBearing - chordBearing);
+  if (diff > 180) diff = 360 - diff;
+  if (diff > TERMINAL_MAX_BEARING_DEG) return false;
+  return true;
+}
+
+/** Keep the tail of a polyline up to maxM metres (always includes the end). */
+function tailOfPathM(path, maxM) {
+  if (!path?.length) return [];
+  const out = [];
+  let acc = 0;
+  for (let i = path.length - 1; i >= 0; i--) {
+    out.unshift(path[i]);
+    if (i > 0) {
+      acc += haversineM(
+        path[i].lat,
+        path[i].lon,
+        path[i - 1].lat,
+        path[i - 1].lon,
+      );
+      if (acc >= maxM) break;
+    }
+  }
+  return out;
+}
+
+/** Max distance of any path point from the a→b straight chord. */
+function maxLateralDeviationM(path, a, b) {
+  let worst = 0;
+  for (const p of path) {
+    const d = distPointToLngLatSegmentM(p, a, b);
+    if (d > worst) worst = d;
+  }
+  return worst;
 }
 
 /**
@@ -1215,6 +1326,21 @@ export async function buildTransitPolyline(opt, opts = {}) {
       }
     } catch (e) {
       console.warn("[routeSnapper] bus shape override", e);
+    }
+  }
+
+  // GTFS operator polyline (real terminal loops) — lazy, cached, never throws
+  if ((!isRail && !isFerry) || opts.forceOsrm) {
+    try {
+      const { getGtfsBusShape } = await import("./routeShapes.js");
+      const gtfs = await getGtfsBusShape(opt, opts);
+      if (gtfs?.coords?.length >= 2) {
+        const poly = sliceRouteBetweenStops(gtfs.coords, stops);
+        if (poly?.length >= 2) return poly;
+      }
+    } catch (e) {
+      if (e?.name === "AbortError") throw e;
+      console.warn("[routeSnapper] GTFS bus shape", e);
     }
   }
 

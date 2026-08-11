@@ -11,6 +11,8 @@ export const TRAFFIC_METHOD_STORAGE_KEY = "morgan.trafficMethods";
 export const SERVICE_DAY_STORAGE_KEY = "morgan.serviceDay";
 /** "now" or "HH:MM" (24h local) */
 export const DEPART_TIME_STORAGE_KEY = "morgan.departTime";
+/** Service-worker data cache (router graph, fares, map data) */
+export const DATA_CACHE_STORAGE_KEY = "morgan.dataCache";
 
 /** @typedef {"fastest" | "simplest" | "cheapest"} RoutePreference */
 /** @typedef {"kmb_lwb" | "ctb" | "nlb" | "gmb"} BusCompanyId */
@@ -428,6 +430,33 @@ export function saveTrafficMethods(list) {
     /* ignore */
   }
   return out;
+}
+
+/**
+ * @returns {boolean} user opted into service-worker data caching (default on)
+ */
+export function loadDataCachePref() {
+  try {
+    const raw = localStorage.getItem(DATA_CACHE_STORAGE_KEY);
+    if (raw === "1" || raw === "0") return raw === "1";
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
+/**
+ * @param {boolean} v
+ * @returns {boolean}
+ */
+export function saveDataCachePref(v) {
+  const next = !!v;
+  try {
+    localStorage.setItem(DATA_CACHE_STORAGE_KEY, next ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+  return next;
 }
 
 /**
