@@ -5978,6 +5978,12 @@ html.pwa .offline-banner {
   box-shadow: var(--shadow);
   pointer-events: none;
 }
+/* Mobile: clear the bottom nav dock (toolbar + pills) instead of sitting on it */
+@media (max-width: 640px) {
+  .toast {
+    bottom: calc(var(--nav-dock-h, 74px) + 12px);
+  }
+}
 /* Slide up + fade in each time a toast appears */
 .toast:not([hidden]) {
   animation: toast-in 0.32s cubic-bezier(0.32, 0.72, 0, 1) both;
