@@ -461,6 +461,46 @@ export function saveDataCachePref(v) {
   return next;
 }
 
+/** Data-source preference for transit data: cloud (live, default) or local (downloaded copy). */
+export const DATA_SOURCE_STORAGE_KEY = "morgan.dataSource";
+
+/** @typedef {"cloud" | "local"} DataSourcePref */
+
+/**
+ * @param {unknown} v
+ * @returns {v is DataSourcePref}
+ */
+export function isDataSourcePref(v) {
+  return v === "cloud" || v === "local";
+}
+
+/**
+ * @returns {DataSourcePref}
+ */
+export function loadDataSourcePref() {
+  try {
+    const raw = localStorage.getItem(DATA_SOURCE_STORAGE_KEY);
+    if (isDataSourcePref(raw)) return raw;
+  } catch {
+    /* ignore */
+  }
+  return "cloud";
+}
+
+/**
+ * @param {DataSourcePref} v
+ * @returns {DataSourcePref}
+ */
+export function saveDataSourcePref(v) {
+  const next = isDataSourcePref(v) ? v : "cloud";
+  try {
+    localStorage.setItem(DATA_SOURCE_STORAGE_KEY, next);
+  } catch {
+    /* ignore */
+  }
+  return next;
+}
+
 /**
  * Short label for result meta, e.g. "Fastest + Simplest"
  * @param {RoutePreference[]} prefs

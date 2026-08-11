@@ -4459,6 +4459,13 @@ body.contrib-submitting .bg-orb {
   margin: 0 0 12px;
 }
 
+.pref-field.is-disabled {
+  opacity: 0.55;
+}
+.pref-field.is-disabled .pref-opt {
+  cursor: not-allowed;
+}
+
 .pref-label {
   display: inline-flex;
   align-items: center;

@@ -61,6 +61,8 @@ import {
   DATA_UPDATED_AT_STORAGE_KEY,
   loadDataCachePref,
   saveDataCachePref,
+  loadDataSourcePref,
+  saveDataSourcePref,
 } from "./preferences.js";
 import { resolveRouteColor } from "./mtrColors.js";
 import {
@@ -2994,9 +2996,17 @@ function initDataCacheUi() {
   const btn = document.getElementById("btn-download-offline");
   if (!on || !off) return;
   (loadDataCachePref() ? on : off).checked = true;
-  // The download option only makes sense while caching is enabled.
+  // The download option and data-source picker only make sense while
+  // caching is enabled.
+  const sourceField = document.getElementById("data-source-field");
   const syncButtonVisibility = () => {
     if (btn) btn.hidden = !on.checked;
+    if (sourceField) {
+      sourceField.classList.toggle("is-disabled", !on.checked);
+      for (const input of sourceField.querySelectorAll("input")) {
+        input.disabled = !on.checked;
+      }
+    }
   };
   syncButtonVisibility();
   const applyPref = (enabled) => {
@@ -3018,6 +3028,26 @@ function initDataCacheUi() {
 }
 initDataCacheUi();
 
+/**
+ * Settings → “Prefer data source”: Cloud (live data first, downloaded copy
+ * as the offline fallback — default) or Local (serve the downloaded copy
+ * directly to save mobile data). Synced to the SW on every change.
+ */
+function initDataSourceUi() {
+  const cloud = document.getElementById("data-source-cloud");
+  const local = document.getElementById("data-source-local");
+  if (!cloud || !local) return;
+  (loadDataSourcePref() === "local" ? local : cloud).checked = true;
+  const sync = () => {
+    const prefer = saveDataSourcePref(local.checked ? "local" : "cloud");
+    notifyDataSourcePref();
+    showToast(`Prefer ${prefer === "local" ? "local" : "cloud"} data`, 1800);
+  };
+  cloud.addEventListener("change", sync);
+  local.addEventListener("change", sync);
+}
+initDataSourceUi();
+
 /** Floating banner while the app runs entirely on cached data (offline). */
 function initOfflineBanner() {
   const banner = document.getElementById("offline-banner");
@@ -3030,6 +3060,44 @@ function initOfflineBanner() {
   apply();
 }
 initOfflineBanner();
+
+/**
+ * Ran on downloaded data (offline) and connectivity returns — the loaded
+ * state is stale, so ask the user to restart for fresh cloud data. One
+ * prompt per session; “Not now” silences it until the next reload.
+ */
+function initReconnectPrompt() {
+  let wasOffline = navigator.onLine === false;
+  let prompted = false;
+  const maybePrompt = () => {
+    if (!wasOffline || prompted) return;
+    prompted = true;
+    const opened = showUpdateDialog({
+      title: "Back online",
+      message:
+        "You were running on downloaded data. Restart to load the latest data from the cloud.",
+      confirmLabel: "Restart now",
+      cancelLabel: "Not now",
+      onConfirm: () => {
+        try {
+          location.reload();
+        } catch {
+          /* ignore */
+        }
+      },
+    });
+    if (!opened) {
+      // Another prompt (app/data update) is showing — try again shortly.
+      prompted = false;
+      setTimeout(maybePrompt, 5000);
+    }
+  };
+  window.addEventListener("offline", () => {
+    wasOffline = true;
+  });
+  window.addEventListener("online", maybePrompt);
+}
+initReconnectPrompt();
 
 /**
  * Settings → “Download offline data”: one explicit fetch of the whole
@@ -13942,6 +14010,8 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
         kick();
         // Data cache is opt-in — sync the toggle state into the SW
         notifyDataCachePref();
+        // Cloud/Local source preference drives the SW serve decision
+        notifyDataSourcePref();
         // A staged update from a previous session — ask before applying.
         if (navigator.serviceWorker.controller && reg.waiting) {
           promptAppUpdate(reg, () => {
@@ -14003,6 +14073,20 @@ function notifyDataCachePref() {
     /* ignore */
   }
   return enabled;
+}
+
+/** Tell the service worker the data-source preference (safe when absent). */
+function notifyDataSourcePref() {
+  const prefer = loadDataSourcePref();
+  try {
+    navigator.serviceWorker?.controller?.postMessage({
+      type: "DATA_SOURCE_PREF",
+      prefer,
+    });
+  } catch {
+    /* ignore */
+  }
+  return prefer;
 }
 
 /**

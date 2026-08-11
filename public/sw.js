@@ -18,10 +18,12 @@
  *  3. OPT-IN data cache (router graph, fares, map data) — controlled by
  *     the Settings "Data cache" toggle via DATA_CACHE_PREF messages.
  *     ALL transit data (route/stop files, fares, overrides, MTR geo,
- *     basemap archive) is serve-only: a downloaded copy is served when
- *     present, otherwise the request passes through to the network and is
- *     NEVER auto-written — automatic caching is limited to static shell
- *     assets so ordinary use does not burn mobile data.
+ *     basemap archive) is serve-only: with the Cloud preference (default)
+ *     the live network copy is tried first and the downloaded copy is the
+ *     offline fallback; with the Local preference the downloaded copy is
+ *     served directly. Either way nothing is ever auto-written —
+ *     automatic caching is limited to static shell assets so ordinary use
+ *     does not burn mobile data.
  *
  *     The only writer is the explicit Settings "Download offline data"
  *     flow (PRECACHE_DATA): every URL is fetched fresh and byte-verified
@@ -48,6 +50,8 @@ const CACHE = "mtravelers-shell-v13";
 const DATA_CACHE = "mtravelers-data-v3"; // v3: all-data serve-only regime
 const TILES_CACHE = "mtravelers-tiles-v1";
 const STAGING_CACHE = "mtravelers-stage-v1"; // atomic download staging
+/** "cloud" (live first, cache as offline fallback) or "local" (cache only) */
+let dataSourcePref = "cloud";
 const SHELL_SWR_TTL_MS = 24 * 60 * 60 * 1000; // /maplibre/ freshness window
 const FONT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // Google Fonts freshness window
 
@@ -127,6 +131,10 @@ self.addEventListener("message", (event) => {
     event.waitUntil(
       caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))),
     );
+  }
+  if (event?.data?.type === "DATA_SOURCE_PREF") {
+    dataSourcePref = event.data.prefer === "local" ? "local" : "cloud";
+    console.info("[sw] data source pref", dataSourcePref);
   }
   if (event?.data?.type === "DATA_CACHE_PREF") {
     dataCacheEnabled = !!event.data.enabled;
@@ -361,6 +369,11 @@ async function commitPrecache() {
  * outside the explicit PRECACHE_DATA flow (which byte-verifies every body
  * into staging before the atomic commit), so a partial file cannot
  * surface here.
+ *
+ * Data-source preference (DATA_SOURCE_PREF):
+ *  - cloud (default): try the live network copy first, fall back to the
+ *    downloaded copy when offline — fresh data whenever reachable.
+ *  - local: serve the downloaded copy directly, saving mobile data.
  * @param {FetchEvent} event
  * @param {string} cacheName
  */
@@ -369,18 +382,35 @@ async function cachedOnlyFetch(event, cacheName) {
   const cache = await caches.open(cacheName);
   const hit = await cache.match(request);
   if (hit) {
-    if (await cachedBodyComplete(hit)) {
+    if (!(await cachedBodyComplete(hit))) {
+      console.warn(
+        "[sw] discarding corrupt data",
+        urlPath(event.request.url),
+      );
+      await cache.delete(request);
+    } else if (dataSourcePref === "local") {
+      console.info(
+        "[sw] serving downloaded data",
+        urlPath(event.request.url),
+      );
+      return hit;
+    } else {
+      // Cloud: prefer live data when online, fall back offline.
+      try {
+        const live = await fetch(request);
+        if (live && live.ok) {
+          console.info("[sw] live data", urlPath(event.request.url));
+          return live;
+        }
+      } catch {
+        /* offline — fall through to the downloaded copy */
+      }
       console.info(
         "[sw] serving downloaded data",
         urlPath(event.request.url),
       );
       return hit;
     }
-    console.warn(
-      "[sw] discarding corrupt data",
-      urlPath(event.request.url),
-    );
-    await cache.delete(request);
   }
   return fetch(request);
 }
@@ -449,6 +479,18 @@ async function tilesFetch(event) {
   const hit = await cache.match(key);
   const range = request.headers.get("range");
   if (hit) {
+    if (dataSourcePref === "cloud") {
+      // Cloud: prefer live tile slices when online, fall back offline.
+      try {
+        const live = await fetch(request);
+        if (live && live.ok) {
+          console.info("[sw] live tiles", urlPath(request.url));
+          return live;
+        }
+      } catch {
+        /* offline — fall through to the downloaded archive */
+      }
+    }
     console.info(
       "[sw] serving downloaded tiles archive",
       urlPath(request.url),

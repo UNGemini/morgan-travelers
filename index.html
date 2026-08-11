@@ -1104,6 +1104,27 @@
                 <dl id="data-cache-details" class="meta-grid" hidden>
                   <div><dt>Data cache</dt><dd>—</dd></div>
                 </dl>
+                <div class="pref-field" id="data-source-field">
+                  <span class="loc-label pref-label">
+                    <span class="material-symbols-outlined" aria-hidden="true">cloud_sync</span>
+                    Prefer data source
+                  </span>
+                  <div class="pref-segment pref-segment-2" role="group" aria-label="Prefer data source">
+                    <label class="pref-opt">
+                      <input type="radio" name="data-source" value="cloud" id="data-source-cloud" />
+                      <span>Cloud</span>
+                    </label>
+                    <label class="pref-opt">
+                      <input type="radio" name="data-source" value="local" id="data-source-local" />
+                      <span>Local</span>
+                    </label>
+                  </div>
+                  <p class="pref-field-note">
+                    Cloud: live data first, downloaded copy as the offline
+                    fallback. Local: serve the downloaded copy directly to
+                    save mobile data.
+                  </p>
+                </div>
                 <button
                   type="button"
                   id="btn-download-offline"
