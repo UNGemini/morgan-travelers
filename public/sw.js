@@ -283,8 +283,16 @@ async function precacheData(urls) {
       const res = await fetch(key, { cache: "reload" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const buf = await res.arrayBuffer();
+      // The CDN compresses JSON/CSV/GeoJSON with gzip/brotli, so the
+      // decoded body is larger than the wire content-length — only compare
+      // lengths for uncompressed bodies. A truncated compressed body fails
+      // at the arrayBuffer() decode above instead.
       const len = Number(res.headers.get("content-length"));
-      if (Number.isFinite(len) && buf.byteLength !== len) {
+      if (
+        !res.headers.get("content-encoding") &&
+        Number.isFinite(len) &&
+        buf.byteLength !== len
+      ) {
         throw new Error(`incomplete body (${buf.byteLength}/${len} bytes)`);
       }
       // Body is decoded — drop transfer-encoding so the stored response
