@@ -13,6 +13,8 @@ export const SERVICE_DAY_STORAGE_KEY = "morgan.serviceDay";
 export const DEPART_TIME_STORAGE_KEY = "morgan.departTime";
 /** Service-worker data cache (router graph, fares, map data) */
 export const DATA_CACHE_STORAGE_KEY = "morgan.dataCache";
+/** Update stamp of the data edge recorded at the last offline download */
+export const DATA_UPDATED_AT_STORAGE_KEY = "morgan.dataUpdatedAt";
 
 /** @typedef {"fastest" | "simplest" | "cheapest"} RoutePreference */
 /** @typedef {"kmb_lwb" | "ctb" | "nlb" | "gmb"} BusCompanyId */

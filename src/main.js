@@ -58,6 +58,7 @@ import {
   isDepartTimeHm,
   parseDepartTimeHm,
   hongKongHmString,
+  DATA_UPDATED_AT_STORAGE_KEY,
   loadDataCachePref,
   saveDataCachePref,
 } from "./preferences.js";
@@ -2927,61 +2928,146 @@ initFareTypeUi();
 function initDataCacheUi() {
   const on = document.getElementById("data-cache-on");
   const off = document.getElementById("data-cache-off");
+  const btn = document.getElementById("btn-download-offline");
   if (!on || !off) return;
   (loadDataCachePref() ? on : off).checked = true;
+  // The download option only makes sense while caching is enabled.
+  const syncButtonVisibility = () => {
+    if (btn) btn.hidden = !on.checked;
+  };
+  syncButtonVisibility();
   const sync = () => {
     const next = saveDataCachePref(on.checked);
     notifyDataCachePref();
     showToast(`Data cache ${next ? "enabled" : "disabled"}`, 1800);
+    syncButtonVisibility();
   };
   on.addEventListener("change", sync);
   off.addEventListener("change", sync);
 }
 initDataCacheUi();
 
+/** Top strip shown while the app runs entirely on cached data (offline). */
+function initOfflineBanner() {
+  const banner = document.getElementById("offline-banner");
+  if (!banner) return;
+  const apply = () => {
+    banner.hidden = navigator.onLine !== false;
+  };
+  window.addEventListener("online", apply);
+  window.addEventListener("offline", apply);
+  apply();
+}
+initOfflineBanner();
+
 /**
  * Settings → “Download offline data”: one explicit fetch of the whole
- * dataset into the SW data/tiles caches (verified byte-complete). Unlike
- * first-use caching, the page never reads a body the SW is also writing,
- * so a partial file cannot break a route path. See sw.js PRECACHE_DATA.
+ * dataset into the SW caches. Every file is byte-verified into a staging
+ * cache and committed atomically only when ALL files succeed — a quit
+ * mid-download discards everything (see sw.js PRECACHE_DATA). Runs under
+ * a full-screen black cover reusing the boot-splash animation.
  */
 function initOfflineDownloadUi() {
   const btn = document.getElementById("btn-download-offline");
-  const sub = document.getElementById("offline-download-sub");
-  if (!btn || !sub) return;
-  const statusEl = document.getElementById("data-cache-status");
+  if (!btn) return;
 
-  btn.addEventListener("click", async () => {
+  btn.addEventListener("click", () => {
     const sw = navigator.serviceWorker?.controller;
     if (!sw) {
       showToast("Reload once so the service worker is active", 2600);
       return;
     }
-    btn.disabled = true;
-    const origSub = sub.textContent;
+    // Downloading implies caching stays on — enable it explicitly.
+    saveDataCachePref(true);
+    notifyDataCachePref();
+    const on = document.getElementById("data-cache-on");
+    if (on) on.checked = true;
+    void startOfflineDownload(sw);
+  });
+}
+initOfflineDownloadUi();
+
+/**
+ * Run the offline download under the black cover. Shared by the Settings
+ * button and the data-update prompt.
+ * @param {ServiceWorker} sw
+ */
+async function startOfflineDownload(sw) {
+  const overlay = document.getElementById("download-overlay");
+  const titleEl = document.getElementById("download-overlay-title");
+  const bar = document.getElementById("download-progress");
+  const fill = document.getElementById("download-progress-fill");
+  const sub = document.getElementById("download-overlay-sub");
+  const errEl = document.getElementById("download-overlay-error");
+  const actions = document.getElementById("download-overlay-actions");
+  const retryBtn = document.getElementById("btn-download-retry");
+  if (!overlay) return;
+
+  const setProgress = (done, total, totalBytes) => {
+    const pct =
+      total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    if (fill) fill.style.width = `${pct}%`;
+    if (bar) bar.setAttribute("aria-valuenow", String(pct));
+    if (sub) {
+      sub.textContent = `${done} / ${total} files · ${(totalBytes / 1048576).toFixed(1)} MB`;
+    }
+  };
+
+  const close = () => {
+    overlay.hidden = true;
+  };
+  const run = async () => {
     try {
       const urls = await offlineDataManifest();
-      // Downloading implies caching stays on — enable it explicitly.
-      saveDataCachePref(true);
-      notifyDataCachePref();
-      const on = document.getElementById("data-cache-on");
-      if (on) on.checked = true;
-      sub.textContent = `Downloading… 0/${urls.length}`;
-      await precacheOfflineData(sw, urls, (done, total) => {
-        sub.textContent = `Downloading… ${done}/${total}`;
-      });
-      if (statusEl) statusEl.textContent = "Verifying…";
+      if (titleEl) titleEl.textContent = "Downloading offline data…";
+      await precacheOfflineData(sw, urls, setProgress);
+      await recordDataUpdatedAt();
+      if (titleEl) titleEl.textContent = "Finishing…";
       await updateDataCacheStatus();
+      overlay.hidden = true;
       showToast("Offline data ready", 2600);
     } catch (e) {
       console.warn("[offline] dataset download failed", e);
-      showToast(`Offline download failed: ${e?.message || e}`, 3600);
-      await updateDataCacheStatus();
-    } finally {
-      btn.disabled = false;
-      sub.textContent = origSub;
+      if (titleEl) titleEl.textContent = "Download failed";
+      if (errEl) {
+        errEl.textContent = String(e?.message || e);
+        errEl.hidden = false;
+      }
+      if (actions) actions.hidden = false;
     }
+  };
+
+  overlay.hidden = false;
+  if (errEl) errEl.hidden = true;
+  if (actions) actions.hidden = true;
+  if (titleEl) titleEl.textContent = "Preparing offline data…";
+  if (sub) sub.textContent = "Preparing manifest…";
+  if (fill) fill.style.width = "0";
+  if (bar) bar.setAttribute("aria-valuenow", "0");
+  document
+    .getElementById("btn-download-close")
+    ?.addEventListener("click", close);
+  retryBtn?.addEventListener("click", () => {
+    if (errEl) errEl.hidden = true;
+    if (actions) actions.hidden = true;
+    if (titleEl) titleEl.textContent = "Preparing offline data…";
+    void run();
   });
+  await run();
+}
+
+/** Remember the data-edge update stamp so future opens can detect refresh. */
+async function recordDataUpdatedAt() {
+  try {
+    const res = await fetch(METADATA_URL, { cache: "no-cache" });
+    if (!res.ok) return;
+    const meta = await res.json();
+    if (meta?.updated_at) {
+      localStorage.setItem(DATA_UPDATED_AT_STORAGE_KEY, meta.updated_at);
+    }
+  } catch {
+    /* offline — nothing to record */
+  }
 }
 
 /** URLs the app reads for launch + routes — everything needed fully offline. */
@@ -3029,31 +3115,53 @@ function offlineDataManifest() {
   })();
 }
 
-/** Drive the SW precache with progress; resolves on PRECACHE_DONE. */
+/**
+ * Drive the SW precache. The SW downloads into a staging cache (never
+ * live); on zero failures the page sends PRECACHE_COMMIT to promote the
+ * set atomically, and on any failure it sends PRECACHE_ABORT so the
+ * staging cache is discarded. If the page dies before the commit message,
+ * the staging set is purged on the next SW activation — a partial dataset
+ * can never surface. Resolves on PRECACHE_COMMITTED.
+ */
 function precacheOfflineData(sw, urls, onProgress) {
   return new Promise((resolve, reject) => {
     const chan = new MessageChannel();
-    const timer = setTimeout(
-      () => reject(new Error("service worker timed out")),
-      10 * 60_000,
-    );
+    let finished = false;
+    const timer = setTimeout(() => {
+      if (finished) return;
+      finished = true;
+      reject(new Error("service worker timed out"));
+    }, 15 * 60_000);
     chan.port1.onmessage = (ev) => {
       const d = ev.data || {};
       if (d.type === "PRECACHE_PROGRESS") {
-        onProgress?.(d.done, d.total);
+        onProgress?.(d.done, d.total, d.totalBytes || 0);
       } else if (d.type === "PRECACHE_DONE") {
-        clearTimeout(timer);
-        chan.port1.close();
-        const failed = (d.failures || []).length;
-        if (failed) {
-          const names = d.failures
+        if (!d.ok) {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          chan.port1.close();
+          try {
+            sw.postMessage({ type: "PRECACHE_ABORT" });
+          } catch {
+            /* ignore */
+          }
+          const names = (d.failures || [])
             .slice(0, 3)
             .map((f) => f.url)
             .join(", ");
-          reject(new Error(`${failed} file(s) failed: ${names}`));
-        } else {
-          resolve(d);
+          reject(new Error(`${d.failures.length} file(s) failed: ${names}`));
+          return;
         }
+        // All files verified — promote the staging set into the live caches.
+        sw.postMessage({ type: "PRECACHE_COMMIT" });
+      } else if (d.type === "PRECACHE_COMMITTED") {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        chan.port1.close();
+        resolve(d);
       }
     };
     sw.postMessage({ type: "PRECACHE_DATA", urls }, [chan.port2]);
@@ -6898,6 +7006,7 @@ async function loadManifest() {
     if (res.ok) {
       const meta = await res.json();
       applyManifest(meta, "metadata.json");
+      maybePromptDataUpdate(meta);
       return meta;
     }
     console.warn("[metadata] HTTP", res.status, "— falling back to HEAD probes");
@@ -13725,10 +13834,13 @@ loadManifest().catch((err) => {
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
     // Query-bust so browsers re-fetch sw.js even when an old cache-first SW is live
-    const swUrl = `${import.meta.env.BASE_URL}sw.js?v=13`;
+    const swUrl = `${import.meta.env.BASE_URL}sw.js?v=14`;
     let refreshing = false;
+    let updateRequested = false;
     const reloadOnce = () => {
-      if (refreshing) return;
+      // Reload only after the user approved an update — never on a silent
+      // background activation (first install claims the page in place).
+      if (!updateRequested || refreshing) return;
       refreshing = true;
       try {
         window.location.reload();
@@ -13752,15 +13864,21 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
           } catch {
             /* ignore */
           }
-          try {
-            reg.waiting?.postMessage?.({ type: "SKIP_WAITING" });
-          } catch {
-            /* ignore */
-          }
         };
         kick();
         // Data cache is opt-in — sync the toggle state into the SW
         notifyDataCachePref();
+        // A staged update from a previous session — ask before applying.
+        if (navigator.serviceWorker.controller && reg.waiting) {
+          promptAppUpdate(reg, () => {
+            updateRequested = true;
+            try {
+              reg.waiting?.postMessage?.({ type: "SKIP_WAITING" });
+            } catch {
+              /* ignore */
+            }
+          });
+        }
         // Standalone often stays warm — re-check when returning to the app
         document.addEventListener("visibilitychange", () => {
           if (document.visibilityState === "visible") kick();
@@ -13768,16 +13886,22 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
         reg.addEventListener("updatefound", () => {
           const nw = reg.installing;
           if (!nw) return;
+          let prompted = false;
           nw.addEventListener("statechange", () => {
             if (
               nw.state === "installed" &&
-              navigator.serviceWorker.controller
+              navigator.serviceWorker.controller &&
+              !prompted
             ) {
-              try {
-                reg.waiting?.postMessage?.({ type: "SKIP_WAITING" });
-              } catch {
-                /* ignore */
-              }
+              prompted = true;
+              promptAppUpdate(reg, () => {
+                updateRequested = true;
+                try {
+                  reg.waiting?.postMessage?.({ type: "SKIP_WAITING" });
+                } catch {
+                  /* ignore */
+                }
+              });
             }
           });
         });
@@ -13808,6 +13932,78 @@ function notifyDataCachePref() {
 }
 
 /**
+ * One generic prompt for app/data updates. Returns false when another
+ * prompt is already open (callers should skip).
+ */
+let updateDialogOpen = false;
+function showUpdateDialog({ title, message, confirmLabel, onConfirm }) {
+  const overlay = document.getElementById("update-overlay");
+  if (!overlay || updateDialogOpen) return false;
+  updateDialogOpen = true;
+  const titleEl = document.getElementById("update-overlay-title");
+  const msgEl = document.getElementById("update-overlay-msg");
+  const nowBtn = document.getElementById("btn-update-now");
+  const laterBtn = document.getElementById("btn-update-later");
+  if (titleEl) titleEl.textContent = title;
+  if (msgEl) msgEl.textContent = message;
+  if (nowBtn) nowBtn.textContent = confirmLabel;
+  overlay.hidden = false;
+  const close = () => {
+    overlay.hidden = true;
+    updateDialogOpen = false;
+    nowBtn?.removeEventListener("click", confirm);
+    laterBtn?.removeEventListener("click", close);
+  };
+  const confirm = () => {
+    close();
+    onConfirm();
+  };
+  nowBtn?.addEventListener("click", confirm);
+  laterBtn?.addEventListener("click", close);
+  return true;
+}
+
+/**
+ * Ask before applying a staged service-worker update — a silent reload
+ * would lose the user's session.
+ * @param {ServiceWorkerRegistration} reg
+ * @param {() => void} apply
+ */
+function promptAppUpdate(reg, apply) {
+  showUpdateDialog({
+    title: "Update available",
+    message:
+      "A new version of MORGAN Travelers is ready. Reload now to get it?",
+    confirmLabel: "Update now",
+    onConfirm: apply,
+  });
+}
+
+/**
+ * Background data check: when the data edge's update stamp differs from
+ * the one recorded at the last offline download, offer a refresh. Runs on
+ * every launch (see loadManifest).
+ * @param {{ updated_at?: string }} meta
+ */
+function maybePromptDataUpdate(meta) {
+  if (!meta?.updated_at) return;
+  if (!navigator.serviceWorker?.controller) return; // no SW → no download
+  if (!loadDataCachePref()) return;
+  const stored = localStorage.getItem(DATA_UPDATED_AT_STORAGE_KEY);
+  if (!stored || stored === meta.updated_at) return;
+  showUpdateDialog({
+    title: "Data update available",
+    message:
+      "The transit data has been refreshed on the server. Re-download the offline set to get the latest routes, stops and fares?",
+    confirmLabel: "Update data",
+    onConfirm: () => {
+      const sw = navigator.serviceWorker?.controller;
+      if (sw) void startOfflineDownload(sw);
+    },
+  });
+}
+
+/**
  * Report the SW data cache (Settings → Data cache status line).
  * Cache names must stay in sync with public/sw.js DATA_CACHE / TILES_CACHE.
  */
@@ -13829,7 +14025,7 @@ async function updateDataCacheStatus() {
       return;
     }
     const cachesList = await Promise.all([
-      caches.open("mtravelers-data-v1"),
+      caches.open("mtravelers-data-v3"),
       caches.open("mtravelers-tiles-v1"),
     ]);
     let keys = 0;

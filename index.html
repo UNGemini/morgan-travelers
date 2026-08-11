@@ -145,6 +145,12 @@
       </div>
     </div>
 
+    <!-- Offline banner: shown while the app runs entirely on cached data -->
+    <div id="offline-banner" class="offline-banner" hidden role="status">
+      <span class="material-symbols-outlined" aria-hidden="true">cloud_off</span>
+      <span>Offline — using downloaded data</span>
+    </div>
+
     <div id="app" class="app-shell" data-ui-mode="eta" data-toolbar="open" data-detail="open" data-sheet="open">
       <!-- Full-bleed map -->
       <div id="map-stage" class="map-stage">
@@ -1088,11 +1094,11 @@
                   </label>
                 </div>
                 <p class="pref-field-note" id="data-cache-note">
-                  Keeps the router graph, fares, map data and the basemap on
-                  device (≈ 55 MB) so repeat launches load without
-                  re-downloading. Data is re-checked for updates in the
-                  background; the first open after an update always fetches
-                  fresh data.
+                  Auto-caches only the app shell (UI, fonts, icons) so
+                  ordinary use never burns mobile data. Fares, route/stop
+                  data and the basemap are downloaded only when you press
+                  “Download offline data” below (≈ 55 MB) — press the
+                  button again after updates to refresh it.
                 </p>
                 <p id="data-cache-status" class="status-line">Data cache: checking…</p>
                 <button
@@ -1519,6 +1525,59 @@
               </span>
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Full-screen black cover while the offline dataset downloads -->
+    <div
+      id="download-overlay"
+      class="download-overlay"
+      hidden
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="download-overlay-title"
+    >
+      <img class="app-splash-mark" src="/logo.svg" alt="" width="96" height="96" />
+      <p class="download-overlay-title" id="download-overlay-title">
+        Preparing offline data…
+      </p>
+      <div
+        class="download-progress"
+        id="download-progress"
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="0"
+      >
+        <div class="download-progress-fill" id="download-progress-fill"></div>
+      </div>
+      <p class="download-overlay-sub" id="download-overlay-sub">
+        Preparing manifest…
+      </p>
+      <p class="download-overlay-error" id="download-overlay-error" hidden></p>
+      <div class="download-overlay-actions" id="download-overlay-actions" hidden>
+        <button type="button" class="btn" id="btn-download-retry">Retry</button>
+        <button type="button" class="btn btn-ghost" id="btn-download-close">Close</button>
+      </div>
+    </div>
+
+    <!-- Update prompt: app shell or offline-data refresh -->
+    <div
+      id="update-overlay"
+      class="update-overlay"
+      hidden
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="update-overlay-title"
+    >
+      <div class="update-scrim" id="update-scrim"></div>
+      <div class="update-dialog" data-acrylic>
+        <h3 id="update-overlay-title" class="update-overlay-title">Update available</h3>
+        <p id="update-overlay-msg" class="update-overlay-msg"></p>
+        <div class="update-overlay-actions">
+          <button type="button" class="btn btn-ghost" id="btn-update-later">Later</button>
+          <button type="button" class="btn" id="btn-update-now">Update now</button>
         </div>
       </div>
     </div>

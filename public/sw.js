@@ -17,16 +17,24 @@
  *
  *  3. OPT-IN data cache (router graph, fares, map data) — controlled by
  *     the Settings "Data cache" toggle via DATA_CACHE_PREF messages.
- *     Same SWR contract as /maplibre/, but with a 12h window and the
- *     toggle decides whether it runs at all.
+ *     ALL transit data (route/stop files, fares, overrides, MTR geo,
+ *     basemap archive) is serve-only: a downloaded copy is served when
+ *     present, otherwise the request passes through to the network and is
+ *     NEVER auto-written — automatic caching is limited to static shell
+ *     assets so ordinary use does not burn mobile data.
  *
- *     Map tiles (hongkong.pmtiles, ~30 MB) are cached as ONE full archive
- *     on first use: the PMTiles client always asks with Range headers and
- *     throws on a 200 full-body reply, so the SW answers every Range
- *     request with a synthesized 206 slice (ETag + CORS headers copied).
- *     The full archive refreshes in the background when its ETag matches
- *     the cached copy — a changed ETag is left for the next visit to pick
- *     up, keeping the slice/ETag pair consistent within a session.
+ *     The only writer is the explicit Settings "Download offline data"
+ *     flow (PRECACHE_DATA): every URL is fetched fresh and byte-verified
+ *     into a staging cache, then the dataset is committed atomically
+ *     (staging → data/tiles) only when EVERY file succeeded. A quit
+ *     mid-download therefore leaves the previous dataset intact, and
+ *     leftover staging is purged on the next activation — partial
+ *     downloads can never surface to the app.
+ *
+ *     The basemap archive (hongkong.pmtiles, ~30 MB) is cached as ONE
+ *     full file: the PMTiles client always asks with Range headers, so
+ *     the SW answers every Range request with a synthesized 206 slice
+ *     (ETag + CORS headers copied).
  *
  * The historical rule was "NEVER intercept CSS/JS/wasm" because cache-first
  * HTML left the shell unstyled. That cannot recur here: HTML stays
@@ -37,17 +45,20 @@
  * unless the user clears it.
  */
 const CACHE = "mtravelers-shell-v13";
-const DATA_CACHE = "mtravelers-data-v1";
+const DATA_CACHE = "mtravelers-data-v3"; // v3: all-data serve-only regime
 const TILES_CACHE = "mtravelers-tiles-v1";
-const DATA_TTL_MS = 12 * 60 * 60 * 1000; // serve-from-cache window (data)
+const STAGING_CACHE = "mtravelers-stage-v1"; // atomic download staging
 const SHELL_SWR_TTL_MS = 24 * 60 * 60 * 1000; // /maplibre/ freshness window
 const FONT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // Google Fonts freshness window
-const TILES_TTL_MS = 30 * 24 * 60 * 60 * 1000; // basemap archive freshness window
 
 /** Cross-origin hosts whose CORS-enabled responses we cache (fonts). */
 const FONT_HOSTS = ["fonts.googleapis.com", "fonts.gstatic.com"];
 
-/** Same-origin static data the app may cache. Excludes APIs, ETA, /edge. */
+/**
+ * Same-origin transit data — routes/stops, fares, overrides, MTR geo.
+ * Serve-only: a downloaded copy is served, otherwise network passthrough
+ * and NEVER auto-cached (a partial body here breaks route paths).
+ */
 const DATA_PREFIXES = ["/data/", "/fares/", "/overrides/", "/mtr/"];
 
 /** Content-hashed or immutable shell assets — safe to cache forever. */
@@ -70,9 +81,14 @@ const SHELL_FILES = [
 
 let dataCacheEnabled = true;
 
+/** Message port for the in-flight offline download (see PRECACHE_*). */
+let precachePort = null;
+
 self.addEventListener("install", (event) => {
   console.info("[sw] install", CACHE);
-  event.waitUntil(self.skipWaiting());
+  // First install: take control immediately so the data cache works.
+  // Updates wait for SKIP_WAITING — the page prompts the user first.
+  if (!self.registration.active) event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", (event) => {
@@ -83,7 +99,12 @@ self.addEventListener("activate", (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((k) => k.startsWith("mtravelers-shell-") && k !== CACHE)
+            .filter(
+              (k) =>
+                (k.startsWith("mtravelers-shell-") && k !== CACHE) ||
+                k.startsWith("mtravelers-stage-") ||
+                (k.startsWith("mtravelers-data-") && k !== DATA_CACHE),
+            )
             .map((k) => caches.delete(k)),
         ),
       )
@@ -112,14 +133,32 @@ self.addEventListener("message", (event) => {
     console.info("[sw] data cache pref", dataCacheEnabled);
     if (!dataCacheEnabled) {
       event.waitUntil(
-        Promise.all([caches.delete(DATA_CACHE), caches.delete(TILES_CACHE)]),
+        Promise.all([
+          caches.delete(DATA_CACHE),
+          caches.delete(TILES_CACHE),
+          caches.delete(STAGING_CACHE),
+        ]),
       );
     }
   }
   if (event?.data?.type === "PRECACHE_DATA") {
+    precachePort = event.ports?.[0] || null;
+    event.waitUntil(precacheData(event.data.urls || []));
+  }
+  if (event?.data?.type === "PRECACHE_ABORT") {
+    // Page gave up (failed download / user quit) — discard the staging set.
     event.waitUntil(
-      precacheData(event.data.urls || [], event.ports?.[0] || null),
+      caches
+        .delete(STAGING_CACHE)
+        .catch(() => {})
+        .then(() => {
+          precachePort?.close?.();
+          precachePort = null;
+        }),
     );
+  }
+  if (event?.data?.type === "PRECACHE_COMMIT") {
+    event.waitUntil(commitPrecache());
   }
 });
 
@@ -153,16 +192,23 @@ function cachedAgeMs(response) {
   return Number.isFinite(t) ? Date.now() - t : Infinity;
 }
 
-/** True when a cached body's bytes match its content-length header. */
+/**
+ * True when a cached body is complete. Decodable = not truncated. When the
+ * response has no content-encoding, the decoded length must also match
+ * content-length (compressed entries store wire bytes, so their decoded
+ * length legitimately differs).
+ */
 async function cachedBodyComplete(response) {
+  let buf;
+  try {
+    buf = await response.clone().arrayBuffer();
+  } catch {
+    return false; // truncated / undecodable body
+  }
+  if (response?.headers?.get?.("content-encoding")) return true;
   const len = Number(response?.headers?.get?.("content-length"));
   if (!Number.isFinite(len) || len <= 0) return true; // cannot verify
-  try {
-    const buf = await response.clone().arrayBuffer();
-    return buf.byteLength === len;
-  } catch {
-    return false;
-  }
+  return buf.byteLength === len;
 }
 
 /** Cache-first within TTL, network-first with stale fallback beyond. */
@@ -172,33 +218,22 @@ async function swrFetch(event, cacheName, ttlMs, logTag) {
   let hit = await cache.match(request);
 
   if (hit && cachedAgeMs(hit) < ttlMs) {
-    // A truncated body (interrupted download, cache.put race) would break
-    // every downstream JSON parse — verify byte length and heal via network.
-    if (cacheName === DATA_CACHE && !(await cachedBodyComplete(hit))) {
-      console.warn(
-        "[sw] corrupt data cache entry, refetching",
-        urlPath(event.request.url),
-      );
-      await cache.delete(request);
-      hit = null;
-    } else {
-      // Serve instantly; revalidate in the background.
-      console.info(
-        "[sw] cache hit",
-        logTag,
-        urlPath(event.request.url),
-        Math.round(cachedAgeMs(hit) / 60000),
-        "min old",
-      );
-      event.waitUntil(
-        fetch(request)
-          .then((res) => {
-            if (res && res.ok) cache.put(request, res.clone());
-          })
-          .catch(() => {}),
-      );
-      return hit;
-    }
+    // Serve instantly; revalidate in the background.
+    console.info(
+      "[sw] cache hit",
+      logTag,
+      urlPath(event.request.url),
+      Math.round(cachedAgeMs(hit) / 60000),
+      "min old",
+    );
+    event.waitUntil(
+      fetch(request)
+        .then((res) => {
+          if (res && res.ok) cache.put(request, res.clone());
+        })
+        .catch(() => {}),
+    );
+    return hit;
   }
 
   // Miss or stale → network first; keep the copy for offline. The page's
@@ -223,17 +258,25 @@ async function swrFetch(event, cacheName, ttlMs, logTag) {
 
 /**
  * Explicit one-shot download of the offline dataset (Settings button).
- * Each URL is fetched fresh (caches bypassed), verified byte-complete, then
- * stored in the data or tiles cache. The page never shares a body stream
- * with this write, so a partial file cannot surface to the app nor poison
- * the cache. Reports progress + result over the message port.
+ * Every URL is fetched fresh (caches bypassed) and byte-verified into the
+ * STAGING cache — the live data/tiles caches are untouched until the page
+ * confirms zero failures (PRECACHE_COMMIT). The page never shares a body
+ * stream with this write, so a partial file cannot poison a cache, and a
+ * quit mid-download leaves the previous dataset intact (the staging cache
+ * is purged on the next activation). Reports progress + result over the
+ * message port.
  * @param {string[]} urls
- * @param {MessagePort|null} port
  */
-async function precacheData(urls, port) {
+async function precacheData(urls) {
   let done = 0;
   let totalBytes = 0;
   const failures = [];
+  try {
+    await caches.delete(STAGING_CACHE);
+  } catch {
+    /* ignore */
+  }
+  const stage = await caches.open(STAGING_CACHE);
   for (const href of urls) {
     try {
       const key = new URL(href, self.location.href).href;
@@ -250,22 +293,88 @@ async function precacheData(urls, port) {
       headers.delete("content-encoding");
       headers.delete("content-length");
       headers.set("content-length", String(buf.byteLength));
-      const cacheName = key.endsWith("/hongkong.pmtiles")
-        ? TILES_CACHE
-        : DATA_CACHE;
-      const cache = await caches.open(cacheName);
-      await cache.put(
-        key,
-        new Response(buf, { status: res.status, headers }),
-      );
+      await stage.put(key, new Response(buf, { status: res.status, headers }));
       totalBytes += buf.byteLength;
     } catch (err) {
       failures.push({ url: href, error: String(err?.message || err) });
     }
     done += 1;
-    port?.postMessage({ type: "PRECACHE_PROGRESS", done, total: urls.length });
+    precachePort?.postMessage({
+      type: "PRECACHE_PROGRESS",
+      done,
+      total: urls.length,
+      totalBytes,
+    });
   }
-  port?.postMessage({ type: "PRECACHE_DONE", totalBytes, failures });
+  precachePort?.postMessage({
+    type: "PRECACHE_DONE",
+    ok: failures.length === 0,
+    failures,
+    totalBytes,
+  });
+}
+
+/**
+ * Promote a fully-verified staging set into the live caches (called only
+ * after PRECACHE_DONE reported zero failures). Entries are copied
+ * key-by-key — put overwrites in place, so readers never see a
+ * missing-file window — then stale keys absent from the new set are
+ * purged. The staging cache is deleted last.
+ */
+async function commitPrecache() {
+  const stage = await caches.open(STAGING_CACHE);
+  const keys = await stage.keys();
+  const live = { [DATA_CACHE]: new Set(), [TILES_CACHE]: new Set() };
+  for (const req of keys) {
+    const res = await stage.match(req);
+    if (!res) continue;
+    const name = req.url.endsWith("/hongkong.pmtiles")
+      ? TILES_CACHE
+      : DATA_CACHE;
+    const cache = await caches.open(name);
+    await cache.put(req, res);
+    live[name].add(req.url);
+  }
+  for (const [name, keep] of Object.entries(live)) {
+    const cache = await caches.open(name);
+    for (const req of await cache.keys()) {
+      if (!keep.has(req.url)) await cache.delete(req);
+    }
+  }
+  await caches.delete(STAGING_CACHE);
+  precachePort?.postMessage({ type: "PRECACHE_COMMITTED" });
+  precachePort?.close?.();
+  precachePort = null;
+}
+
+/**
+ * Serve transit data from a previously downloaded copy (Settings button)
+ * or pass through to the network WITHOUT caching. Data is never written
+ * outside the explicit PRECACHE_DATA flow (which byte-verifies every body
+ * into staging before the atomic commit), so a partial file cannot
+ * surface here.
+ * @param {FetchEvent} event
+ * @param {string} cacheName
+ */
+async function cachedOnlyFetch(event, cacheName) {
+  const { request } = event;
+  const cache = await caches.open(cacheName);
+  const hit = await cache.match(request);
+  if (hit) {
+    if (await cachedBodyComplete(hit)) {
+      console.info(
+        "[sw] serving downloaded data",
+        urlPath(event.request.url),
+      );
+      return hit;
+    }
+    console.warn(
+      "[sw] discarding corrupt data",
+      urlPath(event.request.url),
+    );
+    await cache.delete(request);
+  }
+  return fetch(request);
 }
 
 /** Cache-first forever — only safe for content-hashed/immutable URLs. */
@@ -319,9 +428,10 @@ function sliceOrFull(full, range) {
 }
 
 /**
- * Basemap archive cache. The client only ever sends Range requests, so the
- * full ~30 MB file is fetched once by the SW and re-served as 206 slices.
- * Refreshes keep the cached ETag stable within a session (see header note).
+ * Basemap archive cache (serve-only). The client only ever sends Range
+ * requests, so a downloaded full archive is re-served as 206 slices. A
+ * miss passes through to the network — the archive is NEVER auto-written
+ * outside the explicit PRECACHE_DATA flow (which byte-verifies it).
  */
 async function tilesFetch(event) {
   const { request } = event;
@@ -330,51 +440,14 @@ async function tilesFetch(event) {
   const cache = await caches.open(TILES_CACHE);
   const hit = await cache.match(key);
   const range = request.headers.get("range");
-  const fresh = hit != null && cachedAgeMs(hit) < TILES_TTL_MS;
-
-  if (fresh) {
-    event.waitUntil(
-      fetch(key, { cache: "reload" })
-        .then((res) => {
-          if (
-            res &&
-            res.ok &&
-            res.status === 200 &&
-            res.headers.get("etag") === hit.headers.get("etag")
-          ) {
-            cache.put(key, res.clone());
-          }
-        })
-        .catch(() => {}),
+  if (hit) {
+    console.info(
+      "[sw] serving downloaded tiles archive",
+      urlPath(request.url),
     );
     return sliceOrFull(hit, range);
   }
-
-  // Miss or stale → pass the range request upstream; backfill the full
-  // archive in the background (same ETag only) for offline use.
-  try {
-    const res = await fetch(request);
-    if (res && res.ok) {
-      event.waitUntil(
-        fetch(key, { cache: "no-store" })
-          .then((full) => {
-            if (
-              full &&
-              full.ok &&
-              full.status === 200 &&
-              (!hit || full.headers.get("etag") === hit.headers.get("etag"))
-            ) {
-              cache.put(key, full.clone());
-            }
-          })
-          .catch(() => {}),
-      );
-    }
-    return res;
-  } catch (err) {
-    if (hit) return sliceOrFull(hit, range);
-    throw err;
-  }
+  return fetch(request);
 }
 
 /** @param {string} url */
@@ -404,7 +477,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   // Map tiles (cross-origin archive on the data edge, same-origin /edge
-  // proxy in preview) — full-archive cache answered as 206 slices.
+  // proxy in preview) — downloaded archive served as 206 slices only.
   if (dataCacheEnabled && isTilesPath(url.pathname)) {
     event.respondWith(tilesFetch(event));
     return;
@@ -422,9 +495,11 @@ self.addEventListener("fetch", (event) => {
     request.mode === "navigate" || request.destination === "document";
 
   if (!isNavigate) {
-    // Data allowlist (opt-in toggle) → SWR with the data cache.
+    // Transit data (routes/stops, fares, overrides, MTR geo) — serve-only:
+    // downloaded copy or network, never auto-cached (a partial body here
+    // breaks route paths).
     if (dataCacheEnabled && isDataPath(url.pathname)) {
-      event.respondWith(swrFetch(event, DATA_CACHE, DATA_TTL_MS, "data"));
+      event.respondWith(cachedOnlyFetch(event, DATA_CACHE));
       return;
     }
     // Shell assets → cache-first (hashed) or SWR (fixed filenames).

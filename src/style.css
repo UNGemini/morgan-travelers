@@ -5787,6 +5787,139 @@ body.contrib-submitting .bg-orb {
 }
 
 
+/* ── Offline banner — fixed top strip while running on cached data ── */
+.offline-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 7px 14px;
+  background: rgba(22, 24, 32, 0.92);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  color: #ffd479;
+  font: 500 12px/1.4 var(--font);
+  text-align: center;
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+}
+.offline-banner .material-symbols-outlined {
+  font-size: 15px;
+}
+
+/* ── Download cover — full-screen black while the dataset downloads ── */
+.download-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+  background: #000;
+  color: #fff;
+  text-align: center;
+  font-family: var(--font);
+}
+.download-overlay[hidden] {
+  display: none !important;
+}
+.download-overlay .app-splash-mark {
+  width: min(22vw, 96px);
+}
+.download-overlay-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.download-overlay-sub {
+  margin: 0;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.72);
+  font-variant-numeric: tabular-nums;
+}
+.download-progress {
+  width: min(320px, 76vw);
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+.download-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: #c0aefc;
+  transition: width 0.3s ease;
+}
+.download-overlay-error {
+  margin: 0;
+  max-width: min(420px, 84vw);
+  font-size: 0.85rem;
+  color: #ff8787;
+  word-break: break-word;
+}
+.download-overlay-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* ── Update prompt dialog ─────────────────────────────────────── */
+.update-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9800;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.update-overlay[hidden] {
+  display: none !important;
+}
+.update-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 10, 16, 0.45);
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+}
+.update-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(400px, calc(100vw - 32px));
+  padding: 22px 20px 18px;
+  border-radius: 16px;
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.14));
+  background: rgba(22, 24, 32, 0.92);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  text-align: center;
+}
+.update-overlay-title {
+  margin: 0 0 8px;
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+.update-overlay-msg {
+  margin: 0 0 16px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text-secondary, rgba(245, 245, 247, 0.78));
+}
+.update-overlay-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
 /* ── Toast — absolute bottom centre ─────────────────────────── */
 .toast {
   position: absolute;
