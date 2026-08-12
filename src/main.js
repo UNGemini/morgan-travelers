@@ -14810,6 +14810,11 @@ function busPosEnsureLayers() {
     layer.className = "bus-pos-label-layer";
     map.getContainer().appendChild(layer);
   }
+  // Reposition labels on MapLibre's render event: it fires after the GL frame
+  // is drawn with the current camera (before compositing), so labels stay glued
+  // to the markers during pan/zoom/inertia instead of lagging one rAF behind.
+  map.off("render", busPosSyncLabels);
+  map.on("render", busPosSyncLabels);
   // Re-raise above any layers painted after the panel opened (e.g. MTR)
   for (const id of BUS_POS_LAYER_IDS) {
     try {
@@ -14835,6 +14840,7 @@ function busPosRemoveLayers() {
     /* ignore */
   }
   document.getElementById("bus-pos-label-layer")?.remove();
+  map?.off?.("render", busPosSyncLabels);
   busPosLayersOn = false;
 }
 
