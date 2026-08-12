@@ -3096,6 +3096,17 @@ function initOfflineBanner() {
 }
 initOfflineBanner();
 
+/** Beta warning banner — visible only while the live bus position engine runs. */
+let betaBannerEl = null;
+function syncBetaBanner() {
+  if (betaBannerEl) betaBannerEl.hidden = !busPosEngine?.running;
+}
+function initBetaBanner() {
+  betaBannerEl = document.getElementById("beta-banner");
+  // Starts hidden; syncBetaBanner() flips it with the engine lifecycle.
+}
+initBetaBanner();
+
 /**
  * Ran on downloaded data (offline) and connectivity returns — the loaded
  * state is stale, so ask the user to restart for fresh cloud data. One
@@ -14978,6 +14989,7 @@ async function busPosSyncState() {
       busPosRgb = hexToRgb(busPosColor);
       busPosEnsureLayers();
       void busPosEngine.poll();
+      syncBetaBanner();
     }
   } finally {
     busPosSyncing = false;
@@ -14993,6 +15005,7 @@ function busPosStopEngine() {
   busPosAnimId = 0;
   busPosDisplay.clear();
   busPosRemoveLayers();
+  syncBetaBanner();
 }
 
 /** GeoJSON source + three marker layers, added above everything on start. */

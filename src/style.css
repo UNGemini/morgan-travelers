@@ -5936,6 +5936,29 @@ html.pwa .offline-banner {
   transform: translateX(-50%);
 }
 
+/* ── Beta banner — floating card while the live bus position engine runs ── */
+.beta-banner .material-symbols-outlined {
+  font-size: 18px;
+  color: #ffd479;
+  flex-shrink: 0;
+}
+.beta-banner-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.beta-banner-text strong {
+  font: 700 11px/1.2 var(--font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #fff;
+}
+/* Offline + beta cards at once: stack, don't overlap */
+#offline-banner:not([hidden]) + #beta-banner {
+  top: calc(12px + env(safe-area-inset-top, 0px) + 52px);
+}
+
 /* ── Download cover — full-screen black while the dataset downloads ── */
 .download-overlay {
   position: fixed;
