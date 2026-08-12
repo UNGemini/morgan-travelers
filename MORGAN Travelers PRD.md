@@ -48,6 +48,8 @@ To prevent the engine from returning mathematically fast but physically exhausti
 
 A client-side predictive tracking system that translates static ETA countdowns into smooth map movements.
 
+* **Schedule-Based Positioning (v2):** Whole-route bus positions derive from GTFS schedules (Speed + Time = Position, traffic multipliers applied); the 3 live ETAs at the selected stop re-anchor the next 3 buses, with a schedule-time handoff to the next-soonest trip after an anchored bus leaves the stop. Markers glide along the route polyline (real road distance) rather than straight lines.
+
 * **Data Stitching:** Groups multiple stop ETAs to identify a unique, moving vehicle.  
 * **Kalman Filter:** A lightweight, WASM-executed discrete Kalman filter predicting bus location and velocity.  
 * **Traffic Injection:** Modifies the Kalman matrix using real-world speed multipliers derived from the HK Traffic Speed Map CSV.

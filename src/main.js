@@ -14632,6 +14632,13 @@ const BUS_POS_LAYER_IDS = [
 // pulse. All values are (re)set when the engine (re)starts for a route.
 const busPosDisplay = new Map(); // id → eased display state
 let busPosAnimId = 0; // rAF handle of the marker/radar render loop
+// Drawn shape for the path-following glide (captured once per engine start):
+// retargets project positions onto it (alongM) and frames render back to
+// lon/lat along the polyline, so markers round curves instead of cutting
+// straight across. Cleared when the engine stops.
+let busPosShape = null;
+let busPosAlongToLonLat = null; // engine module export (getBusPosMod)
+let busPosProjectOntoShape = null; // routeShapes export (getBusPosRouteShapesMod)
 let busPosColor = ETA_AGENCY_GTFS_COLORS.kmb; // route line color
 let busPosRgb = [238, 23, 31]; // same color as [r, g, b] for rgba() expressions
 const busPosReducedMotion =
@@ -14710,6 +14717,7 @@ async function busPosBuildCtx(st) {
   if (bound === "LINE" || bound === "LRT") return null;
 
   const { getGtfsBusShape, projectOntoShape } = await getBusPosRouteShapesMod();
+  busPosProjectOntoShape = projectOntoShape;
   const coUp = st.co.toUpperCase();
   // Same shape pipeline the drawn route path uses (see buildTransitPolyline)
   const shape = await getGtfsBusShape({
@@ -14802,9 +14810,11 @@ async function busPosSyncState() {
     if (!st2 || busPosCheapSigOf(st2) !== cheap) return; // changed mid-build
     if (busPosEngine) busPosStopEngine();
     if (!built) return;
-    const { BusPositionEngine } = await getBusPosMod();
+    const { BusPositionEngine, alongToLonLat } = await getBusPosMod();
+    busPosAlongToLonLat = alongToLonLat;
     busPosEngine = new BusPositionEngine({ onUpdate: busPosOnUpdate });
     busPosEngine.start(built.ctx);
+    busPosShape = built.ctx.shape;
     busPosSig = built.sig;
     if (busPosEngine.running) {
       // Route line color → marker outline, route-number text, radar ring
@@ -14821,6 +14831,7 @@ async function busPosSyncState() {
 function busPosStopEngine() {
   busPosEngine?.stop();
   busPosEngine = null;
+  busPosShape = null;
   busPosSig = "";
   if (busPosAnimId) cancelAnimationFrame(busPosAnimId);
   busPosAnimId = 0;
@@ -14940,26 +14951,41 @@ function busPosRemoveLayers() {
 /**
  * Engine emit → retarget the eased display positions. The rAF loop renders
  * them, so the marker glides non-linearly instead of jumping between polls.
+ *
+ * Path-following: when the drawn shape is available, the current rendered
+ * position and the new target are projected onto the polyline (alongM) and
+ * the glide interpolates along-shape distance, so markers travel the real
+ * road distance — around curves and across long gaps — instead of a straight
+ * lon/lat line. Failed projections fall back to today's straight-line lerp.
  */
 function busPosOnUpdate(evt) {
   if (!map?.getStyle) return;
   // Layers may not exist yet if the first emit raced a not-ready style.
   if (!busPosLayersOn && !map.getSource("bus-positions")) busPosEnsureLayers();
   const now = performance.now();
+  const project = (lon, lat) =>
+    busPosShape && busPosProjectOntoShape
+      ? busPosProjectOntoShape(busPosShape.coords, lon, lat)
+      : null;
   for (const v of evt?.vehicles || []) {
     const id = Number(v.id) || 0;
     const tLon = Number(v.lon);
     const tLat = Number(v.lat);
     if (!Number.isFinite(tLon) || !Number.isFinite(tLat)) continue;
     const prev = busPosDisplay.get(id);
-    /** @type {{ fromLon: number, fromLat: number, lon: number, lat: number, tLon: number, tLat: number, label: string, confidence: number, t0: number, dur: number }} */
+    /** @type {{ fromLon: number, fromLat: number, lon: number, lat: number, tLon: number, tLat: number, fromD: number, targetD: number, usePath: boolean, label: string, confidence: number, t0: number, dur: number }} */
     const next = {
       label: String(v.label || ""),
       confidence: Math.max(0.1, Math.min(1, Number(v.confidence) || 0)),
       tLon,
       tLat,
       t0: now,
+      fromD: 0,
+      targetD: 0,
+      usePath: false,
     };
+    const tgt = project(tLon, tLat);
+    const src = prev ? project(prev.lon, prev.lat) : null;
     if (busPosReducedMotion || !prev) {
       // First sighting (or reduced motion): snap straight to the target.
       next.fromLon = tLon;
@@ -14967,6 +14993,29 @@ function busPosOnUpdate(evt) {
       next.lon = tLon;
       next.lat = tLat;
       next.dur = 0;
+      if (tgt) {
+        next.usePath = true;
+        next.fromD = next.targetD = tgt.alongM;
+      }
+    } else if (tgt && src && Number.isFinite(tgt.alongM) && Number.isFinite(src.alongM)) {
+      // Path-following retarget: glide along the polyline from the current
+      // rendered distance to the new target's; the duration scales with the
+      // along-path distance so curvy or long corrections glide slightly
+      // longer (still clamped ≤ 3 s).
+      next.usePath = true;
+      next.fromD = src.alongM;
+      next.targetD = tgt.alongM;
+      const ll = busPosAlongToLonLat
+        ? busPosAlongToLonLat(busPosShape.coords, busPosShape.cumM, src.alongM)
+        : null;
+      next.fromLon = ll?.lon ?? prev.lon;
+      next.fromLat = ll?.lat ?? prev.lat;
+      next.lon = next.fromLon;
+      next.lat = next.fromLat;
+      next.dur = Math.min(
+        3000,
+        Math.max(600, Math.abs(tgt.alongM - src.alongM) * 1.2),
+      );
     } else {
       // Retarget from the currently displayed position; the glide time scales
       // with distance so big poll corrections catch up gracefully.
@@ -15012,17 +15061,36 @@ function busPosBuildFeatures(now) {
       const t = Math.min(1, (now - e.t0) / e.dur);
       if (t < 1) {
         // smoothstep: non-linear ease between the last rendered position and
-        // the target (the Kalman constant-velocity output becomes a gentle
+        // the target (the deterministic schedule output becomes a gentle
         // glide, and poll-to-poll corrections ease instead of snapping)
         const k = t * t * (3 - 2 * t);
-        lon = e.fromLon + (e.tLon - e.fromLon) * k;
-        lat = e.fromLat + (e.tLat - e.fromLat) * k;
+        if (e.usePath && busPosShape && busPosAlongToLonLat) {
+          // Along-polyline interpolation: markers travel the real road
+          // distance — rounding curves and sliding back along the path on
+          // backward corrections — instead of cutting straight across.
+          const ll = busPosAlongToLonLat(
+            busPosShape.coords,
+            busPosShape.cumM,
+            e.fromD + (e.targetD - e.fromD) * k,
+          );
+          if (ll) {
+            lon = ll.lon;
+            lat = ll.lat;
+          } else {
+            lon = e.fromLon + (e.tLon - e.fromLon) * k;
+            lat = e.fromLat + (e.tLat - e.fromLat) * k;
+          }
+        } else {
+          lon = e.fromLon + (e.tLon - e.fromLon) * k;
+          lat = e.fromLat + (e.tLat - e.fromLat) * k;
+        }
         e.lon = lon;
         e.lat = lat;
       } else if (now - e.t0 > e.dur + 1500) {
         // Stale target (tab hidden, rAF paused): snap instead of a long glide.
         e.fromLon = e.tLon;
         e.fromLat = e.tLat;
+        e.fromD = e.targetD;
         e.dur = 0;
       } else {
         e.lon = e.tLon;
