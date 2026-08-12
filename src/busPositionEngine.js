@@ -25,14 +25,16 @@
  *      zoom/stutter whenever the constraint re-anchored at another stop).
  *      Unmatched ETAs become synthetic vehicles (id synth:{rank}).
  *   3. Arrival — when a matched ETA expires the trip is at the stop: the
- *      engine holds it there for a dwell (DWELL_S), then continues on the
- *      schedule shifted by the observed deviation + dwell, so an arriving
- *      bus stops at the stop instead of snapping past it (minute-rounded
- *      ETAs are up to ±60 s off the scheduled arrival, so a plain revert
- *      would skip the stop on fast segments). The continuation runs until
- *      the shifted clock reaches the terminus, and with fetch-more the
- *      trip's own row at the next stop re-anchors it (stop − seconds ×
- *      speed) as usual.
+ *      engine holds it there while the operator feed still lists the bus
+ *      (the ETA card's "Now" lives exactly as long as the row does — the
+ *      marker stays at the stop until "Now" expires), at least DWELL_S and
+ *      at most DWELL_MAX_S, then continues on the schedule shifted by the
+ *      observed deviation + actual dwell, so an arriving bus stops at the
+ *      stop instead of snapping past it (minute-rounded ETAs are up to
+ *      ±60 s off the scheduled arrival, so a plain revert would skip the
+ *      stop on fast segments). The continuation runs until the shifted
+ *      clock reaches the terminus, and with fetch-more the trip's own row
+ *      at the next stop re-anchors it (stop − seconds × speed) as usual.
  *   4. Handoff — the anchored set is always the 3 soonest arrivals at the
  *      board stop: ETA-matched trips use their ETA while future, otherwise
  *      the next-soonest trip (the "4th bus", feeds cap at 3 arrivals) is
@@ -78,8 +80,21 @@ const BOARD_MATCH_TOL_M = 300;
 /** ETA ↔ scheduled-arrival matching tolerance at the board stop. */
 const ETA_MATCH_TOL_MS = 15 * 60_000;
 /** Seconds a bus stays at a stop after its ETA expires (arrival simulation). */
+/**
+ * Stop dwell, seconds. The marker holds at the stop at least this long after
+ * a matched ETA expires (the feed drops the row at arrival, so the stop
+ * would be skipped without it), and beyond that while the operator feed
+ * still lists the bus — see rowStillListed and the DWELL_MAX_S cap.
+ */
 const DWELL_S = 30;
 const DWELL_MS = DWELL_S * 1000;
+/**
+ * Upper bound for the feed-listed dwell (s): the marker never sits at the
+ * stop longer than this, even if the feed keeps the row (stale rows / edge
+ * cases). Also bounds the continuation shift used by activeTrips.
+ */
+const DWELL_MAX_S = 120;
+const DWELL_MAX_MS = DWELL_MAX_S * 1000;
 /** Max projection distance for a schedule stop onto the drawn shape (m). */
 const PROJECT_TOL_M = 400;
 /**
@@ -229,8 +244,10 @@ export class BusPositionEngine {
     this.constraints = new Map();
     /** @type {Array<{ rank: number, etaT: number, dest: string, arrD: number, arrAt: number }>} unmatched ETAs (synth buses) */
     this.synth = [];
-    /** @type {Map<string, { delaySec: number, arrD: number, arrAt: number }>} trip id → arrival bookkeeping (see updateTripState) */
+    /** @type {Map<string, { delaySec: number, arrD: number, arrAt: number, stopIdx: number, dwellEnd?: number }>} trip id → arrival bookkeeping (see updateTripState) */
     this.tripState = new Map();
+    /** @type {Map<number, Array<any>>} stop index → raw (unnormalized) feed rows from the last poll — the dwell-release signal */
+    this.rawRowsByStop = new Map();
     /** @type {Map<number, { distsM: number[], pat: any, boardIdx: number, boardMatchM: number, boardOffSec: number }>} */
     this.patternDists = new Map();
     this.schedules = null;
@@ -286,6 +303,7 @@ export class BusPositionEngine {
     this.lastEmit = null;
     this.initPromise = null;
     this.boardHorizonMs = 0;
+    this.rawRowsByStop.clear();
   }
 
   /** Load schedules (async, cached) + traffic index once at start. */
@@ -448,6 +466,7 @@ export class BusPositionEngine {
       if (!this.running || this.ctx !== ctx) return;
       const anchorIdx = this.anchorStopIndices(ctx);
       const stopEtas = new Map(); // stop index → normalized rows
+      this.rawRowsByStop.clear(); // raw rows per fetched stop, refreshed each poll
       for (const idx of anchorIdx) {
         const stop = ctx.stops?.[idx];
         if (!stop?.stopId || !Number.isFinite(ctx.stopDistM?.[idx])) continue;
@@ -456,6 +475,7 @@ export class BusPositionEngine {
             ? await this.fetchRows(ctx, stop)
             : await this.peekCached(ctx, stop);
         if (!rows?.length) continue;
+        this.rawRowsByStop.set(idx, rows);
         const norm = normalizeRows(ctx.op, rows, ctx.bound, now);
         if (norm.length) stopEtas.set(idx, norm);
       }
@@ -470,6 +490,7 @@ export class BusPositionEngine {
           if (!stop?.stopId || !Number.isFinite(ctx.stopDistM?.[i])) continue;
           const rows = await this.peekCached(ctx, stop);
           if (!rows?.length) continue;
+          this.rawRowsByStop.set(i, rows);
           const norm = normalizeRows(ctx.op, rows, ctx.bound, now);
           if (norm.length) stopEtas.set(i, norm);
         }
@@ -576,7 +597,7 @@ export class BusPositionEngine {
     for (const st of this.tripState.values()) {
       maxShiftMs = Math.max(
         maxShiftMs,
-        (st.delaySec + (st.arrD >= 0 ? DWELL_S : 0)) * 1000,
+        (st.delaySec + (st.arrD >= 0 ? DWELL_MAX_S : 0)) * 1000,
       );
     }
     if (maxShiftMs <= 0) return trips;
@@ -634,7 +655,12 @@ export class BusPositionEngine {
     for (const s of out) if (!s.rank) s.rank = nextRank++;
     for (const s of prev) {
       if (taken.has(s.rank)) continue;
-      if (s.arrD >= 0 && now < s.arrAt + DWELL_MS) out.push(s);
+      // Arrived synths stay while the feed still lists them (the card's
+      // "Now" window), at least the dwell, capped like real trips.
+      if (s.arrD >= 0) {
+        const held = this.rowStillListed(this.ctx.boardStopIndex, s.etaT);
+        if (now < s.arrAt + (held ? DWELL_MAX_MS : DWELL_MS)) out.push(s);
+      }
     }
     out.sort((a, b) => a.etaT - b.etaT);
     return out;
@@ -646,11 +672,18 @@ export class BusPositionEngine {
    *   - a live constraint stores the deviation (rounded ETA − scheduled
    *     arrival) and no dwell;
    *   - a constraint that vanished between polls means the bus arrived — the
-   *     trip dwells at that stop for DWELL_S, then continues on the schedule
-   *     shifted by deviation + dwell (feeds drop the row at arrival, so a
-   *     plain revert would snap the marker past the stop);
+   *     trip dwells at that stop while the operator feed still lists the bus
+   *     (the ETA card's "Now" window), at least DWELL_S and at most
+   *     DWELL_MAX_S, then continues on the schedule shifted by deviation +
+   *     actual dwell (feeds drop the row at arrival, so a plain revert would
+   *     snap the marker past the stop);
    *   - a vanished constraint still in the future (feed hiccup) becomes a
    *     delay-only continuation, which equals the anchored estimate.
+   *
+   * The dwell-release pass runs here (each poll): once the row is gone from
+   * the raw feed — or the DWELL_MAX_S cap hits — the dwell end is recorded,
+   * and computePositions continues the trip from the stop with the actual
+   * dwell.
    */
   updateTripState(trips, prevConstraints, now) {
     const active = new Set(trips.map((t) => t.id));
@@ -670,6 +703,7 @@ export class BusPositionEngine {
         delaySec: schedArr ? (c.etaT - schedArr) / 1000 : 0,
         arrD: -1,
         arrAt: 0,
+        stopIdx: c.stopIdx,
       });
     }
     for (const [id, c] of prevConstraints) {
@@ -681,8 +715,43 @@ export class BusPositionEngine {
         delaySec: schedArr ? (c.etaT - schedArr) / 1000 : 0,
         arrD: c.etaT <= now ? c.d : -1,
         arrAt: c.etaT <= now ? c.etaT : 0,
+        stopIdx: c.stopIdx,
       });
     }
+    // Dwell release: a dwelling trip holds while the raw feed still lists
+    // the bus (the card's "Now" lives as long as the row does) — the marker
+    // stays at the stop until "Now" expires. The cap bounds the hold when
+    // the feed never drops the row; the minimum keeps the stop visible.
+    for (const st of this.tripState.values()) {
+      if (st.arrD < 0 || st.dwellEnd) continue;
+      if (now >= st.arrAt + DWELL_MAX_MS) {
+        st.dwellEnd = st.arrAt + DWELL_MAX_MS;
+      } else if (!this.rowStillListed(st.stopIdx, st.arrAt)) {
+        st.dwellEnd = Math.min(
+          Math.max(st.arrAt + DWELL_MS, now),
+          st.arrAt + DWELL_MAX_MS,
+        );
+      }
+    }
+  }
+
+  /**
+   * Does the operator feed still list a bus at the given stop? True while
+   * the raw row for that arrival survives (not marked departed) — the same
+   * signal the ETA card's "Now" label derives from, so the marker holds at
+   * the stop exactly as long as the card shows the bus. The ±60 s tolerance
+   * covers feeds that bump a dwelling bus's eta to the current minute.
+   */
+  rowStillListed(stopIdx, etaT) {
+    const rows = this.rawRowsByStop.get(stopIdx);
+    if (!rows?.length) return false;
+    for (const r of rows) {
+      if (r?.departed === 1 || r?.departed === true) continue;
+      const iso = r?.eta || r?.estimatedArrivalTime || r?.estimatedArrival;
+      const t = iso ? Date.parse(iso) : NaN;
+      if (Number.isFinite(t) && Math.abs(t - etaT) <= 60_000) return true;
+    }
+    return false;
   }
 
   /**
@@ -700,10 +769,12 @@ export class BusPositionEngine {
       const pd = this.patternDists.get(trip.patIdx);
       if (!pd) continue;
       // Arrival handling: when a trip's constraint expires it is AT the stop.
-      // Hold it there for the dwell, then continue on the schedule shifted by
-      // the observed deviation + dwell, so the marker stops at the stop
-      // instead of snapping past it (minute-rounded ETAs are up to ±60 s away
-      // from the scheduled arrival; a plain revert would skip the stop).
+      // Hold it there while the operator feed still lists the bus (the card's
+      // "Now" window), at least the dwell, then continue on the schedule
+      // shifted by the observed deviation + actual dwell, so the marker stops
+      // at the stop instead of snapping past it (minute-rounded ETAs are up
+      // to ±60 s away from the scheduled arrival; a plain revert would skip
+      // the stop).
       const c = this.constraints.get(trip.id);
       const st = this.tripState.get(trip.id);
       // Phantom guard — TD headway data is a headway-band model, not the
@@ -724,19 +795,29 @@ export class BusPositionEngine {
         const k = this.patternIdxForDist(pd, c.d);
         const schedArr = k ? trip.startEpoch + (pd.offsRows[k.idx][1]) * 1000 : 0;
         const dev = k ? (c.etaT - schedArr) / 1000 : 0;
-        this.tripState.set(trip.id, { delaySec: dev, arrD: c.d, arrAt: c.etaT });
+        const stN = { delaySec: dev, arrD: c.d, arrAt: c.etaT, stopIdx: c.stopIdx };
+        if (!this.rowStillListed(c.stopIdx, c.etaT)) {
+          stN.dwellEnd = Math.min(
+            Math.max(c.etaT + DWELL_MS, now),
+            c.etaT + DWELL_MAX_MS,
+          );
+        }
+        this.tripState.set(trip.id, stN);
+        const dwellMs = stN.dwellEnd ? stN.dwellEnd - stN.arrAt : DWELL_MAX_MS;
         d =
-          now < c.etaT + DWELL_MS
+          now < c.etaT + dwellMs
             ? c.d
-            : this.schedulePos(pd, trip, now - (dev + DWELL_S) * 1000);
+            : this.schedulePos(pd, trip, now - (dev + dwellMs / 1000) * 1000);
       } else if (st && st.arrD >= 0) {
         // The feed dropped the row at arrival; keep the stop visible through
-        // the dwell, then continue on the shifted schedule. The trip drops
-        // out once its shifted clock reaches the terminus.
-        const shiftMs = (st.delaySec + DWELL_S) * 1000;
+        // the feed-listed dwell (the card's "Now" window), then continue on
+        // the shifted schedule. The trip drops out once its shifted clock
+        // reaches the terminus.
+        const dwellMs = st.dwellEnd ? Math.max(0, st.dwellEnd - st.arrAt) : DWELL_MAX_MS;
+        const shiftMs = (st.delaySec + dwellMs / 1000) * 1000;
         if (now - shiftMs > trip.startEpoch + trip.lenSec * 1000) continue;
         d =
-          now < st.arrAt + DWELL_MS
+          now < st.arrAt + dwellMs
             ? st.arrD
             : this.schedulePos(pd, trip, now - shiftMs);
       } else if (st) {
@@ -780,8 +861,15 @@ export class BusPositionEngine {
       // scheduled arrival still lies in the future, which would yank it back
       // behind the stop while it is standing there.
       const st = this.tripState.get(v.id);
-      if (st && st.arrD >= 0 && now < st.arrAt + DWELL_MS) continue;
-      const shiftMs = st ? (st.delaySec + (st.arrD >= 0 ? DWELL_S : 0)) * 1000 : 0;
+      if (st && st.arrD >= 0) {
+        const dwellMs = st.dwellEnd ? st.dwellEnd - st.arrAt : DWELL_MAX_MS;
+        if (now < st.arrAt + dwellMs) continue;
+      }
+      const shiftMs = st
+        ? (st.delaySec +
+            (st.arrD >= 0 && st.dwellEnd ? (st.dwellEnd - st.arrAt) / 1000 : 0)) *
+          1000
+        : 0;
       const etaT = this.etaMap.get(v.id);
       const anchorT =
         etaT != null ? etaT : trip.startEpoch + pd.boardOffSec * 1000 + shiftMs;
@@ -829,15 +917,16 @@ export class BusPositionEngine {
       v.anchored = true;
     }
     // Unmatched ETAs → synthetic buses (id stable by rank). An arrived synth
-    // simulates the stop: it holds at the stop for the dwell, then drops
-    // (the feed dropped its row anyway).
+    // simulates the stop: it holds at the stop for the feed-listed window
+    // (same rule as real trips), then drops (the feed dropped its row anyway).
     for (const s of this.synth) {
       if (s.etaT <= now) {
         if (s.arrD < 0) {
           s.arrD = boardDist;
           s.arrAt = s.etaT;
         }
-        if (now < s.arrAt + DWELL_MS) {
+        const held = this.rowStillListed(ctx.boardStopIndex, s.etaT);
+        if (now < s.arrAt + (held ? DWELL_MAX_MS : DWELL_MS)) {
           out.push({
             id: `synth:${s.rank}`,
             d: s.arrD,
