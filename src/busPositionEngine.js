@@ -35,6 +35,12 @@
  *      stop on fast segments). The continuation runs until the shifted
  *      clock reaches the terminus, and with fetch-more the trip's own row
  *      at the next stop re-anchors it (stop − seconds × speed) as usual.
+ *      With fetch-more the hold also ends early when the next stop's ETA
+ *      demands it: the bus departs before its own "Now" expires — right
+ *      away when the next stop's ETA already reads "Now", otherwise once
+ *      the remaining ETA equals the speed-map travel time to that stop —
+ *      and travels the segment at speed-map speeds instead of lingering
+ *      at the old stop or teleporting to the new one.
  *   4. Handoff — the anchored set is always the 3 soonest arrivals at the
  *      board stop: ETA-matched trips use their ETA while future, otherwise
  *      the next-soonest trip (the "4th bus", feeds cap at 3 arrivals) is
@@ -251,6 +257,8 @@ export class BusPositionEngine {
     this.running = false;
     /** @type {Map<string, number>} trip id → ETA time from the last poll */
     this.etaMap = new Map();
+    /** @type {Map<string, Array<{ stopIdx: number, etaT: number, d: number }>}>} trip id → every matched row this poll (ascending stop order) — the early-departure rules need the next stop's ETA, not just the soonest constraint */
+    this.tripEtas = new Map();
     /** @type {Map<string, { etaT: number, d: number, stopIdx: number }>} trip id → soonest ETA constraint across all anchor stops */
     this.constraints = new Map();
     /** @type {Array<{ rank: number, etaT: number, dest: string, arrD: number, arrAt: number }>} unmatched ETAs (synth buses) */
@@ -315,6 +323,7 @@ export class BusPositionEngine {
     this.initPromise = null;
     this.boardHorizonMs = 0;
     this.rawRowsByStop.clear();
+    this.tripEtas.clear();
   }
 
   /** Load schedules (async, cached) + traffic index once at start. */
@@ -544,6 +553,7 @@ export class BusPositionEngine {
     // dwell at that stop instead of letting the trip snap past it.
     const prevConstraints = new Map(this.constraints);
     this.etaMap.clear();
+    this.tripEtas.clear();
     this.constraints.clear();
     const synthRows = [];
     let trips = [];
@@ -576,6 +586,12 @@ export class BusPositionEngine {
             continue;
           }
           matched.add(best.id);
+          // Keep every matched row per trip — the constraint holds only the
+          // soonest, while the early-departure rules need the next stop's ETA
+          // too (rows arrive in ascending stop order).
+          const etas = this.tripEtas.get(best.id);
+          if (etas) etas.push({ stopIdx, etaT: eta.t, d });
+          else this.tripEtas.set(best.id, [{ stopIdx, etaT: eta.t, d }]);
           const prev = this.constraints.get(best.id);
           if (!prev || eta.t < prev.etaT) {
             this.constraints.set(best.id, { etaT: eta.t, d, stopIdx });
@@ -709,6 +725,20 @@ export class BusPositionEngine {
     for (const [id, c] of this.constraints) {
       const trip = trips.find((t) => t.id === id);
       if (!trip) continue;
+      const held = this.tripState.get(id);
+      // fetch-more: a held state survives the rebuild while its own stop's
+      // row (or a row at a stop ahead) still constrains the trip — the
+      // constraint branch then releases it early per the departure rules
+      // instead of rebuilding the arrival from scratch (which would lose the
+      // early release and re-pin the marker at the stop).
+      if (
+        this.ctx.fetchMore &&
+        held &&
+        held.arrD >= 0 &&
+        (held.arrD < c.d || held.stopIdx === c.stopIdx)
+      ) {
+        continue;
+      }
       const schedArr = schedArrAt(trip, c.d);
       this.tripState.set(id, {
         delaySec: schedArr ? (c.etaT - schedArr) / 1000 : 0,
@@ -721,6 +751,12 @@ export class BusPositionEngine {
       if (!active.has(id) || this.constraints.has(id)) continue;
       const trip = trips.find((t) => t.id === id);
       if (!trip) continue;
+      const held = this.tripState.get(id);
+      // A state the departure rules already released keeps its early dwell
+      // end — rebuilding here would re-pin the marker at the old stop.
+      if (this.ctx.fetchMore && held && held.arrD >= 0 && held.dwellEnd !== undefined) {
+        continue;
+      }
       const schedArr = schedArrAt(trip, c.d);
       this.tripState.set(id, {
         delaySec: schedArr ? (c.etaT - schedArr) / 1000 : 0,
@@ -766,6 +802,47 @@ export class BusPositionEngine {
   }
 
   /**
+   * fetch-more early-departure end: when is the hold at an arrival stop
+   * allowed to end? The bus may leave before its own "Now" expires once the
+   * next stop's remaining ETA can no longer be made at speed-map speeds —
+   * the marker then departs (immediately when that ETA already reads "Now")
+   * and travels at segment speeds instead of lingering at the old stop.
+   * Returns the departure time, or null to hold to the natural end.
+   */
+  earlyDepartureEnd(trip, pd, st, now) {
+    if (!this.ctx.fetchMore || !st || st.arrD < 0) return null;
+    let next = null;
+    for (const r of this.tripEtas.get(trip.id) || []) {
+      if (r.stopIdx > st.stopIdx) {
+        next = r;
+        break;
+      }
+    }
+    if (!next) return null;
+    const k0 = this.patternIdxForDist(pd, st.arrD);
+    const k1 = this.patternIdxForDist(pd, next.d);
+    if (!k0 || !k1 || k1.idx <= k0.idx) return null;
+    // Speed-map travel time to the next matched stop: each pattern segment at
+    // its midpoint's traffic multiplier (the same model schedulePos uses).
+    const offs = pd.offsRows;
+    let travelMs = 0;
+    for (let i = k0.idx; i < k1.idx; i++) {
+      const dt = (offs[i + 1][1] - offs[i][1]) * 1000;
+      if (dt <= 0) continue;
+      const mid = alongToLonLat(
+        this.ctx.shape.coords,
+        this.ctx.shape.cumM,
+        (pd.distsM[i] + pd.distsM[i + 1]) / 2,
+      );
+      const m = this.trafficIndex && mid ? this.trafficIndex.multiplierAt(mid.lon, mid.lat) : 1;
+      travelMs += dt / m;
+    }
+    const naturalEnd = st.dwellEnd ?? st.arrAt + DWELL_MAX_MS;
+    const release = Math.max(now, Math.min(naturalEnd, next.etaT - travelMs));
+    return release < naturalEnd ? release : null;
+  }
+
+  /**
    * Deterministic position computation (poll and 1 Hz tick share this, so
    * markers advance smoothly at schedule speed between polls):
    * schedule pass → 3-slot anchor pass (ETA first, schedule handoff) → synth.
@@ -803,29 +880,71 @@ export class BusPositionEngine {
       }
       let d;
       if (c && c.etaT <= now) {
-        const k = this.patternIdxForDist(pd, c.d);
-        const schedArr = k ? trip.startEpoch + (pd.offsRows[k.idx][1]) * 1000 : 0;
-        const dev = k ? (c.etaT - schedArr) / 1000 : 0;
-        const stN = { delaySec: dev, arrD: c.d, arrAt: c.etaT, stopIdx: c.stopIdx };
-        // Release when the row is gone — or at the dwell cap even if the feed
-        // keeps the row (a stale row must not pin the marker at the stop).
-        if (!this.rowStillListed(c.stopIdx, c.etaT) || now >= c.etaT + DWELL_MAX_MS) {
-          stN.dwellEnd = Math.min(
-            Math.max(c.etaT + DWELL_MS, now),
-            c.etaT + DWELL_MAX_MS,
-          );
+        const held = this.tripState.get(trip.id);
+        // fetch-more departure rules: the marker is held (or was held) at a
+        // stop while a row reads "Now" — the row's stop wins over the hold.
+        //   a) the row is at a stop AHEAD — the bus is overdue there per the
+        //      feed: release the hold now (depart before "Now" expires) and
+        //      continue on the shifted schedule, so the marker travels the
+        //      segment at speed-map speeds instead of lingering at the old
+        //      stop or teleporting to the new one; once it reaches the stop
+        //      the normal arrival hold below takes over.
+        //   b) the row is at the SAME stop — hold while the row lists (the
+        //      "Now" card), but leave early when the next stop's ETA can't be
+        //      made at speed-map speeds (earlyDepartureEnd).
+        if (this.ctx.fetchMore && held && held.arrD >= 0) {
+          if (held.arrD < c.d) {
+            // Release at now, never later — a re-derived dwell would snap the
+            // marker back to the held stop on the next poll.
+            held.dwellEnd = Math.min(held.dwellEnd ?? Infinity, now);
+            const dwellMs = Math.max(0, held.dwellEnd - held.arrAt);
+            const shiftMs = (held.delaySec + dwellMs / 1000) * 1000;
+            if (now - shiftMs <= trip.startEpoch + trip.lenSec * 1000) {
+              const cand = this.schedulePos(pd, trip, now - shiftMs);
+              if (cand < c.d) d = cand;
+            }
+          } else if (held.stopIdx === c.stopIdx) {
+            const earlyEnd = this.earlyDepartureEnd(trip, pd, held, now);
+            if (earlyEnd !== null) held.dwellEnd = earlyEnd;
+            const holdMs = held.dwellEnd
+              ? Math.max(0, held.dwellEnd - held.arrAt)
+              : DWELL_MAX_MS;
+            const shiftMs = (held.delaySec + holdMs / 1000) * 1000;
+            d =
+              now < held.arrAt + holdMs
+                ? c.d
+                : this.schedulePos(pd, trip, now - shiftMs);
+          }
         }
-        this.tripState.set(trip.id, stN);
-        const dwellMs = stN.dwellEnd ? stN.dwellEnd - stN.arrAt : DWELL_MAX_MS;
-        d =
-          now < c.etaT + dwellMs
-            ? c.d
-            : this.schedulePos(pd, trip, now - (dev + dwellMs / 1000) * 1000);
+        if (d === undefined) {
+          const k = this.patternIdxForDist(pd, c.d);
+          const schedArr = k ? trip.startEpoch + (pd.offsRows[k.idx][1]) * 1000 : 0;
+          const dev = k ? (c.etaT - schedArr) / 1000 : 0;
+          const stN = { delaySec: dev, arrD: c.d, arrAt: c.etaT, stopIdx: c.stopIdx };
+          // Release when the row is gone — or at the dwell cap even if the feed
+          // keeps the row (a stale row must not pin the marker at the stop).
+          if (!this.rowStillListed(c.stopIdx, c.etaT) || now >= c.etaT + DWELL_MAX_MS) {
+            stN.dwellEnd = Math.min(
+              Math.max(c.etaT + DWELL_MS, now),
+              c.etaT + DWELL_MAX_MS,
+            );
+          }
+          this.tripState.set(trip.id, stN);
+          const dwellMs = stN.dwellEnd ? stN.dwellEnd - stN.arrAt : DWELL_MAX_MS;
+          d =
+            now < c.etaT + dwellMs
+              ? c.d
+              : this.schedulePos(pd, trip, now - (dev + dwellMs / 1000) * 1000);
+        }
       } else if (st && st.arrD >= 0) {
         // The feed dropped the row at arrival; keep the stop visible through
         // the feed-listed dwell (the card's "Now" window), then continue on
-        // the shifted schedule. The trip drops out once its shifted clock
-        // reaches the terminus.
+        // the shifted schedule. With fetch-more the hold also ends early when
+        // the next stop's ETA can't be made at speed-map speeds — the panel's
+        // countdown wins over the lingering row here. The trip drops out once
+        // its shifted clock reaches the terminus.
+        const earlyEnd = this.earlyDepartureEnd(trip, pd, st, now);
+        if (earlyEnd !== null) st.dwellEnd = earlyEnd;
         const dwellMs = st.dwellEnd ? Math.max(0, st.dwellEnd - st.arrAt) : DWELL_MAX_MS;
         const shiftMs = (st.delaySec + dwellMs / 1000) * 1000;
         if (now - shiftMs > trip.startEpoch + trip.lenSec * 1000) continue;
@@ -878,6 +997,12 @@ export class BusPositionEngine {
         const dwellMs = st.dwellEnd ? st.dwellEnd - st.arrAt : DWELL_MAX_MS;
         if (now < st.arrAt + dwellMs) continue;
       }
+      // A trip the fetch-more departure rules released (expired "Now" row at
+      // a non-board stop ahead) is already on its shifted continuation —
+      // re-anchoring it here (deviation-only, via the expired ETA) would snap
+      // the marker forward to the next stop.
+      const cEarly = this.constraints.get(v.id);
+      if (cEarly && cEarly.etaT <= now && cEarly.stopIdx !== ctx.boardStopIndex) continue;
       const shiftMs = st
         ? (st.delaySec +
             (st.arrD >= 0 && st.dwellEnd ? (st.dwellEnd - st.arrAt) / 1000 : 0)) *
@@ -919,6 +1044,10 @@ export class BusPositionEngine {
       const c = this.constraints.get(v.id);
       if (!c || c.stopIdx === ctx.boardStopIndex || !Number.isFinite(c.d)) continue;
       if (c.etaT <= now) continue;
+      // A trip mid-dwell or on its shifted continuation is already placed —
+      // the deviation-only anchor here would snap it back to the stop.
+      const stX = this.tripState.get(v.id);
+      if (stX && stX.arrD >= 0) continue;
       extended.push({ v, c });
     }
     extended.sort((a, b) => a.c.etaT - b.c.etaT);
