@@ -95,6 +95,14 @@ const DWELL_MS = DWELL_S * 1000;
  */
 const DWELL_MAX_S = 120;
 const DWELL_MAX_MS = DWELL_MAX_S * 1000;
+/**
+ * Rows whose published ETA is up to this far in the past are buses AT the
+ * stop (minute-rounded "Now" rows live while the bus stands there). Kept
+ * briefly so a "Now" row anchors the marker at the stop instead of dropping
+ * the trip to the schedule — or worse, letting a neighboring bus's row at an
+ * upstream stop hijack it (fetch-more polls upstream stops first).
+ */
+const AT_STOP_WINDOW_MS = 2 * 60_000;
 /** Max projection distance for a schedule stop onto the drawn shape (m). */
 const PROJECT_TOL_M = 400;
 /**
@@ -202,7 +210,10 @@ function normalizeRows(op, rows, bound, now = Date.now()) {
     if (r?.departed === 1 || r?.departed === true) continue;
     const iso = r?.eta || r?.estimatedArrivalTime || r?.estimatedArrival;
     const t = iso ? Date.parse(iso) : NaN;
-    if (!Number.isFinite(t) || t <= now) continue;
+    // Rows up to AT_STOP_WINDOW_MS in the past are buses standing at the
+    // stop (minute-rounded "Now" rows) — kept so the marker holds there;
+    // anything older is a stale row.
+    if (!Number.isFinite(t) || t <= now - AT_STOP_WINDOW_MS) continue;
     if (bound && r?.dir && String(r.dir).toUpperCase() !== bound) continue;
     out.push({
       t,
@@ -796,7 +807,9 @@ export class BusPositionEngine {
         const schedArr = k ? trip.startEpoch + (pd.offsRows[k.idx][1]) * 1000 : 0;
         const dev = k ? (c.etaT - schedArr) / 1000 : 0;
         const stN = { delaySec: dev, arrD: c.d, arrAt: c.etaT, stopIdx: c.stopIdx };
-        if (!this.rowStillListed(c.stopIdx, c.etaT)) {
+        // Release when the row is gone — or at the dwell cap even if the feed
+        // keeps the row (a stale row must not pin the marker at the stop).
+        if (!this.rowStillListed(c.stopIdx, c.etaT) || now >= c.etaT + DWELL_MAX_MS) {
           stN.dwellEnd = Math.min(
             Math.max(c.etaT + DWELL_MS, now),
             c.etaT + DWELL_MAX_MS,
