@@ -239,6 +239,71 @@ function orientShapeToStops(coords, stops) {
   }
 }
 
+/**
+ * Cumulative metres along a decoded polyline (equirectangular, same math as
+ * projectStopMonotonic so distances agree with the stop snapping).
+ * Returns an array of the same length as coords.
+ * @param {LngLat[]} coords
+ * @returns {number[]}
+ */
+export function cumulativeMeters(coords) {
+  const cum = [0];
+  for (let i = 1; i < coords.length; i++) {
+    const a = coords[i - 1];
+    const b = coords[i];
+    if (
+      !Number.isFinite(a?.lon) ||
+      !Number.isFinite(a?.lat) ||
+      !Number.isFinite(b?.lon) ||
+      !Number.isFinite(b?.lat)
+    ) {
+      cum.push(cum[i - 1]);
+      continue;
+    }
+    const cos = Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180));
+    const dLat = (b.lat - a.lat) * (Math.PI / 180);
+    const dLon = (b.lon - a.lon) * (Math.PI / 180);
+    cum.push(cum[i - 1] + 6371000 * Math.hypot(dLat, dLon * cos));
+  }
+  return cum;
+}
+
+/**
+ * Project a lon/lat onto a polyline in travel order, returning metres-along
+ * the shape. Uses the same nearest-segment-with-far-ahead-penalty rule as
+ * projectStopMonotonic so the along-distance agrees with the monotonic stop
+ * snapping used by the bus-position engine.
+ * @param {LngLat[]} coords
+ * @param {number} lon
+ * @param {number} lat
+ * @param {number} [searchFrom] vertex index to start searching from
+ * @returns {{ alongM: number, segEnd: number, lon: number, lat: number, d: number } | null}
+ */
+export function projectOntoShape(coords, lon, lat, searchFrom = 0) {
+  const mono = projectStopMonotonic(coords, lon, lat, searchFrom);
+  if (!mono) return null;
+  const cum = cumulativeMeters(coords);
+  const start = Math.max(0, Math.min(mono.segEnd - 1, cum.length - 1));
+  let alongM = cum[start] ?? 0;
+  const a = coords[mono.segEnd - 1];
+  const b = coords[mono.segEnd];
+  if (
+    a &&
+    b &&
+    Number.isFinite(a?.lon) &&
+    Number.isFinite(a?.lat) &&
+    Number.isFinite(b?.lon) &&
+    Number.isFinite(b?.lat)
+  ) {
+    const p = projectOnSegment(a, b, lon, lat);
+    if (p) {
+      const segLen = (cum[mono.segEnd] ?? cum[start]) - (cum[start] ?? 0);
+      alongM += segLen * p.t;
+    }
+  }
+  return { alongM, segEnd: mono.segEnd, lon: mono.lon, lat: mono.lat, d: mono.d };
+}
+
 function routeIdKey(routeId) {
   return String(routeId || "").toUpperCase().replace(/\s+/g, "");
 }
@@ -369,7 +434,7 @@ export async function preloadGtfsBusShape(opt, opts = {}) {
  * Never throws — returns null on any failure so callers fall back.
  * @param {{ route_id?: string, route_short_name?: string, agency?: { id?: string, name?: string }, from?: any, to?: any, bound?: string, direction_id?: string|number, headsign?: string, stops?: any[] }} opt
  * @param {{ signal?: AbortSignal }} [opts]
- * @returns {Promise<{ coords: LngLat[], route_id: string, headsign?: string } | null>}
+ * @returns {Promise<{ coords: LngLat[], route_id: string, headsign?: string, cumM: number[] } | null>}
  */
 export async function getGtfsBusShape(opt, opts = {}) {
   try {
@@ -420,7 +485,7 @@ export async function getGtfsBusShape(opt, opts = {}) {
       "pts",
       shape?.h?.[0] ? `(dir ${shape.h[0]})` : "",
     );
-    return { coords, route_id: ridKey, headsign: shape?.h?.[0] };
+    return { coords, route_id: ridKey, headsign: shape?.h?.[0], cumM: cumulativeMeters(coords) };
   } catch (e) {
     if (e?.name === "AbortError") throw e;
     console.warn("[bus-shapes] shape lookup failed, falling back", e);

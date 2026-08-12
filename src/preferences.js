@@ -513,6 +513,36 @@ export function saveDataSourcePref(v) {
   return next;
 }
 
+/** Live bus positions Beta toggle (PRD 4.2) — default on */
+export const LIVE_BUS_STORAGE_KEY = "morgan.liveBusPositions";
+
+/**
+ * @returns {boolean} user enabled live bus position markers (default on)
+ */
+export function loadLiveBusPref() {
+  try {
+    const raw = localStorage.getItem(LIVE_BUS_STORAGE_KEY);
+    if (raw === "1" || raw === "0") return raw === "1";
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
+/**
+ * @param {boolean} v
+ * @returns {boolean}
+ */
+export function saveLiveBusPref(v) {
+  const next = !!v;
+  try {
+    localStorage.setItem(LIVE_BUS_STORAGE_KEY, next ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+  return next;
+}
+
 /**
  * Short label for result meta, e.g. "Fastest + Simplest"
  * @param {RoutePreference[]} prefs

@@ -69,7 +69,7 @@ To optimize battery life, network bandwidth, and API limits, the engine uses a h
 Designed with a geometric sans-serif aesthetic (Montserrat) and sleek transparency elements.
 
 * **Standard Mode:** Optimized for quick glances. Displays simple ETA countdowns (e.g., "3 min") and smooth, predictive map markers.  
-* **Bus Spotter Mode (巴士迷 Mode):** A toggleable raw-data view overlaying technical specifications (wheelchair accessibility, exact timestamps, vehicle capacity) directly onto the map interface for extended tracking sessions
+* **Bus Spotter Mode (巴士迷 Mode):** A toggleable raw-data view overlaying technical specifications (wheelchair accessibility, exact timestamps, vehicle capacity) directly onto the map interface for extended tracking sessions (*Bus Spotter Mode idea cancelled.)
 
 ### **5\. Technical Stack & Deployment**
 

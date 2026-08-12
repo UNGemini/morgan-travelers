@@ -63,6 +63,8 @@ import {
   saveDataCachePref,
   loadDataSourcePref,
   saveDataSourcePref,
+  loadLiveBusPref,
+  saveLiveBusPref,
 } from "./preferences.js";
 import { resolveRouteColor } from "./mtrColors.js";
 import {
@@ -14507,6 +14509,354 @@ if (typeof window !== "undefined") {
     runPlan,
   };
 }
+
+// ── Live bus positions (PRD 4.2, Beta) ─────────────────────────────────────
+// Self-contained additive block: Beta toggle UI, engine lifecycle, marker
+// layers, and the PRD 4.3 loops (Instant Sync / Pulse / Baseline). The engine
+// runs only while the ETA route-detail page shows a KMB/CTB/NLB bus route AND
+// the settings toggle is on; otherwise the app behaves exactly as before — no
+// timers, no map sources, no fetches. No existing function is edited.
+
+let busPosEngine = null;
+let busPosSyncing = false;
+let busPosCheapSig = ""; // last synced detail-state signature
+let busPosSig = ""; // signature of the running engine's ctx
+let busPosLayersOn = false;
+let busPosModPromise = null;
+let busPosRouteShapesPromise = null;
+const getBusPosMod = () =>
+  (busPosModPromise ||= import("./busPositionEngine.js"));
+const getBusPosRouteShapesMod = () =>
+  (busPosRouteShapesPromise ||= import("./routeShapes.js"));
+const BUS_POS_LAYER_IDS = ["bus-pos-halo", "bus-pos-dot", "bus-pos-label"];
+
+/**
+ * Current detail-page state the engine needs, or null when it must not run:
+ * bus route (KMB/CTB/NLB), toggle on, eta-route page open, named stops with
+ * ETA-able stop ids, and a board stop. Sync-only — never awaits.
+ */
+function busPosDetailState() {
+  const route = etaSelectedForDetails;
+  if (!route) return null;
+  const co = String(route.co || "").toLowerCase();
+  if (route.kind !== "bus" || !["kmb", "ctb", "nlb"].includes(co)) return null;
+  if (!loadLiveBusPref()) return null;
+  if (sidebarPage !== "eta-route") return null;
+  const named = etaSelectedStops.filter((s) => s.name && !s._polylineOnly);
+  if (named.length < 2) return null;
+  const boardIndex = Math.min(Math.max(0, etaDetailStopIndex || 0), named.length - 1);
+  if (!named[boardIndex]?.stopId) return null;
+  return { route, co, named, boardIndex };
+}
+
+/** Cheap signature of the detail state (direction flips change it). */
+function busPosCheapSigOf(st) {
+  const dirs = etaRouteDirections(st.route, { full: true });
+  let di = resolveCardDirIndex(st.route, dirs);
+  if (di >= dirs.length) di = Math.max(0, dirs.length - 1);
+  const dir = dirs[di] || dirs[0] || {};
+  const bound = String(dir.bound || "O").toUpperCase();
+  return [
+    st.co,
+    String(st.route.id || ""),
+    bound === "LINE" || bound === "LRT" ? "" : bound,
+    String(dir?.serviceType ?? dir?.service_type ?? ""),
+    String(dir?.routeId || ""),
+    st.named.length,
+    st.boardIndex,
+  ].join("|");
+}
+
+/**
+ * Build the engine ctx for the current detail state (async: direction
+ * filtering, GTFS shape, stop along-shape distances). Returns null when the
+ * route has no usable shape.
+ */
+async function busPosBuildCtx(st) {
+  // Same direction resolution as showEtaRouteDetailsPanel (filtered dirs + card)
+  const dirs = await filterDirsWithRealStops(
+    st.route,
+    etaRouteDirections(st.route, { full: true }),
+  );
+  if (!dirs?.length) return null;
+  let di = resolveCardDirIndex(st.route, dirs);
+  if (di >= dirs.length) di = Math.max(0, dirs.length - 1);
+  const dir = dirs[di] || dirs[0];
+  const bound = String(dir?.bound || "O").toUpperCase();
+  if (bound === "LINE" || bound === "LRT") return null;
+
+  const { getGtfsBusShape, projectOntoShape } = await getBusPosRouteShapesMod();
+  const coUp = st.co.toUpperCase();
+  // Same shape pipeline the drawn route path uses (see buildTransitPolyline)
+  const shape = await getGtfsBusShape({
+    route_id: `${coUp}-${st.route.id}`,
+    route_short_name: String(st.route.id || ""),
+    agency: { id: coUp, name: coUp },
+    bound,
+    stops: st.named,
+    headsign: dir?.dest || "",
+  });
+  if (!shape?.coords?.length || !shape.cumM?.length) {
+    console.warn("[buspos] no GTFS shape for", st.co, st.route.id, bound);
+    return null;
+  }
+
+  // Along-shape distances for the window stops (monotonic, travel order)
+  const stopDistM = [];
+  let searchFrom = 0;
+  for (const s of st.named) {
+    if (!Number.isFinite(s.lon) || !Number.isFinite(s.lat)) {
+      stopDistM.push(NaN);
+      continue;
+    }
+    const p = projectOntoShape(shape.coords, s.lon, s.lat, searchFrom);
+    if (!p) {
+      stopDistM.push(NaN);
+      continue;
+    }
+    stopDistM.push(p.alongM);
+    searchFrom = p.segEnd;
+  }
+
+  const serviceType =
+    Number(dir?.serviceType ?? dir?.service_type) ||
+    Number(
+      (kmbRouteBoundsMap?.get(String(st.route.id || "").toUpperCase()) || []).find(
+        (b) => String(b.bound || "").toUpperCase() === bound,
+      )?.service_type,
+    ) ||
+    1;
+  const sig = [
+    st.co,
+    String(st.route.id || ""),
+    bound,
+    String(serviceType),
+    String(dir?.routeId || ""),
+    st.named.length,
+    st.boardIndex,
+  ].join("|");
+
+  return {
+    sig,
+    ctx: {
+      op: st.co,
+      routeId: String(st.route.id || ""),
+      routeShort: String(st.route.id || ""),
+      bound,
+      serviceType,
+      stops: st.named.map((s, i) => ({
+        stopId: s.stopId,
+        seq: s.seq ?? i + 1,
+        lon: s.lon,
+        lat: s.lat,
+      })),
+      boardStopIndex: st.boardIndex,
+      shape,
+      stopDistM,
+      nlbRouteIds: st.co === "nlb" ? [String(dir?.routeId || "")].filter(Boolean) : undefined,
+    },
+  };
+}
+
+/** Start/stop/restart the engine to match the current detail state. */
+async function busPosSyncState() {
+  const st = busPosDetailState();
+  const cheap = st ? busPosCheapSigOf(st) : "";
+  if (!cheap) {
+    if (busPosEngine || busPosLayersOn) busPosStopEngine();
+    busPosCheapSig = "";
+    busPosSig = "";
+    return;
+  }
+  if (busPosEngine && cheap === busPosCheapSig) return;
+  if (busPosSyncing) return;
+  busPosSyncing = true;
+  try {
+    busPosCheapSig = cheap;
+    const built = await busPosBuildCtx(st);
+    const st2 = busPosDetailState();
+    if (!st2 || busPosCheapSigOf(st2) !== cheap) return; // changed mid-build
+    if (busPosEngine) busPosStopEngine();
+    if (!built) return;
+    const { BusPositionEngine } = await getBusPosMod();
+    busPosEngine = new BusPositionEngine({ onUpdate: busPosOnUpdate });
+    busPosEngine.start(built.ctx);
+    busPosSig = built.sig;
+    if (busPosEngine.running) {
+      busPosEnsureLayers();
+      void busPosEngine.poll();
+    }
+  } finally {
+    busPosSyncing = false;
+  }
+}
+
+function busPosStopEngine() {
+  busPosEngine?.stop();
+  busPosEngine = null;
+  busPosSig = "";
+  busPosRemoveLayers();
+}
+
+/** GeoJSON source + three marker layers, added above everything on start. */
+function busPosEnsureLayers() {
+  if (!map?.getStyle || busPosLayersOn) return;
+  if (!map.getSource("bus-positions")) {
+    map.addSource("bus-positions", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+  }
+  if (!map.getLayer("bus-pos-halo")) {
+    map.addLayer({
+      id: "bus-pos-halo",
+      type: "circle",
+      source: "bus-positions",
+      paint: {
+        "circle-radius": 18,
+        "circle-color": "#0a0c10",
+        "circle-opacity": 0.55,
+        "circle-blur": 0.7,
+      },
+    });
+  }
+  if (!map.getLayer("bus-pos-dot")) {
+    map.addLayer({
+      id: "bus-pos-dot",
+      type: "circle",
+      source: "bus-positions",
+      paint: {
+        "circle-radius": 14,
+        "circle-color": "#c0aefc",
+        // Fades when the stitch confidence drops (marker stays visible but honest)
+        "circle-opacity": [
+          "case",
+          ["<", ["get", "confidence"], 0.6],
+          0.25,
+          0.95,
+        ],
+        "circle-stroke-color": "rgba(255,255,255,0.85)",
+        "circle-stroke-width": 2,
+      },
+    });
+  }
+  if (!map.getLayer("bus-pos-label")) {
+    map.addLayer({
+      id: "bus-pos-label",
+      type: "symbol",
+      source: "bus-positions",
+      layout: {
+        "text-field": ["get", "label"],
+        "text-size": 12,
+        "text-allow-overlap": true,
+        "text-ignore-placement": true,
+        "text-anchor": "center",
+        "text-font": ["Noto Sans Regular"],
+      },
+      paint: {
+        "text-color": "#ffffff",
+        "text-halo-color": "rgba(0,0,0,0.75)",
+        "text-halo-width": 1,
+      },
+    });
+  }
+  // Re-raise above any layers painted after the panel opened (e.g. MTR)
+  for (const id of BUS_POS_LAYER_IDS) {
+    try {
+      if (map.getLayer(id)) map.moveLayer(id);
+    } catch {
+      /* style not ready */
+    }
+  }
+  busPosLayersOn = true;
+}
+
+function busPosRemoveLayers() {
+  for (const id of BUS_POS_LAYER_IDS) {
+    try {
+      if (map?.getLayer?.(id)) map.removeLayer(id);
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    if (map?.getSource?.("bus-positions")) map.removeSource("bus-positions");
+  } catch {
+    /* ignore */
+  }
+  busPosLayersOn = false;
+}
+
+/** Engine emit → GeoJSON features (route number + confidence per vehicle). */
+function busPosOnUpdate(evt) {
+  if (!map?.getStyle) return;
+  // Layers may not exist yet if the first emit raced a not-ready style.
+  if (!busPosLayersOn && !map.getSource("bus-positions")) busPosEnsureLayers();
+  const src = map?.getSource?.("bus-positions");
+  if (!src) return;
+  const features = (evt?.vehicles || []).map((v) => ({
+    type: "Feature",
+    properties: {
+      label: String(v.label || ""),
+      confidence: Math.max(0.1, Math.min(1, Number(v.confidence) || 0)),
+    },
+    geometry: {
+      type: "Point",
+      coordinates: [Number(v.lon), Number(v.lat)],
+    },
+  }));
+  src.setData({ type: "FeatureCollection", features });
+}
+
+/** Beta toggle UI (mirrors initTrafficMethodUi; saves + syncs the engine). */
+function initLiveBusPrefUi() {
+  const on = document.getElementById("live-bus-on");
+  const off = document.getElementById("live-bus-off");
+  if (!on || !off) return;
+  (loadLiveBusPref() ? on : off).checked = true;
+  for (const el of [on, off]) {
+    el.addEventListener("change", () => {
+      if (!el.checked) return;
+      const next = saveLiveBusPref(el === on);
+      showToast(
+        next ? "Live bus positions enabled" : "Live bus positions disabled",
+        1600,
+      );
+      void busPosSyncState();
+    });
+  }
+}
+initLiveBusPrefUi();
+
+// PRD 4.3 loops — all visibility-gated (same pattern as the existing timers).
+// 1 s cadence: keep the engine state in sync + advance Kalman interpolation.
+setInterval(() => {
+  if (document.visibilityState !== "visible") return;
+  void busPosSyncState();
+  busPosEngine?.tick();
+}, 1_000);
+
+// Pulse: one poll per minute while a route detail is open (traffic from cache).
+setInterval(() => {
+  if (document.visibilityState !== "visible") return;
+  if (!busPosEngine?.running) return;
+  void busPosEngine.poll();
+}, 60_000);
+
+// Baseline: traffic index refresh + poll every 5 minutes.
+setInterval(() => {
+  if (document.visibilityState !== "visible") return;
+  if (!busPosEngine?.running) return;
+  void busPosEngine.refreshTraffic();
+  void busPosEngine.poll();
+}, 300_000);
+
+// Instant Sync: coming back to the app polls immediately.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  void busPosSyncState();
+  if (busPosEngine?.running) void busPosEngine.poll();
+});
 
 // ── Boot splash ─────────────────────────────────────────────────────────────
 const BOOT_SPLASH_MIN_MS = 700;

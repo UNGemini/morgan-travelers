@@ -34,10 +34,13 @@ const CACHE_MS = 25_000;
 let nlbRouteMapPromise = null;
 
 /**
+ * Same-origin JSON fetch with a shared in-memory TTL cache (25 s default).
+ * Exported so the bus-position engine reuses the same cache and coalesces
+ * its stop-ETA calls with browse/detail fetches (KMB rate-limit friendly).
  * @param {string} url
  * @param {{ ttlMs?: number }} [opts]
  */
-async function fetchJson(url, opts = {}) {
+export async function fetchJson(url, opts = {}) {
   const ttl = opts.ttlMs ?? CACHE_MS;
   const hit = cache.get(url);
   if (hit && Date.now() - hit.t < ttl) return hit.data;
