@@ -5954,6 +5954,19 @@ html.pwa .offline-banner {
   text-transform: uppercase;
   color: #fff;
 }
+/* Wider than the offline card: spans the top with 16px margins, no 560px cap */
+.offline-banner.beta-banner {
+  left: 16px;
+  right: 16px;
+  width: auto;
+  max-width: none;
+  transform: none;
+}
+html.pwa .offline-banner.beta-banner {
+  left: 16px;
+  right: 16px;
+  transform: none;
+}
 /* Offline + beta cards at once: stack, don't overlap */
 #offline-banner:not([hidden]) + #beta-banner {
   top: calc(12px + env(safe-area-inset-top, 0px) + 52px);
