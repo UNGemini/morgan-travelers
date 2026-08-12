@@ -3207,10 +3207,30 @@ function initBetaBannerPrefUi() {
   for (const el of [on, off]) {
     el.addEventListener("change", () => {
       if (!el.checked) return;
-      const next = saveBetaBannerPref(el === on);
+      if (el === off) {
+        // Turning it off requires acknowledging the disclaimer first.
+        const opened = showUpdateDialog({
+          title: "Hide beta banner?",
+          message:
+            "Turning off the banner means you understand and agree that predicted live bus positions are inaccurate and for reference only.",
+          confirmLabel: "I understand",
+          cancelLabel: "Keep banner",
+          onConfirm: () => {
+            saveBetaBannerPref(false);
+            showToast("Beta banner hidden", 1600);
+            syncBetaBanner();
+          },
+          onCancel: () => {
+            on.checked = true; // revert to showing the banner
+          },
+        });
+        if (!opened) on.checked = true; // dialog busy/unavailable — revert
+        return;
+      }
+      saveBetaBannerPref(true);
       // Re-enabling clears the swipe dismissal so the banner returns.
-      if (next) setBetaBannerDismissed(false);
-      showToast(next ? "Beta banner enabled" : "Beta banner hidden", 1600);
+      setBetaBannerDismissed(false);
+      showToast("Beta banner enabled", 1600);
       syncBetaBanner();
     });
   }
