@@ -3342,11 +3342,11 @@ body.contrib-desktop-ok .contrib-desktop-only {
   font-size: 0.7rem;
 }
 
-/* Hide main dock while contributing */
+/* Hide main dock while contributing (toolbar + bottom chrome stack) */
 body.contrib-mode .main-toolbar,
 #app[data-contrib="open"] .main-toolbar,
-body.contrib-mode .app-bottom-nav,
-#app[data-contrib="open"] .app-bottom-nav {
+body.contrib-mode #panel-bottom-stack,
+#app[data-contrib="open"] #panel-bottom-stack {
   display: none !important;
   pointer-events: none !important;
 }
