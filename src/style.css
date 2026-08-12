@@ -3292,6 +3292,56 @@ body.contrib-desktop-ok .contrib-desktop-only {
   overflow: auto;
 }
 
+/* ── Licenses sheet (About page) ──────────────────────────── */
+.licenses-body {
+  padding: 8px 16px 20px;
+}
+
+.licenses-body .hint {
+  margin: 0 0 14px;
+}
+
+.license-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+
+.license-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1px 10px;
+  align-items: baseline;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.license-name {
+  font-weight: 600;
+}
+
+.license-name a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.license-name a:hover {
+  text-decoration: underline;
+}
+
+.license-id {
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.license-note {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
 /* Hide main dock while contributing */
 body.contrib-mode .main-toolbar,
 #app[data-contrib="open"] .main-toolbar {

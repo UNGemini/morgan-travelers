@@ -595,6 +595,199 @@
         </div>
       </div>
 
+      <!-- Open source & data licenses (About page) -->
+      <div
+        id="licenses-sheet"
+        class="sheet"
+        hidden
+        role="dialog"
+        aria-labelledby="licenses-title"
+      >
+        <div class="sheet-backdrop" data-sheet-close></div>
+        <div class="sheet-card" data-acrylic>
+          <header class="sheet-head">
+            <h2 id="licenses-title">
+              <span class="material-symbols-outlined" aria-hidden="true">description</span>
+              Licenses
+            </h2>
+            <button
+              type="button"
+              class="btn btn-icon"
+              data-sheet-close
+              aria-label="Close"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">close</span>
+            </button>
+          </header>
+          <div class="sheet-body licenses-body">
+            <p class="hint">
+              Third-party software, fonts, and data used by Travelers, with
+              license identifiers and attribution links for compliance. Last
+              updated 12 Aug 2026 — versions are package ranges; lockfile pins
+              apply at build time. SPDX identifiers as declared upstream; full
+              license text is in each project’s distribution.
+            </p>
+
+            <h3>Runtime open source</h3>
+            <div class="license-list">
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://github.com/maplibre/maplibre-gl" target="_blank" rel="noopener noreferrer">MapLibre GL JS</a>
+                  · 6.x
+                </span>
+                <span class="license-id">BSD-3-Clause</span>
+                <span class="license-note">Map rendering engine (MapLibre contributors).</span>
+              </div>
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://github.com/protomaps/PMTiles" target="_blank" rel="noopener noreferrer">PMTiles</a>
+                  · 4.x
+                </span>
+                <span class="license-id">BSD-3-Clause</span>
+                <span class="license-note">Tile archive format and client loader (Protomaps).</span>
+              </div>
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://github.com/protomaps/basemaps" target="_blank" rel="noopener noreferrer">@protomaps/basemaps</a>
+                  · 5.x
+                </span>
+                <span class="license-id">BSD-3-Clause</span>
+                <span class="license-note">Basemap style and layer definitions (Protomaps).</span>
+              </div>
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://router-nano.justusewheels.com" target="_blank" rel="noopener noreferrer">wheels-router-nano</a>
+                  · WASM
+                </span>
+                <span class="license-id">MIT</span>
+                <span class="license-note">Trip-planning engine (RAPTOR); compiled WASM vendored in this repo (Wheels Labs / Wheels Softworks).</span>
+              </div>
+            </div>
+
+            <h3>Build and toolchain</h3>
+            <div class="license-list">
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://github.com/vitejs/vite" target="_blank" rel="noopener noreferrer">Vite</a>
+                  · 6.x
+                </span>
+                <span class="license-id">MIT</span>
+                <span class="license-note">Build tool (VoidZero Inc. and Vite contributors).</span>
+              </div>
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://github.com/microsoft/playwright" target="_blank" rel="noopener noreferrer">Playwright</a>
+                  · 1.x
+                </span>
+                <span class="license-id">Apache-2.0</span>
+                <span class="license-note">E2E testing only — not shipped in the app bundle.</span>
+              </div>
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://github.com/UNGemini/local-router" target="_blank" rel="noopener noreferrer">pipeline-rs</a>
+                </span>
+                <span class="license-id">MIT</span>
+                <span class="license-note">GTFS → .wheelsrouter graph compiler, run in CI (wheels-router-nano ecosystem; not shipped).</span>
+              </div>
+            </div>
+
+            <h3>Fonts</h3>
+            <div class="license-list">
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://fonts.google.com/specimen/Montserrat" target="_blank" rel="noopener noreferrer">Montserrat</a>
+                </span>
+                <span class="license-id">OFL-1.1</span>
+                <span class="license-note">UI typeface, loaded from Google Fonts (The Montserrat Project Authors).</span>
+              </div>
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://fonts.google.com/icons" target="_blank" rel="noopener noreferrer">Material Symbols Outlined</a>
+                </span>
+                <span class="license-id">Apache-2.0</span>
+                <span class="license-note">UI icons, loaded from Google Fonts (Google LLC).</span>
+              </div>
+            </div>
+
+            <h3>Map data and services</h3>
+            <div class="license-list">
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>
+                </span>
+                <span class="license-id">ODbL 1.0</span>
+                <span class="license-note">© OpenStreetMap contributors — basemap tiles and OSRM/Nominatim data.</span>
+              </div>
+              <div class="license-item">
+                <span class="license-name">hongkong.pmtiles</span>
+                <span class="license-id">ODbL 1.0</span>
+                <span class="license-note">Basemap tiles generated from OpenStreetMap (via hk-pmtiles-generation) and served from the Travelers data edge.</span>
+              </div>
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://github.com/Project-OSRM/osrm-backend" target="_blank" rel="noopener noreferrer">OSRM</a>
+                </span>
+                <span class="license-id">BSD-2-Clause</span>
+                <span class="license-note">Road-network geometry for bus-route snapping (service; data © OSM contributors).</span>
+              </div>
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://nominatim.org" target="_blank" rel="noopener noreferrer">Nominatim</a>
+                </span>
+                <span class="license-id">ODbL data · GPL software</span>
+                <span class="license-note">Place search / reverse geocoding (service).</span>
+              </div>
+            </div>
+
+            <h3>Transit data (Hong Kong)</h3>
+            <div class="license-list">
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://opendata.mtr.com.hk" target="_blank" rel="noopener noreferrer">MTR Corporation open data</a>
+                </span>
+                <span class="license-id">MTR open data terms</span>
+                <span class="license-note">Fares, line / LRT routes and stops, MTR Bus schedules.</span>
+              </div>
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://data.gov.hk" target="_blank" rel="noopener noreferrer">Transport Department open data</a>
+                </span>
+                <span class="license-id">Gov open data terms</span>
+                <span class="license-note">Bus / GMB routes, stops and fares (FARE, ROUTE, RSTOP, STOP tables) plus realtime ETAs (rt.data.gov.hk, data.etabus.gov.hk).</span>
+              </div>
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://data.etagmb.gov.hk" target="_blank" rel="noopener noreferrer">etagmb.gov.hk</a>
+                </span>
+                <span class="license-id">Gov open data terms</span>
+                <span class="license-note">Green minibus routes, stops and ETAs.</span>
+              </div>
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://github.com/hkbus/hk-bus-crawling" target="_blank" rel="noopener noreferrer">HK Bus Crawling</a>
+                </span>
+                <span class="license-id">Community data feed</span>
+                <span class="license-note">Route / fare dataset used for GMB and ferry fare fallbacks; used per its citation notice (HK Bus Crawling @2021).</span>
+              </div>
+              <div class="license-item">
+                <span class="license-name">
+                  <a href="https://github.com/wheelstransit/hongkong-community-gtfs" target="_blank" rel="noopener noreferrer">Hong Kong Community GTFS</a>
+                </span>
+                <span class="license-id">MIT</span>
+                <span class="license-note">GTFS feed builder (© 2025 Wheels Transit) behind hk.gtfs.zip and the routing graph; feed data is derived from the government sources above.</span>
+              </div>
+            </div>
+
+            <h3>First-party code</h3>
+            <p class="hint">
+              Application code for MORGAN Travelers is © UNLOOP MORGAN 2026 and
+              is released under the MIT License. Brand marks and product naming
+              are not open-sourced.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <!-- Panel / drawer: desktop left · mobile bottom sheet -->
       <div id="main-toolbar" class="main-toolbar" data-acrylic>
         <!-- Grabber + title always first (on top when closed) -->
@@ -1262,6 +1455,25 @@
               <p class="hint contrib-desktop-note" style="margin-top: 8px">
                 Desktop only · mouse/trackpad recommended.
               </p>
+            </section>
+            <section class="panel-section">
+              <h3>Licenses</h3>
+              <p class="hint">
+                Third-party software, fonts, and data used by Travelers, with
+                license identifiers and attribution links for compliance.
+              </p>
+              <button
+                type="button"
+                id="btn-licenses"
+                class="btn btn-ghost"
+                data-acrylic
+                style="margin-top: 10px; width: 100%"
+              >
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">description</span>
+                  Open source &amp; data licenses
+                </span>
+              </button>
             </section>
               </div>
             </div>

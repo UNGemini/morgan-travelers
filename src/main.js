@@ -273,6 +273,7 @@ const els = {
   appNavSearchField: document.getElementById("app-nav-search-field"),
   settingsSheet: document.getElementById("settings-sheet"),
   infoSheet: document.getElementById("info-sheet"),
+  licensesSheet: document.getElementById("licenses-sheet"),
   sidebarPageSearch: document.getElementById("sidebar-page-search"),
   sidebarPageTrip: document.getElementById("sidebar-page-trip"),
   sidebarPageEtaRoute: document.getElementById("sidebar-page-eta-route"),
@@ -13869,6 +13870,12 @@ els.btnInfo?.addEventListener("click", (e) => {
   closeProfileMenu();
   setSidebarPage("about");
 });
+els.btnLicenses?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  closeProfileMenu();
+  openSheet(els.licensesSheet);
+});
+wireSheet(els.licensesSheet);
 document.addEventListener("click", (e) => {
   const root = els.mapProfile || document.getElementById("map-profile");
   if (!root?.contains(/** @type {Node} */ (e.target))) {
@@ -14194,6 +14201,10 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (pathContributor?.isOpen()) {
     pathContributor.close();
+    return;
+  }
+  if (els.licensesSheet && !els.licensesSheet.hidden) {
+    closeSheet(els.licensesSheet);
     return;
   }
   if (els.settingsSheet && !els.settingsSheet.hidden) {
