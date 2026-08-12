@@ -498,7 +498,7 @@ export async function getGtfsBusShape(opt, opts = {}) {
  * @param {AbortSignal} [signal]
  * @returns {Promise<{ list: Array<{ id: string, lon: number, lat: number, name: string }>, byId: Map<string, number> }>}
  */
-async function loadGtfsStopDirectory(signal) {
+export async function loadGtfsStopDirectory(signal) {
   const url = `${BASE()}stops.json`;
   if (!cache.has(url)) {
     cache.set(

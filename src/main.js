@@ -1889,15 +1889,18 @@ async function fetchKmbRouteStopList(routeId, direction, serviceType = 1) {
       .sort((a, b) => Number(a.seq) - Number(b.seq));
     /** @type {Array<{ seq: number, name: string, nameEn: string, nameTc: string, stopId: string, lon: number, lat: number }>} */
     const stops = [];
+    let named = 0;
     for (const row of rows) {
       const sid = String(row.stop || "");
       if (!sid) continue;
       const st = byId.get(sid);
       const lat = st && Number.isFinite(st.lat) ? st.lat : NaN;
       const lon = st && Number.isFinite(st.lon) ? st.lon : NaN;
+      const nm = st?.name_tc || st?.name_en || "";
+      if (nm) named += 1;
       stops.push({
         seq: Number(row.seq) || stops.length + 1,
-        name: st?.name_tc || st?.name_en || sid,
+        name: nm || sid,
         nameEn: st?.name_en || "",
         nameTc: st?.name_tc || "",
         stopId: sid,
@@ -1905,7 +1908,9 @@ async function fetchKmbRouteStopList(routeId, direction, serviceType = 1) {
         lat,
       });
     }
-    kmbRouteStopSeqCache.set(cacheKey, stops);
+    // Cache only when names resolved — an unresolved list must stay uncached
+    // so a later directory load can re-resolve instead of locking in ids.
+    if (named > 0) kmbRouteStopSeqCache.set(cacheKey, stops);
     return stops;
   } catch {
     kmbRouteStopSeqCache.set(cacheKey, []);
@@ -8064,7 +8069,9 @@ async function ensureKmbRouteBounds() {
 
 /** @returns {Promise<Array<{ stop: string, name_en: string, name_tc: string, lat: number, lon: number }>>} */
 async function ensureKmbStops() {
-  if (kmbStopsCache) return kmbStopsCache;
+  // Never serve a cached EMPTY directory: one failed fetch must not degrade
+  // every KMB stop name to its raw id for the rest of the session.
+  if (kmbStopsCache?.length) return kmbStopsCache;
   if (kmbStopsPromise) return kmbStopsPromise;
   kmbStopsPromise = (async () => {
     try {
@@ -8082,11 +8089,36 @@ async function ensureKmbStops() {
           lon: Number(s.long ?? s.lon),
         }))
         .filter((s) => s.stop && Number.isFinite(s.lat) && Number.isFinite(s.lon));
+      if (!kmbStopsCache.length) throw new Error("empty KMB stop directory");
       console.info("[eta] KMB stops", kmbStopsCache.length);
     } catch (e) {
-      console.warn("[eta] KMB stops", e);
-      kmbStopsCache = [];
+      // Operator directory unavailable — fall back to the local GTFS stop
+      // directory (offline-ready) so names keep resolving instead of ids.
+      console.warn("[eta] KMB stops API failed, using GTFS directory", e);
+      try {
+        const { loadGtfsStopDirectory } = await import("./routeShapes.js");
+        const dir = await loadGtfsStopDirectory();
+        kmbStopsCache = dir.list
+          .filter((s) => String(s.id).startsWith("KMB-"))
+          .map((s) => ({
+            stop: String(s.id).slice("KMB-".length),
+            name_en: s.name,
+            name_tc: s.name,
+            lat: s.lat,
+            lon: s.lon,
+          }));
+        if (!kmbStopsCache.length) {
+          throw new Error("no KMB stops in GTFS directory");
+        }
+        console.info("[eta] KMB stops (GTFS fallback)", kmbStopsCache.length);
+      } catch (e2) {
+        console.warn("[eta] KMB stop directory unavailable", e2);
+        // Leave the cache empty so the next caller retries instead of
+        // permanently degrading stop names to raw ids.
+        kmbStopsCache = null;
+      }
     }
+    kmbStopsPromise = null;
     return kmbStopsCache;
   })();
   return kmbStopsPromise;
