@@ -15098,8 +15098,10 @@ function busPosOnUpdate(evt) {
     }
     return prev.targetD;
   };
+  const seen = new Set();
   for (const v of evt?.vehicles || []) {
     const id = Number(v.id) || 0;
+    seen.add(id);
     const tLon = Number(v.lon);
     const tLat = Number(v.lat);
     if (!Number.isFinite(tLon) || !Number.isFinite(tLat)) continue;
@@ -15160,6 +15162,13 @@ function busPosOnUpdate(evt) {
       );
     }
     busPosDisplay.set(id, next);
+  }
+  // Drop display entries the engine no longer emits (arrived synth buses,
+  // evicted vehicles, trips that ended at the terminus): otherwise the
+  // markers freeze in place, pulsing forever. The grace covers in-flight
+  // glides; a vehicle back a poll later simply re-enters as a fresh marker.
+  for (const [id, e] of busPosDisplay) {
+    if (!seen.has(id) && now - e.t0 > e.dur + 1500) busPosDisplay.delete(id);
   }
   busPosStartAnim();
 }

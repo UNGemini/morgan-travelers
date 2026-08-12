@@ -14,13 +14,16 @@
  *      whose scheduled arrival there is closest (≤ 15 min); matched trips are
  *      pulled to `board stop − seconds × speed`. Unmatched ETAs become
  *      synthetic vehicles (id synth:{rank}).
- *   3. Handoff — the anchored set is always the 3 soonest arrivals at the
+ *   3. Arrival — when a matched ETA expires the trip is at the stop: the
+ *      engine holds it there for a dwell (DWELL_S), then continues on the
+ *      schedule shifted by the observed deviation + dwell, so an arriving
+ *      bus stops at the stop instead of snapping past it (minute-rounded
+ *      ETAs are up to ±60 s off the scheduled arrival, so a plain revert
+ *      would skip the stop on fast segments).
+ *   4. Handoff — the anchored set is always the 3 soonest arrivals at the
  *      board stop: ETA-matched trips use their ETA while future, otherwise
  *      the next-soonest trip (the "4th bus", feeds cap at 3 arrivals) is
- *      anchored by its scheduled arrival. When a matched ETA expires the trip
- *      reverts to pure schedule interpolation; near-on-time ETAs (≤ 30 s past
- *      the scheduled arrival) blend into the schedule first, so the revert
- *      is continuous instead of snapping on fast segments.
+ *      anchored by its scheduled arrival.
  *
  * Multi-stop anchoring (fetch-more option + passive reuse):
  *   - With ctx.fetchMore the poll also fetches ETA rows for the nearest stops
@@ -47,8 +50,8 @@ import {
 
 /** Typical bus speed for synthetic/fallback anchoring (m/s, ~30 km/h). */
 const V_TYP = 8.3;
-/** Max simultaneously emitted vehicles (3 anchored + up to 5 schedule). */
-const MAX_VEHICLES = 8;
+/** Max simultaneously emitted vehicles (3 anchored + up to 7 schedule). */
+const MAX_VEHICLES = 10;
 /** ETA anchor slots at the selected stop (operator feeds cap at 3). */
 const ANCHOR_SLOTS = 3;
 /** Extra anchored trips from other stops' ETAs (fetch-more / cached rows). */
@@ -57,14 +60,9 @@ const EXTRA_ANCHORS = 2;
 const BOARD_MATCH_TOL_M = 300;
 /** ETA ↔ scheduled-arrival matching tolerance at the board stop. */
 const ETA_MATCH_TOL_MS = 15 * 60_000;
-/**
- * ETA deviation (rounded ETA − scheduled arrival) within which the anchored
- * estimate blends into the schedule over the anchor's remaining life. Covers
- * the minute-rounding ambiguity of a near-on-time bus (±30 s) so the revert
- * at ETA expiry is continuous; a genuinely late ETA (> 30 s) stays purely
- * anchored until expiry (the schedule would be far behind the bus).
- */
-const BLEND_DEV_S = 30;
+/** Seconds a bus stays at a stop after its ETA expires (arrival simulation). */
+const DWELL_S = 30;
+const DWELL_MS = DWELL_S * 1000;
 /** Max projection distance for a schedule stop onto the drawn shape (m). */
 const PROJECT_TOL_M = 400;
 
@@ -206,8 +204,10 @@ export class BusPositionEngine {
     this.etaMap = new Map();
     /** @type {Map<string, { etaT: number, d: number, stopIdx: number }>} trip id → soonest ETA constraint across all anchor stops */
     this.constraints = new Map();
-    /** @type {Array<{ rank: number, etaT: number }>} unmatched ETAs (synth buses) */
+    /** @type {Array<{ rank: number, etaT: number, dest: string, arrD: number, arrAt: number }>} unmatched ETAs (synth buses) */
     this.synth = [];
+    /** @type {Map<string, { delaySec: number, arrD: number, arrAt: number }>} trip id → arrival bookkeeping (see updateTripState) */
+    this.tripState = new Map();
     /** @type {Map<number, { distsM: number[], pat: any, boardIdx: number, boardMatchM: number, boardOffSec: number }>} */
     this.patternDists = new Map();
     this.schedules = null;
@@ -256,6 +256,7 @@ export class BusPositionEngine {
     this.etaMap.clear();
     this.constraints.clear();
     this.synth = [];
+    this.tripState.clear();
     this.trafficIndex = null;
     this.lastEmit = null;
     this.initPromise = null;
@@ -468,11 +469,16 @@ export class BusPositionEngine {
    * — they are beyond-horizon buses that would duplicate across stops.
    */
   matchAnchors(ctx, stopEtas, now) {
+    // Snapshot before clearing: a constraint that vanishes at this poll means
+    // the bus arrived (feeds drop the row) — updateTripState turns it into a
+    // dwell at that stop instead of letting the trip snap past it.
+    const prevConstraints = new Map(this.constraints);
     this.etaMap.clear();
     this.constraints.clear();
-    this.synth = [];
+    const synthRows = [];
+    let trips = [];
     if (this.schedules && this.patternDists.size) {
-      const trips = enumerateTrips(this.schedules, this.routeKey, this.dir, now);
+      trips = enumerateTrips(this.schedules, this.routeKey, this.dir, now);
       for (const [stopIdx, etas] of stopEtas) {
         const d = ctx.stopDistM?.[stopIdx];
         if (!Number.isFinite(d)) continue;
@@ -495,7 +501,7 @@ export class BusPositionEngine {
           }
           if (!best) {
             if (stopIdx === ctx.boardStopIndex) {
-              this.synth.push({ rank: this.synth.length + 1, etaT: eta.t });
+              synthRows.push({ etaT: eta.t, dest: eta.dest });
             }
             continue;
           }
@@ -510,8 +516,99 @@ export class BusPositionEngine {
     } else {
       // No schedule: every board-stop ETA is a synthetic, ETA-anchored bus.
       for (const eta of stopEtas.get(ctx.boardStopIndex) || []) {
-        this.synth.push({ rank: this.synth.length + 1, etaT: eta.t });
+        synthRows.push({ etaT: eta.t, dest: eta.dest });
       }
+    }
+    this.synth = this.reidentifySynth(synthRows, now);
+    this.updateTripState(trips, prevConstraints, now);
+  }
+
+  /**
+   * Stable identity for synthetic buses across polls. Ranks were positional,
+   * so when the soonest synth arrived the next bus inherited its rank and the
+   * marker glided onto the wrong bus. Re-matching keeps a rank on the same
+   * bus: same destination wins, otherwise the nearest ETA; fresh ranks stay
+   * monotonic so a live marker's id is never recycled. Arrived synths are
+   * kept through their dwell at the stop, then dropped (the feed dropped
+   * their row anyway).
+   */
+  reidentifySynth(rows, now) {
+    const prev = this.synth;
+    const out = [];
+    const taken = new Set();
+    for (const row of rows) {
+      let best = null;
+      let bestPen = Infinity;
+      for (const s of prev) {
+        if (s.etaT <= now || taken.has(s.rank)) continue;
+        const pen =
+          (row.dest && s.dest && row.dest === s.dest ? 0 : 60_000) +
+          Math.abs(row.etaT - s.etaT);
+        if (pen < bestPen) {
+          bestPen = pen;
+          best = s;
+        }
+      }
+      if (best) {
+        taken.add(best.rank);
+        out.push({ rank: best.rank, etaT: row.etaT, dest: row.dest, arrD: -1, arrAt: 0 });
+      } else {
+        out.push({ rank: 0, etaT: row.etaT, dest: row.dest, arrD: -1, arrAt: 0 });
+      }
+    }
+    let nextRank = 1;
+    for (const s of prev) nextRank = Math.max(nextRank, s.rank + 1);
+    for (const s of out) if (!s.rank) s.rank = nextRank++;
+    for (const s of prev) {
+      if (taken.has(s.rank)) continue;
+      if (s.arrD >= 0 && now < s.arrAt + DWELL_MS) out.push(s);
+    }
+    out.sort((a, b) => a.etaT - b.etaT);
+    return out;
+  }
+
+  /**
+   * Per-trip arrival bookkeeping across polls (the schedule pass consumes
+   * it, so it must survive the constraint rebuild here):
+   *   - a live constraint stores the deviation (rounded ETA − scheduled
+   *     arrival) and no dwell;
+   *   - a constraint that vanished between polls means the bus arrived — the
+   *     trip dwells at that stop for DWELL_S, then continues on the schedule
+   *     shifted by deviation + dwell (feeds drop the row at arrival, so a
+   *     plain revert would snap the marker past the stop);
+   *   - a vanished constraint still in the future (feed hiccup) becomes a
+   *     delay-only continuation, which equals the anchored estimate.
+   */
+  updateTripState(trips, prevConstraints, now) {
+    const active = new Set(trips.map((t) => t.id));
+    for (const id of [...this.tripState.keys()]) {
+      if (!active.has(id)) this.tripState.delete(id);
+    }
+    const schedArrAt = (trip, d) => {
+      const pd = this.patternDists.get(trip.patIdx);
+      const k = pd ? this.patternIdxForDist(pd, d) : null;
+      return k ? trip.startEpoch + (pd.offsRows[k.idx][1]) * 1000 : 0;
+    };
+    for (const [id, c] of this.constraints) {
+      const trip = trips.find((t) => t.id === id);
+      if (!trip) continue;
+      const schedArr = schedArrAt(trip, c.d);
+      this.tripState.set(id, {
+        delaySec: schedArr ? (c.etaT - schedArr) / 1000 : 0,
+        arrD: -1,
+        arrAt: 0,
+      });
+    }
+    for (const [id, c] of prevConstraints) {
+      if (!active.has(id) || this.constraints.has(id)) continue;
+      const trip = trips.find((t) => t.id === id);
+      if (!trip) continue;
+      const schedArr = schedArrAt(trip, c.d);
+      this.tripState.set(id, {
+        delaySec: schedArr ? (c.etaT - schedArr) / 1000 : 0,
+        arrD: c.etaT <= now ? c.d : -1,
+        arrAt: c.etaT <= now ? c.etaT : 0,
+      });
     }
   }
 
@@ -531,11 +628,42 @@ export class BusPositionEngine {
     for (const trip of trips) {
       const pd = this.patternDists.get(trip.patIdx);
       if (!pd) continue;
+      // Arrival handling: when a trip's constraint expires it is AT the stop.
+      // Hold it there for the dwell, then continue on the schedule shifted by
+      // the observed deviation + dwell, so the marker stops at the stop
+      // instead of snapping past it (minute-rounded ETAs are up to ±60 s away
+      // from the scheduled arrival; a plain revert would skip the stop).
+      const c = this.constraints.get(trip.id);
+      const st = this.tripState.get(trip.id);
+      let d;
+      if (c && c.etaT <= now) {
+        const k = this.patternIdxForDist(pd, c.d);
+        const schedArr = k ? trip.startEpoch + (pd.offsRows[k.idx][1]) * 1000 : 0;
+        const dev = k ? (c.etaT - schedArr) / 1000 : 0;
+        this.tripState.set(trip.id, { delaySec: dev, arrD: c.d, arrAt: c.etaT });
+        d =
+          now < c.etaT + DWELL_MS
+            ? c.d
+            : this.schedulePos(pd, trip, now - (dev + DWELL_S) * 1000);
+      } else if (st && st.arrD >= 0) {
+        // The feed dropped the row at arrival; keep the stop visible through
+        // the dwell, then continue on the shifted schedule.
+        d =
+          now < st.arrAt + DWELL_MS
+            ? st.arrD
+            : this.schedulePos(pd, trip, now - (st.delaySec + DWELL_S) * 1000);
+      } else if (st) {
+        // Row vanished before arrival: continue on the delay-shifted schedule
+        // (equals the anchored estimate while the constraint was live).
+        d = this.schedulePos(pd, trip, now - st.delaySec * 1000);
+      } else {
+        d = this.schedulePos(pd, trip, now);
+      }
       out.push({
         id: trip.id,
         trip,
         pd,
-        d: this.schedulePos(pd, trip, now),
+        d,
         confidence: this.trafficIndex ? CONF_SCHED : CONF_NO_TRAFFIC,
         anchored: false,
       });
@@ -550,45 +678,34 @@ export class BusPositionEngine {
     for (const v of out) {
       const { pd, trip } = v;
       if (!pd || pd.boardIdx < 0 || pd.boardMatchM > BOARD_MATCH_TOL_M) continue;
+      // A trip dwelling at another stop is not a board candidate: its shifted
+      // scheduled arrival still lies in the future, which would yank it back
+      // behind the stop while it is standing there.
+      const st = this.tripState.get(v.id);
+      if (st && st.arrD >= 0 && now < st.arrAt + DWELL_MS) continue;
+      const shiftMs = st ? (st.delaySec + (st.arrD >= 0 ? DWELL_S : 0)) * 1000 : 0;
       const etaT = this.etaMap.get(v.id);
       const anchorT =
-        etaT != null ? etaT : trip.startEpoch + pd.boardOffSec * 1000;
+        etaT != null ? etaT : trip.startEpoch + pd.boardOffSec * 1000 + shiftMs;
       if (anchorT <= now) continue;
       cands.push({ v, pd, trip, anchorT });
     }
     cands.sort((a, b) => a.anchorT - b.anchorT);
     const vAnchor = this.anchorSpeed(cands, boardDist);
     for (let i = 0; i < Math.min(ANCHOR_SLOTS, cands.length); i++) {
-      const { v, pd, trip, anchorT } = cands[i];
+      const { v, anchorT } = cands[i];
       // A tighter ETA at another anchor stop (fetched with fetch-more, or
       // cached from an earlier stop selection) overrides the board anchor:
       // that stop is nearer the bus, so `stop − seconds × speed` is the more
       // accurate position. Without one, the board-stop math below is unchanged.
       const c = this.constraints.get(v.id);
       if (c && c.stopIdx !== ctx.boardStopIndex && Number.isFinite(c.d)) {
-        let d = Math.max(0, c.d - ((c.etaT - now) / 1000) * this.anchorSpeedAt(c.d));
-        v.d = this.blendConstraint(pd, trip, c, d, now);
+        v.d = Math.max(0, c.d - ((c.etaT - now) / 1000) * this.anchorSpeedAt(c.d));
         v.confidence = CONF_ETA;
         v.anchored = true;
         continue;
       }
-      let d = Math.max(0, boardDist - ((anchorT - now) / 1000) * vAnchor);
-      const etaT = this.etaMap.get(v.id);
-      if (etaT != null) {
-        // Near-on-time ETA: blend the anchored estimate into the schedule
-        // over the anchor's remaining life. The minute-rounded ETA of an
-        // on-time bus trails its scheduled arrival by ≤ 30 s; blending keeps
-        // the marker continuous when the row expires (fast segments would
-        // otherwise snap by minutes of travel). Genuinely late buses
-        // (deviation > 30 s) stay purely anchored — the schedule is behind them.
-        const schedArr = trip.startEpoch + pd.boardOffSec * 1000;
-        const dev = (etaT - schedArr) / 1000;
-        if (dev > 0 && dev <= BLEND_DEV_S && now > schedArr) {
-          const w = Math.min(1, (now - schedArr) / (dev * 1000));
-          d += (this.schedulePos(pd, trip, now) - d) * w;
-        }
-      }
-      v.d = d;
+      v.d = Math.max(0, boardDist - ((anchorT - now) / 1000) * vAnchor);
       v.confidence = CONF_ETA;
       v.anchored = true;
     }
@@ -605,15 +722,29 @@ export class BusPositionEngine {
     }
     extended.sort((a, b) => a.c.etaT - b.c.etaT);
     for (const { v, c } of extended.slice(0, EXTRA_ANCHORS)) {
-      let d = Math.max(0, c.d - ((c.etaT - now) / 1000) * this.anchorSpeedAt(c.d));
-      v.d = this.blendConstraint(v.pd, v.trip, c, d, now);
+      v.d = Math.max(0, c.d - ((c.etaT - now) / 1000) * this.anchorSpeedAt(c.d));
       v.confidence = CONF_ETA;
       v.anchored = true;
     }
-    // Unmatched ETAs → synthetic buses (id stable by rank; disappear once
-    // their ETA passes, since the feed drops departed buses anyway).
+    // Unmatched ETAs → synthetic buses (id stable by rank). An arrived synth
+    // simulates the stop: it holds at the stop for the dwell, then drops
+    // (the feed dropped its row anyway).
     for (const s of this.synth) {
-      if (s.etaT <= now) continue;
+      if (s.etaT <= now) {
+        if (s.arrD < 0) {
+          s.arrD = boardDist;
+          s.arrAt = s.etaT;
+        }
+        if (now < s.arrAt + DWELL_MS) {
+          out.push({
+            id: `synth:${s.rank}`,
+            d: s.arrD,
+            confidence: CONF_ETA,
+            anchored: true,
+          });
+        }
+        continue;
+      }
       out.push({
         id: `synth:${s.rank}`,
         d: Math.max(0, boardDist - ((s.etaT - now) / 1000) * vAnchor),
@@ -701,19 +832,6 @@ export class BusPositionEngine {
     return Math.max(0.5, vNom * mult);
   }
 
-  /** Near-on-time ETA blend at an arbitrary constraint stop (BLEND_DEV_S). */
-  blendConstraint(pd, trip, c, d, now) {
-    const k = this.patternIdxForDist(pd, c.d);
-    if (!k) return d;
-    const schedArr = trip.startEpoch + (pd.offsRows[k.idx][1]) * 1000;
-    const dev = (c.etaT - schedArr) / 1000;
-    if (dev > 0 && dev <= BLEND_DEV_S && now > schedArr) {
-      const w = Math.min(1, (now - schedArr) / (dev * 1000));
-      d += (this.schedulePos(pd, trip, now) - d) * w;
-    }
-    return d;
-  }
-
   /** 1 Hz recompute between polls (deterministic schedule model). */
   tick(now = this.nowFn()) {
     if (!this.running || !this.ctx) return;
@@ -741,11 +859,14 @@ export class BusPositionEngine {
     const coords = ctx.shape.coords;
     const cumM = ctx.shape.cumM;
     const total = cumM?.[cumM.length - 1] || 0;
-    // Anchored (soonest) first, then schedule buses; cap for radar clutter.
+    // Anchored (soonest) first, then schedule buses nearest the board stop
+    // (a just-arrived bus sits at the stop, so it is never evicted); cap for
+    // radar clutter.
     const anchored = [];
     const sched = [];
     for (const v of this.vehicles || []) (v.anchored ? anchored : sched).push(v);
-    sched.sort((a, b) => a.d - b.d);
+    const boardDist = ctx.stopDistM?.[ctx.boardStopIndex] || 0;
+    sched.sort((a, b) => Math.abs(a.d - boardDist) - Math.abs(b.d - boardDist));
     const vehicles = [];
     for (const v of [...anchored, ...sched].slice(0, MAX_VEHICLES)) {
       const ll = alongToLonLat(coords, cumM, Math.max(0, Math.min(v.d, total)));
