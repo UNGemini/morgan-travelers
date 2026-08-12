@@ -12,14 +12,22 @@
  *      the traffic multiplier of the current segment.
  *   2. ETA anchoring — up to 3 future ETAs at the board stop match the trip
  *      whose scheduled arrival there is closest (≤ 15 min); matched trips are
- *      pulled to `board stop − seconds × speed`. Unmatched ETAs become
- *      synthetic vehicles (id synth:{rank}).
+ *      placed at the schedule position shifted by their deviation (ETA −
+ *      scheduled arrival at that stop) — the position whose remaining
+ *      path-time to the stop equals the ETA, so the marker follows the road
+ *      at segment speeds instead of homing in a straight line at one
+ *      constant speed (a linear stop − seconds × speed model made markers
+ *      zoom/stutter whenever the constraint re-anchored at another stop).
+ *      Unmatched ETAs become synthetic vehicles (id synth:{rank}).
  *   3. Arrival — when a matched ETA expires the trip is at the stop: the
  *      engine holds it there for a dwell (DWELL_S), then continues on the
  *      schedule shifted by the observed deviation + dwell, so an arriving
  *      bus stops at the stop instead of snapping past it (minute-rounded
  *      ETAs are up to ±60 s off the scheduled arrival, so a plain revert
- *      would skip the stop on fast segments).
+ *      would skip the stop on fast segments). The continuation runs until
+ *      the shifted clock reaches the terminus, and with fetch-more the
+ *      trip's own row at the next stop re-anchors it (stop − seconds ×
+ *      speed) as usual.
  *   4. Handoff — the anchored set is always the 3 soonest arrivals at the
  *      board stop: ETA-matched trips use their ETA while future, otherwise
  *      the next-soonest trip (the "4th bus", feeds cap at 3 arrivals) is
@@ -50,8 +58,12 @@ import {
 
 /** Typical bus speed for synthetic/fallback anchoring (m/s, ~30 km/h). */
 const V_TYP = 8.3;
-/** Max simultaneously emitted vehicles (3 anchored + up to 7 schedule). */
-const MAX_VEHICLES = 10;
+/**
+ * Max simultaneously emitted vehicles. Anchored buses and tracked buses
+ * (mid-continuation after an arrival dwell) always emit; the cap applies to
+ * the untracked schedule buses, so a bus never blinks out after stopping.
+ */
+const MAX_VEHICLES = 12;
 /** ETA anchor slots at the selected stop (operator feeds cap at 3). */
 const ANCHOR_SLOTS = 3;
 /** Extra anchored trips from other stops' ETAs (fetch-more / cached rows). */
@@ -478,7 +490,7 @@ export class BusPositionEngine {
     const synthRows = [];
     let trips = [];
     if (this.schedules && this.patternDists.size) {
-      trips = enumerateTrips(this.schedules, this.routeKey, this.dir, now);
+      trips = this.activeTrips(now);
       for (const [stopIdx, etas] of stopEtas) {
         const d = ctx.stopDistM?.[stopIdx];
         if (!Number.isFinite(d)) continue;
@@ -521,6 +533,41 @@ export class BusPositionEngine {
     }
     this.synth = this.reidentifySynth(synthRows, now);
     this.updateTripState(trips, prevConstraints, now);
+  }
+
+  /**
+   * Trips on the road right now. The schedule window is extended back by the
+   * largest observed delay + dwell, so a late bus's trip does not drop out
+   * (and its marker vanish) before it actually reaches the terminus — only
+   * trips with an arrival state come from the extended slice.
+   */
+  activeTrips(now) {
+    let trips = this.schedules
+      ? enumerateTrips(this.schedules, this.routeKey, this.dir, now)
+      : [];
+    if (!this.schedules || !this.tripState.size) return trips;
+    let maxShiftMs = 0;
+    for (const st of this.tripState.values()) {
+      maxShiftMs = Math.max(
+        maxShiftMs,
+        (st.delaySec + (st.arrD >= 0 ? DWELL_S : 0)) * 1000,
+      );
+    }
+    if (maxShiftMs <= 0) return trips;
+    const known = new Set(trips.map((t) => t.id));
+    const extra = enumerateTrips(
+      this.schedules,
+      this.routeKey,
+      this.dir,
+      now - maxShiftMs,
+    );
+    for (const t of extra) {
+      if (!known.has(t.id) && this.tripState.has(t.id)) {
+        known.add(t.id);
+        trips.push(t);
+      }
+    }
+    return trips;
   }
 
   /**
@@ -622,9 +669,7 @@ export class BusPositionEngine {
     if (!ctx) return;
     /** @type {Array<{ id: string, d: number, confidence: number, anchored: boolean }>} */
     const out = [];
-    const trips = this.schedules
-      ? enumerateTrips(this.schedules, this.routeKey, this.dir, now)
-      : [];
+    const trips = this.activeTrips(now);
     for (const trip of trips) {
       const pd = this.patternDists.get(trip.patIdx);
       if (!pd) continue;
@@ -647,14 +692,18 @@ export class BusPositionEngine {
             : this.schedulePos(pd, trip, now - (dev + DWELL_S) * 1000);
       } else if (st && st.arrD >= 0) {
         // The feed dropped the row at arrival; keep the stop visible through
-        // the dwell, then continue on the shifted schedule.
+        // the dwell, then continue on the shifted schedule. The trip drops
+        // out once its shifted clock reaches the terminus.
+        const shiftMs = (st.delaySec + DWELL_S) * 1000;
+        if (now - shiftMs > trip.startEpoch + trip.lenSec * 1000) continue;
         d =
           now < st.arrAt + DWELL_MS
             ? st.arrD
-            : this.schedulePos(pd, trip, now - (st.delaySec + DWELL_S) * 1000);
+            : this.schedulePos(pd, trip, now - shiftMs);
       } else if (st) {
         // Row vanished before arrival: continue on the delay-shifted schedule
         // (equals the anchored estimate while the constraint was live).
+        if (now - st.delaySec * 1000 > trip.startEpoch + trip.lenSec * 1000) continue;
         d = this.schedulePos(pd, trip, now - st.delaySec * 1000);
       } else {
         d = this.schedulePos(pd, trip, now);
@@ -671,9 +720,19 @@ export class BusPositionEngine {
     // Anchored set: the 3 soonest arrivals at the board stop. ETA-matched
     // trips anchor on their ETA while future; otherwise the next-soonest trip
     // (schedule handoff — feeds cap at 3 arrivals, so the 4th bus is anchored
-    // by its scheduled stop time). Once a matched ETA expires the trip reverts
-    // to schedule interpolation and drops out of the set automatically.
+    // by its scheduled stop time). The anchored position is the schedule
+    // position shifted by the trip's deviation (anchor time − scheduled
+    // arrival at the anchor stop): the marker sits where a bus arriving at
+    // that time is on the path right now. This is continuous with the dwell
+    // continuation below and never pulls the marker across segments — a
+    // linear stop − seconds × speed model made markers zoom when the ETA
+    // re-anchored at another stop (fetch-more / cached rows). Once a matched
+    // ETA expires the trip dwells and drops out of the set automatically.
     const boardDist = ctx.stopDistM?.[ctx.boardStopIndex];
+    const schedArrAt = (pd, trip, d) => {
+      const k = this.patternIdxForDist(pd, d);
+      return k ? trip.startEpoch + (pd.offsRows[k.idx][1]) * 1000 : null;
+    };
     const cands = [];
     for (const v of out) {
       const { pd, trip } = v;
@@ -691,21 +750,23 @@ export class BusPositionEngine {
       cands.push({ v, pd, trip, anchorT });
     }
     cands.sort((a, b) => a.anchorT - b.anchorT);
-    const vAnchor = this.anchorSpeed(cands, boardDist);
+    const vAnchor = this.anchorSpeed(cands, boardDist); // synth buses only now
     for (let i = 0; i < Math.min(ANCHOR_SLOTS, cands.length); i++) {
-      const { v, anchorT } = cands[i];
+      const { v, pd, trip, anchorT } = cands[i];
       // A tighter ETA at another anchor stop (fetched with fetch-more, or
       // cached from an earlier stop selection) overrides the board anchor:
-      // that stop is nearer the bus, so `stop − seconds × speed` is the more
-      // accurate position. Without one, the board-stop math below is unchanged.
+      // the deviation is measured against THAT stop's scheduled arrival, so
+      // the position stays path-continuous as the constraint moves from stop
+      // to stop. (An expired constraint always dwells in the schedule pass,
+      // so c.etaT > now here.)
       const c = this.constraints.get(v.id);
-      if (c && c.stopIdx !== ctx.boardStopIndex && Number.isFinite(c.d)) {
-        v.d = Math.max(0, c.d - ((c.etaT - now) / 1000) * this.anchorSpeedAt(c.d));
-        v.confidence = CONF_ETA;
-        v.anchored = true;
-        continue;
-      }
-      v.d = Math.max(0, boardDist - ((anchorT - now) / 1000) * vAnchor);
+      const nonBoard = c && c.stopIdx !== ctx.boardStopIndex && Number.isFinite(c.d);
+      const schedArr = nonBoard
+        ? schedArrAt(pd, trip, c.d)
+        : trip.startEpoch + pd.boardOffSec * 1000;
+      if (schedArr == null) continue;
+      const at = nonBoard ? c.etaT : anchorT;
+      v.d = this.schedulePos(pd, trip, now - (at - schedArr));
       v.confidence = CONF_ETA;
       v.anchored = true;
     }
@@ -722,7 +783,9 @@ export class BusPositionEngine {
     }
     extended.sort((a, b) => a.c.etaT - b.c.etaT);
     for (const { v, c } of extended.slice(0, EXTRA_ANCHORS)) {
-      v.d = Math.max(0, c.d - ((c.etaT - now) / 1000) * this.anchorSpeedAt(c.d));
+      const schedArr = schedArrAt(v.pd, v.trip, c.d);
+      if (schedArr == null) continue;
+      v.d = this.schedulePos(v.pd, v.trip, now - (c.etaT - schedArr));
       v.confidence = CONF_ETA;
       v.anchored = true;
     }
@@ -780,9 +843,10 @@ export class BusPositionEngine {
   }
 
   /**
-   * Traffic-adjusted speed near the board stop, used by ETA anchoring:
-   * nominal segment speed (from the soonest candidate's pattern) × traffic
-   * multiplier at the board stop. Falls back to V_TYP without candidates.
+   * Traffic-adjusted speed near the board stop, used by synthetic-vehicle
+   * anchoring (synths have no schedule): nominal segment speed (from the
+   * soonest candidate's pattern) × traffic multiplier at the board stop.
+   * Falls back to V_TYP without candidates.
    */
   anchorSpeed(cands, boardDist) {
     const ctx = this.ctx;
@@ -802,33 +866,6 @@ export class BusPositionEngine {
     const stop = ctx.stops?.[ctx.boardStopIndex];
     const mult =
       this.trafficIndex && stop ? this.trafficIndex.multiplierAt(stop.lon, stop.lat) : 1;
-    return Math.max(0.5, vNom * mult);
-  }
-
-  /** Traffic-adjusted speed near an arbitrary along-shape distance: nominal
-   * speed of the pattern segment bracketing it × the traffic multiplier
-   * there. anchorSpeed() remains the board-stop variant used by the handoff. */
-  anchorSpeedAt(d) {
-    const ctx = this.ctx;
-    let vNom = V_TYP;
-    for (const pd of this.patternDists.values()) {
-      const first = pd.distsM[0];
-      const last = pd.distsM[pd.distsM.length - 1];
-      if (d < first - 100 || d > last + 100) continue;
-      const offs = pd.offsRows || pd.pat;
-      let i = 0;
-      while (i < pd.distsM.length - 2 && pd.distsM[i + 1] <= d) i += 1;
-      const dt = offs[i + 1]?.[1] - offs[i]?.[1];
-      const d0 = pd.distsM[i];
-      const d1 = pd.distsM[i + 1];
-      if (Number.isFinite(d0) && Number.isFinite(d1) && dt > 0) {
-        vNom = (d1 - d0) / dt;
-      }
-      break;
-    }
-    const mid = alongToLonLat(ctx.shape.coords, ctx.shape.cumM, d);
-    const mult =
-      this.trafficIndex && mid ? this.trafficIndex.multiplierAt(mid.lon, mid.lat) : 1;
     return Math.max(0.5, vNom * mult);
   }
 
@@ -860,18 +897,38 @@ export class BusPositionEngine {
     const cumM = ctx.shape.cumM;
     const total = cumM?.[cumM.length - 1] || 0;
     // Anchored (soonest) first, then schedule buses nearest the board stop
-    // (a just-arrived bus sits at the stop, so it is never evicted); cap for
-    // radar clutter.
+    // (a just-arrived bus sits at the stop). A tracked bus — one continuing
+    // after its arrival dwell — always emits: evicting it would make a bus
+    // blink out mid-route, past the stop it just served.
     const anchored = [];
     const sched = [];
     for (const v of this.vehicles || []) (v.anchored ? anchored : sched).push(v);
     const boardDist = ctx.stopDistM?.[ctx.boardStopIndex] || 0;
-    sched.sort((a, b) => Math.abs(a.d - boardDist) - Math.abs(b.d - boardDist));
+    const tracked = (v) => this.tripState.get(v.id)?.arrD >= 0;
+    sched.sort((a, b) => {
+      const ta = tracked(a) ? 0 : 1;
+      const tb = tracked(b) ? 0 : 1;
+      if (ta !== tb) return ta - tb;
+      return Math.abs(a.d - boardDist) - Math.abs(b.d - boardDist);
+    });
     const vehicles = [];
-    for (const v of [...anchored, ...sched].slice(0, MAX_VEHICLES)) {
+    let used = 0;
+    for (const v of anchored) {
+      vehicles.push(v);
+      used += 1;
+    }
+    for (const v of sched) {
+      if (used >= MAX_VEHICLES && !tracked(v)) break;
+      vehicles.push(v);
+      used += 1;
+    }
+    // Separate output array — the loop below must not append to the array it
+    // iterates (a shared array here used to grow unboundedly → memory blow-up).
+    const payloads = [];
+    for (const v of vehicles) {
       const ll = alongToLonLat(coords, cumM, Math.max(0, Math.min(v.d, total)));
       if (!ll) continue;
-      vehicles.push({
+      payloads.push({
         id: hashId(v.id),
         lon: ll.lon,
         lat: ll.lat,
@@ -885,7 +942,7 @@ export class BusPositionEngine {
         coasting: false,
       });
     }
-    this.lastEmit = { vehicles, at: now };
+    this.lastEmit = { vehicles: payloads, at: now };
     this.onUpdate(this.lastEmit);
   }
 }

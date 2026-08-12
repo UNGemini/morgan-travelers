@@ -12927,8 +12927,12 @@ function wheelsEtaSlotsHtml(etaResult, opts = {}) {
       const destHtml = destLine
         ? `<span class="wheels-eta-slotdest" title="To ${escapeHtml(destLine)}">${escapeHtml(destLine)}</span>`
         : "";
+      // Live slots carry their ETA time so the global 1 s ticker can count
+      // the wait down against it (scheduled slots have no etaIso — static).
+      const etaT = slot.etaIso ? Date.parse(slot.etaIso) : NaN;
+      const etaTAttr = Number.isFinite(etaT) ? ` data-eta-t="${etaT}"` : "";
       return `<div class="wheels-eta-slot${due ? " is-due" : ""}${slot.scheduled ? " is-scheduled" : ""}">
-        <span class="wheels-eta-wait">${escapeHtml(wait)}</span>
+        <span class="wheels-eta-wait"${etaTAttr}>${escapeHtml(wait)}</span>
         <span class="wheels-eta-clock" title="${kindTitle}">${escapeHtml(clockLine)}</span>${destHtml}
       </div>`;
     })
@@ -13455,6 +13459,41 @@ async function refreshEtaRouteDetailEta() {
 setInterval(() => {
   void refreshEtaRouteDetailEta();
 }, 60_000);
+
+// Live ETA waits count down every second (same round-to-minute rule as
+// waitMinutesFromIso) against the fetched ETA times, so the card tracks the
+// bus instead of freezing the value fetched at open. The moment the soonest
+// ETA passes the detail card re-fetches — the marker is anchored to the same
+// ETAs, so the map arrival and the roll to the next bus stay in sync (the
+// fixed 60 s refresh could otherwise still show “1 min” while the bus sat at
+// the stop and then drove past it).
+let etaDetailDueRefreshedAt = 0;
+setInterval(() => {
+  if (document.visibilityState !== "visible") return;
+  const now = Date.now();
+  let soonest = Infinity;
+  let soonestEl = null;
+  for (const el of document.querySelectorAll(".wheels-eta-wait[data-eta-t]")) {
+    const t = Number(el.dataset.etaT || 0);
+    if (!Number.isFinite(t) || t <= 0) continue;
+    const mins = Math.max(0, Math.round((t - now) / 60_000));
+    el.textContent = formatWaitCompact(mins);
+    el.closest(".wheels-eta-slot")?.classList.toggle("is-due", mins <= 0);
+    if (t < soonest) {
+      soonest = t;
+      soonestEl = el;
+    }
+  }
+  if (
+    soonestEl &&
+    soonestEl.closest("#eta-detail-slots") &&
+    soonest <= now &&
+    now - etaDetailDueRefreshedAt > 15_000
+  ) {
+    etaDetailDueRefreshedAt = now;
+    void refreshEtaRouteDetailEta();
+  }
+}, 1_000);
 
 /**
  * Open ETA route detail page — Wheels-style hero + ETA card + stop timeline.
