@@ -14768,14 +14768,16 @@ function busPosEnsureLayers() {
       source: "bus-positions",
       layout: busPosReducedMotion ? { visibility: "none" } : {},
       paint: {
-        // Filled pulse: route-color fill that fades out as it expands
-        "circle-radius": ["+", 16, ["*", 74, ["get", "radarPhase"]]],
+        // Filled pulse: route-color fill that fades out as it expands.
+        // Smaller footprint (14->54px) and the alpha dies by mid-cycle, so
+        // the ripple reads as a quick pulse instead of a lingering disc.
+        "circle-radius": ["+", 14, ["*", 40, ["get", "radarPhase"]]],
         "circle-color": [
           "rgba",
           busPosRgb[0],
           busPosRgb[1],
           busPosRgb[2],
-          ["*", 0.3, ["-", 1, ["get", "radarPhase"]]],
+          ["*", 0.35, ["max", 0, ["-", 1, ["*", 2, ["get", "radarPhase"]]]]],
         ],
       },
     });
