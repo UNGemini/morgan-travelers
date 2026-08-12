@@ -12549,6 +12549,52 @@ async function paintEtaRouteOnMap(route, stops, opts = {}) {
     console.warn("[eta] visual_stops", e);
   }
 
+  // Visual positions for routes WITHOUT contributed visual_stops: snap official
+  // stops onto the drawn polyline (same projection the trip plan uses). Display
+  // only — official coords / identity stay; stops far from the line keep their
+  // official position (parallel-road guard). Contributed visual_stops win.
+  if (lineCoords.length >= 2) {
+    try {
+      const line = lineCoords.map((c) => ({
+        lon: Number(c[0]),
+        lat: Number(c[1]),
+      }));
+      const isRailKind = route.kind === "mtr" || route.kind === "lrt";
+      const maxErr = isRailKind ? PLATFORM_SNAP_MAX_M : STOP_SNAP_MAX_M;
+      const targets = stopFeats
+        .map((f, i) => ({
+          f,
+          i,
+          lon: Number(f.geometry?.coordinates?.[0]),
+          lat: Number(f.geometry?.coordinates?.[1]),
+        }))
+        .filter(
+          (t) =>
+            Number.isFinite(t.lon) &&
+            Number.isFinite(t.lat) &&
+            t.f.properties?.visual_override !== true,
+        );
+      const projected = projectStops(
+        line,
+        targets.map((t) => ({ id: String(t.i), lon: t.lon, lat: t.lat })),
+      );
+      let snapped = 0;
+      for (const t of targets) {
+        const p = projected.find((x) => x.id === String(t.i));
+        if (!p || !Number.isFinite(p.lon) || !Number.isFinite(p.lat)) continue;
+        if (Number.isFinite(p.error) && p.error > maxErr) continue;
+        t.f.geometry = { type: "Point", coordinates: [p.lon, p.lat] };
+        t.f.properties.snapped = true;
+        snapped += 1;
+      }
+      if (snapped) {
+        console.info("[eta] snapped", snapped, "stops onto route line");
+      }
+    } catch (e) {
+      console.warn("[eta] stop snap failed", e);
+    }
+  }
+
   if (lineCoords.length < 2) {
     etaMapGeomCache = null;
     console.warn(
