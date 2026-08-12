@@ -14768,16 +14768,15 @@ function busPosEnsureLayers() {
       source: "bus-positions",
       layout: busPosReducedMotion ? { visibility: "none" } : {},
       paint: {
+        // Filled pulse: route-color fill that fades out as it expands
         "circle-radius": ["+", 16, ["*", 74, ["get", "radarPhase"]]],
-        "circle-color": "rgba(0,0,0,0)",
-        "circle-stroke-color": [
+        "circle-color": [
           "rgba",
           busPosRgb[0],
           busPosRgb[1],
           busPosRgb[2],
-          ["*", 0.45, ["-", 1, ["get", "radarPhase"]]],
+          ["*", 0.3, ["-", 1, ["get", "radarPhase"]]],
         ],
-        "circle-stroke-width": 2.5,
       },
     });
   }
@@ -14809,11 +14808,13 @@ function busPosEnsureLayers() {
       source: "bus-positions",
       layout: {
         "text-field": ["get", "label"],
-        "text-size": 12,
+        // Boldest weight the shared glyph server serves (no Montserrat there);
+        // smaller to sit comfortably inside the white dot.
+        "text-size": 10,
         "text-allow-overlap": true,
         "text-ignore-placement": true,
         "text-anchor": "center",
-        "text-font": ["Noto Sans Regular"],
+        "text-font": ["Noto Sans Medium"],
       },
       paint: {
         // Route number in the route line color, no stroke/border
