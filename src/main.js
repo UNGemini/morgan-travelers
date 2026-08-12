@@ -4020,6 +4020,19 @@ els.btnPlanCta?.addEventListener("click", () => {
   runPlan();
 });
 
+/**
+ * Stop marker radius scales with zoom: small at low zoom so nearby stops don't
+ * merge into one blob, full size at high zoom. Board stop stays larger.
+ * @param {boolean} board
+ * @returns {unknown[]}
+ */
+function stopRadiusExpr(board) {
+  const stops = board
+    ? [10, 3.2, 12, 4.2, 14, 5.6, 16, 7, 18, 9]
+    : [10, 2.6, 12, 3.4, 14, 4.6, 16, 6, 18, 8];
+  return ["interpolate", ["linear"], ["zoom"], ...stops];
+}
+
 function ensureRouteLayers() {
   if (!map.getSource("route-line")) {
     map.addSource("route-line", {
@@ -4115,12 +4128,12 @@ function ensureRouteLayers() {
       type: "circle",
       source: "route-stops",
       paint: {
-        // Board stop slightly larger; passed stops greyed (same idea as list)
+        // Radius scales with zoom so nearby stops don't merge at low zoom
         "circle-radius": [
           "case",
           ["==", ["get", "role"], "board"],
-          9,
-          7,
+          stopRadiusExpr(true),
+          stopRadiusExpr(false),
         ],
         // Passed keeps the route colour — grey veil circle sits on top
         "circle-color": ["coalesce", ["get", "color"], "#c0aefc"],
@@ -4159,8 +4172,8 @@ function ensureRouteLayers() {
         "circle-radius": [
           "case",
           ["==", ["get", "role"], "board"],
-          9,
-          7,
+          stopRadiusExpr(true),
+          stopRadiusExpr(false),
         ],
         "circle-color": "#5a5a66",
         "circle-opacity": 0.4,
@@ -4221,9 +4234,17 @@ function ensureRouteLayers() {
       map.setPaintProperty("route-stops-circle", "circle-radius", [
         "case",
         ["==", ["get", "role"], "board"],
-        9,
-        7,
+        stopRadiusExpr(true),
+        stopRadiusExpr(false),
       ]);
+      if (map.getLayer("route-stops-passed-veil")) {
+        map.setPaintProperty("route-stops-passed-veil", "circle-radius", [
+          "case",
+          ["==", ["get", "role"], "board"],
+          stopRadiusExpr(true),
+          stopRadiusExpr(false),
+        ]);
+      }
       map.setPaintProperty("route-stops-circle", "circle-color", [
         "coalesce", ["get", "color"], "#c0aefc",
       ]);
@@ -12554,13 +12575,30 @@ async function paintEtaRouteOnMap(route, stops, opts = {}) {
     return;
   }
 
-  // Cache full geometry; progress (grey passed segment) applied from board index
+  // Cache full geometry; progress (grey passed segment) applied from board index.
+  // Deep-copy stops and bake contributed visual_stops offsets (already applied
+  // to stopFeats, built 1:1 in the same filtered order) into the copies so
+  // later board-tap re-cuts keep visual marker positions, not official coords.
   etaMapGeomCache = {
     coords: lineCoords,
     color,
     routeId: String(route.id || ""),
-    stops: (stops || []).slice(),
+    stops: (stops || []).map((s) => ({ ...s })),
   };
+  {
+    let fi = 0;
+    for (const s of etaMapGeomCache.stops) {
+      if (s._polylineOnly || !Number.isFinite(s.lon) || !Number.isFinite(s.lat)) {
+        continue;
+      }
+      const c = stopFeats[fi]?.geometry?.coordinates;
+      if (Array.isArray(c) && c.length >= 2) {
+        s.lon = Number(c[0]);
+        s.lat = Number(c[1]);
+      }
+      fi += 1;
+    }
+  }
   applyEtaRouteProgressOnMap(boardIndex, { fit: doFit });
 }
 
