@@ -297,12 +297,13 @@ body.mobile-ui [data-acrylic]::before {
 }
 
 /* Live bus marker labels: DOM overlay above the canvas so they can use the
-   app's Montserrat typeface — map glyph servers only ship Noto Sans. */
+   app's Montserrat typeface — map glyph servers only ship Noto Sans.
+   z-index 1: above the canvas but below the MapLibre tools (z-index 2). */
 .bus-pos-label-layer {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 3;
+  z-index: 1;
 }
 
 .bus-pos-label {
