@@ -14984,11 +14984,13 @@ function busPosRemoveLayers() {
  * Engine emit → retarget the eased display positions. The rAF loop renders
  * them, so the marker glides non-linearly instead of jumping between polls.
  *
- * Path-following: when the drawn shape is available, the current rendered
- * position and the new target are projected onto the polyline (alongM) and
- * the glide interpolates along-shape distance, so markers travel the real
- * road distance — around curves and across long gaps — instead of a straight
- * lon/lat line. Failed projections fall back to today's straight-line lerp.
+ * Path-following: the engine emits each vehicle's exact along-shape distance
+ * (d), so the target needs NO re-projection — a whole-polyline nearest-point
+ * search is ambiguous where a shape loops back on itself (circular routes),
+ * which made markers flip between the two nearby legs and glide the long way
+ * around the loop. The glide source is likewise derived from the previous
+ * glide state (unambiguous), never re-projected from the rendered lon/lat.
+ * Projection survives only as a fallback for payloads without d.
  */
 function busPosOnUpdate(evt) {
   if (!map?.getStyle) return;
@@ -14999,6 +15001,18 @@ function busPosOnUpdate(evt) {
     busPosShape && busPosProjectOntoShape
       ? busPosProjectOntoShape(busPosShape.coords, lon, lat)
       : null;
+  /** Along-shape distance of the last rendered position (mid-glide interpolated). */
+  const prevAlongM = (prev) => {
+    if (!prev?.usePath) return null;
+    if (prev.dur > 0) {
+      const t = Math.min(1, (now - prev.t0) / prev.dur);
+      if (t < 1) {
+        const k = t * t * (3 - 2 * t);
+        return prev.fromD + (prev.targetD - prev.fromD) * k;
+      }
+    }
+    return prev.targetD;
+  };
   for (const v of evt?.vehicles || []) {
     const id = Number(v.id) || 0;
     const tLon = Number(v.lon);
@@ -15016,8 +15030,8 @@ function busPosOnUpdate(evt) {
       targetD: 0,
       usePath: false,
     };
-    const tgt = project(tLon, tLat);
-    const src = prev ? project(prev.lon, prev.lat) : null;
+    const tgt = Number.isFinite(v.d) ? { alongM: v.d } : project(tLon, tLat);
+    const src = prev ? prevAlongM(prev) : null;
     if (busPosReducedMotion || !prev) {
       // First sighting (or reduced motion): snap straight to the target.
       next.fromLon = tLon;

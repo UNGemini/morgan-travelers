@@ -572,6 +572,11 @@ export class BusPositionEngine {
         id: hashId(v.id),
         lon: ll.lon,
         lat: ll.lat,
+        // Along-shape distance: main.js' glide uses it directly instead of
+        // re-projecting the lon/lat (whole-polyline nearest search is
+        // ambiguous where the shape loops back on itself — circular routes
+        // made markers flip between the two nearby legs).
+        d: Math.round(v.d),
         label: String(ctx.routeShort || ""),
         confidence: v.confidence,
         coasting: false,
