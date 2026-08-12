@@ -573,6 +573,36 @@ export function saveLiveBusMorePref(v) {
   return next;
 }
 
+/** Beta warning banner preference — hide the disclaimer card entirely (default on) */
+export const BETA_BANNER_STORAGE_KEY = "morgan.betaBanner";
+
+/**
+ * @returns {boolean} user wants the beta banner shown while the engine runs
+ */
+export function loadBetaBannerPref() {
+  try {
+    const raw = localStorage.getItem(BETA_BANNER_STORAGE_KEY);
+    if (raw === "1" || raw === "0") return raw === "1";
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
+/**
+ * @param {boolean} v
+ * @returns {boolean}
+ */
+export function saveBetaBannerPref(v) {
+  const next = !!v;
+  try {
+    localStorage.setItem(BETA_BANNER_STORAGE_KEY, next ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+  return next;
+}
+
 /**
  * Short label for result meta, e.g. "Fastest + Simplest"
  * @param {RoutePreference[]} prefs

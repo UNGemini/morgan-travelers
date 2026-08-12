@@ -5945,8 +5945,9 @@ html.pwa .offline-banner {
 .beta-banner-text {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: 2px;
+  text-align: left;
 }
 .beta-banner-text strong {
   font: 700 11px/1.2 var(--font);
@@ -5961,6 +5962,7 @@ html.pwa .offline-banner {
   width: auto;
   max-width: none;
   transform: none;
+  justify-content: flex-start;
 }
 html.pwa .offline-banner.beta-banner {
   left: 16px;

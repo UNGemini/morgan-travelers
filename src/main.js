@@ -67,6 +67,8 @@ import {
   saveLiveBusPref,
   loadLiveBusMorePref,
   saveLiveBusMorePref,
+  loadBetaBannerPref,
+  saveBetaBannerPref,
 } from "./preferences.js";
 import { resolveRouteColor } from "./mtrColors.js";
 import {
@@ -3098,14 +3100,121 @@ initOfflineBanner();
 
 /** Beta warning banner — visible only while the live bus position engine runs. */
 let betaBannerEl = null;
+const BETA_BANNER_DISMISS_KEY = "morgan.betaBannerDismissed";
+function betaBannerDismissed() {
+  try {
+    return sessionStorage.getItem(BETA_BANNER_DISMISS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function setBetaBannerDismissed(v) {
+  try {
+    if (v) sessionStorage.setItem(BETA_BANNER_DISMISS_KEY, "1");
+    else sessionStorage.removeItem(BETA_BANNER_DISMISS_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 function syncBetaBanner() {
-  if (betaBannerEl) betaBannerEl.hidden = !busPosEngine?.running;
+  if (!betaBannerEl) return;
+  betaBannerEl.hidden =
+    !busPosEngine?.running || !loadBetaBannerPref() || betaBannerDismissed();
 }
 function initBetaBanner() {
   betaBannerEl = document.getElementById("beta-banner");
+  if (!betaBannerEl) return;
+  initBetaBannerSwipe();
+  initBetaBannerPrefUi();
   // Starts hidden; syncBetaBanner() flips it with the engine lifecycle.
 }
 initBetaBanner();
+
+/** Swipe up on the banner to dismiss it for the rest of the session. */
+function initBetaBannerSwipe() {
+  let startY = null;
+  let dy = 0;
+  let dragging = false;
+  const clearStyles = () => {
+    betaBannerEl.style.transition = "";
+    betaBannerEl.style.transform = "";
+    betaBannerEl.style.opacity = "";
+  };
+  betaBannerEl.addEventListener(
+    "touchstart",
+    (e) => {
+      if (betaBannerEl.hidden || e.touches.length !== 1) return;
+      startY = e.touches[0].clientY;
+      dy = 0;
+      dragging = false;
+      betaBannerEl.style.transition = "none";
+    },
+    { passive: true },
+  );
+  betaBannerEl.addEventListener(
+    "touchmove",
+    (e) => {
+      if (startY == null) return;
+      dy = e.touches[0].clientY - startY;
+      if (dy > 0 && !dragging) return;
+      if (dy < -8) dragging = true;
+      const p = Math.max(-160, dy);
+      betaBannerEl.style.transform = `translateY(${p}px)`;
+      betaBannerEl.style.opacity = String(1 - Math.min(1, -dy / 160));
+    },
+    { passive: true },
+  );
+  const finish = (dismiss) => {
+    if (dismiss) {
+      // Hidden for the rest of the session; the Settings toggle is permanent.
+      setBetaBannerDismissed(true);
+      betaBannerEl.style.transition = "transform 0.22s ease, opacity 0.22s ease";
+      betaBannerEl.style.transform = "translateY(-120%)";
+      betaBannerEl.style.opacity = "0";
+      window.setTimeout(() => {
+        betaBannerEl.hidden = true;
+        clearStyles();
+      }, 240);
+    } else {
+      // Below the threshold — spring back.
+      betaBannerEl.style.transition = "transform 0.2s ease, opacity 0.2s ease";
+      betaBannerEl.style.transform = "";
+      betaBannerEl.style.opacity = "";
+      window.setTimeout(clearStyles, 220);
+    }
+  };
+  betaBannerEl.addEventListener("touchend", () => {
+    if (startY == null) return;
+    const was = dy;
+    startY = null;
+    dragging = false;
+    finish(was <= -60);
+  });
+  betaBannerEl.addEventListener("touchcancel", () => {
+    if (startY == null) return;
+    startY = null;
+    dragging = false;
+    finish(false);
+  });
+}
+
+/** Settings → Beta warning banner: persistent show/hide for the banner. */
+function initBetaBannerPrefUi() {
+  const on = document.getElementById("beta-banner-on");
+  const off = document.getElementById("beta-banner-off");
+  if (!on || !off) return;
+  (loadBetaBannerPref() ? on : off).checked = true;
+  for (const el of [on, off]) {
+    el.addEventListener("change", () => {
+      if (!el.checked) return;
+      const next = saveBetaBannerPref(el === on);
+      // Re-enabling clears the swipe dismissal so the banner returns.
+      if (next) setBetaBannerDismissed(false);
+      showToast(next ? "Beta banner enabled" : "Beta banner hidden", 1600);
+      syncBetaBanner();
+    });
+  }
+}
 
 /**
  * Ran on downloaded data (offline) and connectivity returns — the loaded
