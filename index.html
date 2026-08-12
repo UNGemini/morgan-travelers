@@ -1334,6 +1334,27 @@
                   from the ETA countdowns of nearby stops, not official GPS.
                 </p>
               </div>
+              <div class="pref-field" id="live-bus-more-field" hidden>
+                <span class="loc-label pref-label">
+                  <span class="material-symbols-outlined" aria-hidden="true">radar</span>
+                  Fetch more live data
+                </span>
+                <div class="pref-segment pref-segment-2" role="group" aria-label="Fetch more live data">
+                  <label class="pref-opt">
+                    <input type="radio" name="live-bus-more" value="on" id="live-bus-more-on" />
+                    <span>On</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="radio" name="live-bus-more" value="off" id="live-bus-more-off" />
+                    <span>Off</span>
+                  </label>
+                </div>
+                <p class="pref-field-note">
+                  Also fetches ETAs at the nearest stops and every 5th stop
+                  ahead and behind the selected stop, so positions are stitched
+                  from more anchors (extra requests per route view).
+                </p>
+              </div>
             </section>
             <section class="panel-section">
               <h3>Dataset status</h3>

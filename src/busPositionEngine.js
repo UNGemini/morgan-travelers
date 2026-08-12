@@ -22,6 +22,16 @@
  *      the scheduled arrival) blend into the schedule first, so the revert
  *      is continuous instead of snapping on fast segments.
  *
+ * Multi-stop anchoring (fetch-more option + passive reuse):
+ *   - With ctx.fetchMore the poll also fetches ETA rows for the nearest stops
+ *     and every 5th stop ahead and behind the board stop; each stop's rows
+ *     match trips by their scheduled arrival AT THAT STOP, and the soonest
+ *     constraint per trip anchors it at `stop − seconds × speed`. Extra
+ *     anchored trips beyond the board-stop slots cap at EXTRA_ANCHORS.
+ *   - With or without fetchMore, cached rows the ETA panel fetched for other
+ *     window stops (e.g. the stop selected before a switch) are reused, so
+ *     switching the board stop re-anchors the same trips instead of jumping.
+ *
  * The engine is purely additive: it imports from existing modules and never
  * modifies them. Kalman1D is gone — the schedule model is deterministic and
  * the eased-glide animation in main.js smooths re-anchors between polls.
@@ -41,6 +51,8 @@ const V_TYP = 8.3;
 const MAX_VEHICLES = 8;
 /** ETA anchor slots at the selected stop (operator feeds cap at 3). */
 const ANCHOR_SLOTS = 3;
+/** Extra anchored trips from other stops' ETAs (fetch-more / cached rows). */
+const EXTRA_ANCHORS = 2;
 /** A pattern stop is the "board stop" only within this distance (m). */
 const BOARD_MATCH_TOL_M = 300;
 /** ETA ↔ scheduled-arrival matching tolerance at the board stop. */
@@ -140,6 +152,13 @@ async function defaultFetchRows(ctx, stop) {
   return [];
 }
 
+/** Cache-only row lookup for non-board stops (no network; used when the
+ * fetch-more option is off — reuse what the ETA panel already fetched). */
+async function defaultPeekCached(ctx, stop) {
+  const { getRawEtaRows } = await import("./eta.js");
+  return getRawEtaRows(ctx.op, ctx.routeShort, ctx.serviceType, stop.stopId);
+}
+
 /** Filter + normalize raw operator rows for one stop. */
 function normalizeRows(op, rows, bound, now = Date.now()) {
   const out = [];
@@ -169,6 +188,7 @@ export class BusPositionEngine {
    * @param {object} opts
    * @param {(evt: { vehicles: Array<{ id: number, lon: number, lat: number, label: string, confidence: number, coasting: boolean }> }) => void} [opts.onUpdate]
    * @param {(ctx: any, stop: { stopId: string, seq: number }) => Promise<any[]>} [opts.fetchRows]
+   * @param {(ctx: any, stop: { stopId: string, seq: number }) => Promise<any[]>} [opts.peekCached] harness injection (default: eta.js raw cache)
    * @param {(co: string) => Promise<any|null>} [opts.loadSchedules] harness injection (default: browser fetch)
    * @param {() => Promise<any|null>} [opts.loadTraffic] harness injection (default: fetchTrafficSpeed)
    * @param {() => number} [opts.nowFn] clock injection for the sim harness (default: Date.now)
@@ -176,6 +196,7 @@ export class BusPositionEngine {
   constructor(opts = {}) {
     this.onUpdate = opts.onUpdate || (() => {});
     this.fetchRows = opts.fetchRows || defaultFetchRows;
+    this.peekCached = opts.peekCached || defaultPeekCached;
     this.loadSchedules = opts.loadSchedules || loadOperatorSchedules;
     this.loadTraffic = opts.loadTraffic || fetchTrafficSpeed;
     this.nowFn = opts.nowFn || Date.now;
@@ -183,6 +204,8 @@ export class BusPositionEngine {
     this.running = false;
     /** @type {Map<string, number>} trip id → ETA time from the last poll */
     this.etaMap = new Map();
+    /** @type {Map<string, { etaT: number, d: number, stopIdx: number }>} trip id → soonest ETA constraint across all anchor stops */
+    this.constraints = new Map();
     /** @type {Array<{ rank: number, etaT: number }>} unmatched ETAs (synth buses) */
     this.synth = [];
     /** @type {Map<number, { distsM: number[], pat: any, boardIdx: number, boardMatchM: number, boardOffSec: number }>} */
@@ -195,7 +218,7 @@ export class BusPositionEngine {
   }
 
   /**
-   * @param {{ op: string, routeId: string, routeShort: string, bound: string, serviceType?: number, stops: Array<{ stopId: string, seq: number, lon: number, lat: number }>, boardStopIndex: number, shape: { coords: Array<{ lon: number, lat: number }>, cumM: number[] }, stopDistM: number[], nlbRouteIds?: string[] }} ctx
+   * @param {{ op: string, routeId: string, routeShort: string, bound: string, serviceType?: number, stops: Array<{ stopId: string, seq: number, lon: number, lat: number }>, boardStopIndex: number, shape: { coords: Array<{ lon: number, lat: number }>, cumM: number[] }, stopDistM: number[], nlbRouteIds?: string[], fetchMore?: boolean }} ctx
    */
   start(ctx) {
     this.stop();
@@ -231,6 +254,7 @@ export class BusPositionEngine {
     this.schedules = null;
     this.patternDists.clear();
     this.etaMap.clear();
+    this.constraints.clear();
     this.synth = [];
     this.trafficIndex = null;
     this.lastEmit = null;
@@ -349,7 +373,45 @@ export class BusPositionEngine {
     );
   }
 
-  /** One poll: fetch board-stop ETAs → match anchors → compute → emit. */
+  /**
+   * Stop indices whose ETA rows anchor the estimate. The board stop is always
+   * included; with ctx.fetchMore also the nearest stops (±1, ±2) and every
+   * 5th stop (±5, ±10, ±15) on both sides — behind (passed) and ahead
+   * (future) along the route.
+   */
+  anchorStopIndices(ctx) {
+    const n = ctx.stops?.length || 0;
+    const b = ctx.boardStopIndex;
+    if (!Number.isInteger(b) || b < 0 || b >= n) return [];
+    const set = new Set([b]);
+    if (!ctx.fetchMore) return [...set];
+    for (const dir of [-1, 1]) {
+      for (const step of [1, 2, 5, 10, 15]) {
+        const idx = b + dir * step;
+        if (idx >= 0 && idx < n) set.add(idx);
+      }
+    }
+    return [...set].sort((a, b) => a - b);
+  }
+
+  /** Kept pattern stop nearest an along-shape distance, within BOARD_MATCH_TOL_M. */
+  patternIdxForDist(pd, d) {
+    let best = -1;
+    let bestM = Infinity;
+    for (let i = 0; i < pd.distsM.length; i++) {
+      const dd = Math.abs(pd.distsM[i] - d);
+      if (dd < bestM) {
+        bestM = dd;
+        best = i;
+      }
+    }
+    return best >= 0 && bestM <= BOARD_MATCH_TOL_M ? { idx: best, matchM: bestM } : null;
+  }
+
+  /**
+   * One poll: fetch board-stop ETAs (+ fetch-more stops) → match anchors →
+   * compute → emit.
+   */
   async poll() {
     const ctx = this.ctx;
     if (!this.running || !ctx) return;
@@ -357,49 +419,99 @@ export class BusPositionEngine {
     try {
       if (this.initPromise) await this.initPromise;
       if (!this.running || this.ctx !== ctx) return;
-      const stop = ctx.stops?.[ctx.boardStopIndex];
-      let etas = [];
-      if (stop?.stopId) {
-        const rows = await this.fetchRows(ctx, stop);
-        etas = normalizeRows(ctx.op, rows, ctx.bound, now);
+      const anchorIdx = this.anchorStopIndices(ctx);
+      const stopEtas = new Map(); // stop index → normalized rows
+      for (const idx of anchorIdx) {
+        const stop = ctx.stops?.[idx];
+        if (!stop?.stopId || !Number.isFinite(ctx.stopDistM?.[idx])) continue;
+        const rows =
+          idx === ctx.boardStopIndex || ctx.fetchMore
+            ? await this.fetchRows(ctx, stop)
+            : await this.peekCached(ctx, stop);
+        if (!rows?.length) continue;
+        const norm = normalizeRows(ctx.op, rows, ctx.bound, now);
+        if (norm.length) stopEtas.set(idx, norm);
       }
-      this.etaMap.clear();
-      this.synth = [];
-      if (this.schedules && this.patternDists.size) {
-        const trips = enumerateTrips(this.schedules, this.routeKey, this.dir, now);
+      // Passive reuse over the whole window (fetch-more off): cached rows the
+      // ETA panel fetched for other stops — e.g. the stop the user had open
+      // before switching — still constrain the trips, so switching the board
+      // stop keeps their estimates continuous instead of re-anchoring them.
+      if (!ctx.fetchMore) {
+        for (let i = 0; i < (ctx.stops?.length || 0); i++) {
+          if (stopEtas.has(i)) continue;
+          const stop = ctx.stops?.[i];
+          if (!stop?.stopId || !Number.isFinite(ctx.stopDistM?.[i])) continue;
+          const rows = await this.peekCached(ctx, stop);
+          if (!rows?.length) continue;
+          const norm = normalizeRows(ctx.op, rows, ctx.bound, now);
+          if (norm.length) stopEtas.set(i, norm);
+        }
+      }
+      this.matchAnchors(ctx, stopEtas, now);
+      this.computePositions(now);
+      this.emit(now);
+    } catch (e) {
+      console.warn("[buspos] poll failed", e?.message || e);
+      this.coast(now);
+    }
+  }
+
+  /**
+   * Greedy ETA → trip matching. Rows are processed STOP BY STOP (not merged):
+   * rows at one stop are distinct buses (per-stop matched set, so the board
+   * stop's 3-arrival feed maps 1:1 as before), while the same trip may be
+   * claimed at several stops — its own rows at downstream stops re-match it
+   * and the soonest ETA wins, so the constraint sits at the stop nearest the
+   * bus. (A global matched set would cascade: trip A's board row would be
+   * reassigned to trip B, whose row then steals trip C.) Unmatched board-stop
+   * ETAs become synthetic vehicles; unmatched rows at other stops are ignored
+   * — they are beyond-horizon buses that would duplicate across stops.
+   */
+  matchAnchors(ctx, stopEtas, now) {
+    this.etaMap.clear();
+    this.constraints.clear();
+    this.synth = [];
+    if (this.schedules && this.patternDists.size) {
+      const trips = enumerateTrips(this.schedules, this.routeKey, this.dir, now);
+      for (const [stopIdx, etas] of stopEtas) {
+        const d = ctx.stopDistM?.[stopIdx];
+        if (!Number.isFinite(d)) continue;
         const matched = new Set();
-        // Greedy ascending: each ETA takes the unmatched trip whose scheduled
-        // arrival at the board stop is closest (≤ 15 min).
         for (const eta of etas) {
           let best = null;
           let bestD = Infinity;
           for (const trip of trips) {
             if (matched.has(trip.id)) continue;
             const pd = this.patternDists.get(trip.patIdx);
-            if (!pd || pd.boardIdx < 0 || pd.boardMatchM > BOARD_MATCH_TOL_M) continue;
-            const arr = trip.startEpoch + pd.boardOffSec * 1000;
-            const d = Math.abs(arr - eta.t);
-            if (d <= ETA_MATCH_TOL_MS && d < bestD) {
-              bestD = d;
+            if (!pd) continue;
+            const k = this.patternIdxForDist(pd, d);
+            if (!k) continue;
+            const arr = trip.startEpoch + (pd.offsRows[k.idx][1]) * 1000;
+            const dd = Math.abs(arr - eta.t);
+            if (dd <= ETA_MATCH_TOL_MS && dd < bestD) {
+              bestD = dd;
               best = trip;
             }
           }
-          if (best) {
-            matched.add(best.id);
-            this.etaMap.set(best.id, eta.t);
-          } else {
-            this.synth.push({ rank: this.synth.length + 1, etaT: eta.t });
+          if (!best) {
+            if (stopIdx === ctx.boardStopIndex) {
+              this.synth.push({ rank: this.synth.length + 1, etaT: eta.t });
+            }
+            continue;
           }
+          matched.add(best.id);
+          const prev = this.constraints.get(best.id);
+          if (!prev || eta.t < prev.etaT) {
+            this.constraints.set(best.id, { etaT: eta.t, d, stopIdx });
+          }
+          if (stopIdx === ctx.boardStopIndex) this.etaMap.set(best.id, eta.t);
         }
-      } else {
-        // No schedule: every ETA is a synthetic, ETA-anchored bus.
-        for (const eta of etas) this.synth.push({ rank: this.synth.length + 1, etaT: eta.t });
       }
-      this.computePositions(now);
-      this.emit(now);
-    } catch (e) {
-      console.warn("[buspos] poll failed", e?.message || e);
-      this.coast(now);
+    } else {
+      // No schedule: every board-stop ETA is a synthetic, ETA-anchored bus.
+      for (const eta of stopEtas.get(ctx.boardStopIndex) || []) {
+        this.synth.push({ rank: this.synth.length + 1, etaT: eta.t });
+      }
     }
   }
 
@@ -448,6 +560,18 @@ export class BusPositionEngine {
     const vAnchor = this.anchorSpeed(cands, boardDist);
     for (let i = 0; i < Math.min(ANCHOR_SLOTS, cands.length); i++) {
       const { v, pd, trip, anchorT } = cands[i];
+      // A tighter ETA at another anchor stop (fetched with fetch-more, or
+      // cached from an earlier stop selection) overrides the board anchor:
+      // that stop is nearer the bus, so `stop − seconds × speed` is the more
+      // accurate position. Without one, the board-stop math below is unchanged.
+      const c = this.constraints.get(v.id);
+      if (c && c.stopIdx !== ctx.boardStopIndex && Number.isFinite(c.d)) {
+        let d = Math.max(0, c.d - ((c.etaT - now) / 1000) * this.anchorSpeedAt(c.d));
+        v.d = this.blendConstraint(pd, trip, c, d, now);
+        v.confidence = CONF_ETA;
+        v.anchored = true;
+        continue;
+      }
       let d = Math.max(0, boardDist - ((anchorT - now) / 1000) * vAnchor);
       const etaT = this.etaMap.get(v.id);
       if (etaT != null) {
@@ -465,6 +589,24 @@ export class BusPositionEngine {
         }
       }
       v.d = d;
+      v.confidence = CONF_ETA;
+      v.anchored = true;
+    }
+    // Extended anchors: trips constrained only at non-board stops (beyond the
+    // board-stop slots) — e.g. a bus well behind or ahead that fetch-more or a
+    // cached row still locates. Capped so the anchored set stays readable.
+    const extended = [];
+    for (const v of out) {
+      if (v.anchored) continue;
+      const c = this.constraints.get(v.id);
+      if (!c || c.stopIdx === ctx.boardStopIndex || !Number.isFinite(c.d)) continue;
+      if (c.etaT <= now) continue;
+      extended.push({ v, c });
+    }
+    extended.sort((a, b) => a.c.etaT - b.c.etaT);
+    for (const { v, c } of extended.slice(0, EXTRA_ANCHORS)) {
+      let d = Math.max(0, c.d - ((c.etaT - now) / 1000) * this.anchorSpeedAt(c.d));
+      v.d = this.blendConstraint(v.pd, v.trip, c, d, now);
       v.confidence = CONF_ETA;
       v.anchored = true;
     }
@@ -530,6 +672,46 @@ export class BusPositionEngine {
     const mult =
       this.trafficIndex && stop ? this.trafficIndex.multiplierAt(stop.lon, stop.lat) : 1;
     return Math.max(0.5, vNom * mult);
+  }
+
+  /** Traffic-adjusted speed near an arbitrary along-shape distance: nominal
+   * speed of the pattern segment bracketing it × the traffic multiplier
+   * there. anchorSpeed() remains the board-stop variant used by the handoff. */
+  anchorSpeedAt(d) {
+    const ctx = this.ctx;
+    let vNom = V_TYP;
+    for (const pd of this.patternDists.values()) {
+      const first = pd.distsM[0];
+      const last = pd.distsM[pd.distsM.length - 1];
+      if (d < first - 100 || d > last + 100) continue;
+      const offs = pd.offsRows || pd.pat;
+      let i = 0;
+      while (i < pd.distsM.length - 2 && pd.distsM[i + 1] <= d) i += 1;
+      const dt = offs[i + 1]?.[1] - offs[i]?.[1];
+      const d0 = pd.distsM[i];
+      const d1 = pd.distsM[i + 1];
+      if (Number.isFinite(d0) && Number.isFinite(d1) && dt > 0) {
+        vNom = (d1 - d0) / dt;
+      }
+      break;
+    }
+    const mid = alongToLonLat(ctx.shape.coords, ctx.shape.cumM, d);
+    const mult =
+      this.trafficIndex && mid ? this.trafficIndex.multiplierAt(mid.lon, mid.lat) : 1;
+    return Math.max(0.5, vNom * mult);
+  }
+
+  /** Near-on-time ETA blend at an arbitrary constraint stop (BLEND_DEV_S). */
+  blendConstraint(pd, trip, c, d, now) {
+    const k = this.patternIdxForDist(pd, c.d);
+    if (!k) return d;
+    const schedArr = trip.startEpoch + (pd.offsRows[k.idx][1]) * 1000;
+    const dev = (c.etaT - schedArr) / 1000;
+    if (dev > 0 && dev <= BLEND_DEV_S && now > schedArr) {
+      const w = Math.min(1, (now - schedArr) / (dev * 1000));
+      d += (this.schedulePos(pd, trip, now) - d) * w;
+    }
+    return d;
   }
 
   /** 1 Hz recompute between polls (deterministic schedule model). */

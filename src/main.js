@@ -65,6 +65,8 @@ import {
   saveDataSourcePref,
   loadLiveBusPref,
   saveLiveBusPref,
+  loadLiveBusMorePref,
+  saveLiveBusMorePref,
 } from "./preferences.js";
 import { resolveRouteColor } from "./mtrColors.js";
 import {
@@ -14709,7 +14711,7 @@ function busPosDetailState() {
   if (named.length < 2) return null;
   const boardIndex = Math.min(Math.max(0, etaDetailStopIndex || 0), named.length - 1);
   if (!named[boardIndex]?.stopId) return null;
-  return { route, co, named, boardIndex };
+  return { route, co, named, boardIndex, fetchMore: loadLiveBusMorePref() };
 }
 
 /** Cheap signature of the detail state (direction flips change it). */
@@ -14727,6 +14729,7 @@ function busPosCheapSigOf(st) {
     String(dir?.routeId || ""),
     st.named.length,
     st.boardIndex,
+    st.fetchMore ? "more" : "",
   ].join("|");
 }
 
@@ -14817,6 +14820,7 @@ async function busPosBuildCtx(st) {
       boardStopIndex: st.boardIndex,
       shape,
       stopDistM,
+      fetchMore: !!st.fetchMore,
       nlbRouteIds: st.co === "nlb" ? [String(dir?.routeId || "")].filter(Boolean) : undefined,
     },
   };
@@ -15195,7 +15199,19 @@ function initLiveBusPrefUi() {
   const on = document.getElementById("live-bus-on");
   const off = document.getElementById("live-bus-off");
   if (!on || !off) return;
+  const moreField = document.getElementById("live-bus-more-field");
+  const moreOn = document.getElementById("live-bus-more-on");
+  const moreOff = document.getElementById("live-bus-more-off");
+  const syncMoreVisibility = () => {
+    // Sub-option only makes sense while the engine itself is on.
+    if (moreField) moreField.hidden = !loadLiveBusPref();
+  };
+  const syncMoreChecked = () => {
+    if (moreOn && moreOff) (loadLiveBusMorePref() ? moreOn : moreOff).checked = true;
+  };
   (loadLiveBusPref() ? on : off).checked = true;
+  syncMoreChecked();
+  syncMoreVisibility();
   for (const el of [on, off]) {
     el.addEventListener("change", () => {
       if (!el.checked) return;
@@ -15204,6 +15220,20 @@ function initLiveBusPrefUi() {
         next ? "Live bus positions enabled" : "Live bus positions disabled",
         1600,
       );
+      syncMoreVisibility();
+      void busPosSyncState();
+    });
+  }
+  for (const el of [moreOn, moreOff]) {
+    el?.addEventListener("change", () => {
+      if (!el.checked) return;
+      const next = saveLiveBusMorePref(el === moreOn);
+      showToast(
+        next ? "Fetch more live data enabled" : "Fetch more live data disabled",
+        1600,
+      );
+      // fetchMore is part of the cheap signature, so the engine rebuilds with
+      // the wider anchor-stop set on the next sync.
       void busPosSyncState();
     });
   }

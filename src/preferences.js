@@ -543,6 +543,36 @@ export function saveLiveBusPref(v) {
   return next;
 }
 
+/** Fetch-more-live-data Beta option (PRD 4.2) — default off */
+export const LIVE_BUS_MORE_STORAGE_KEY = "morgan.liveBusPositionsMore";
+
+/**
+ * @returns {boolean} user opted into extra ETA fetches for tighter positions
+ */
+export function loadLiveBusMorePref() {
+  try {
+    const raw = localStorage.getItem(LIVE_BUS_MORE_STORAGE_KEY);
+    if (raw === "1" || raw === "0") return raw === "1";
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/**
+ * @param {boolean} v
+ * @returns {boolean}
+ */
+export function saveLiveBusMorePref(v) {
+  const next = !!v;
+  try {
+    localStorage.setItem(LIVE_BUS_MORE_STORAGE_KEY, next ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+  return next;
+}
+
 /**
  * Short label for result meta, e.g. "Fastest + Simplest"
  * @param {RoutePreference[]} prefs
