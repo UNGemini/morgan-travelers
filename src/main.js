@@ -4055,15 +4055,13 @@ function ensureRouteLayers() {
       paint: {
         "line-color": [
           "case",
-          // Already-passed segment (ETA board stop logic)
-          ["==", ["get", "passed"], true],
-          "#5a5a66",
           ["==", ["get", "walk_style"], "indoor"],
           "#c4b5fd",
           ["==", ["get", "walk_style"], "free"],
           "#c4b5fd",
           ["==", ["get", "kind"], "walk"],
           "#ff9500",
+          // Passed keeps the route colour — a grey veil layer sits on top
           ["coalesce", ["get", "color"], "#c0aefc"],
         ],
         "line-width": [
@@ -4077,7 +4075,7 @@ function ensureRouteLayers() {
         "line-opacity": [
           "case",
           ["==", ["get", "passed"], true],
-          0.42,
+          0.85,
           0.95,
         ],
         "line-dasharray": [
@@ -4088,6 +4086,23 @@ function ensureRouteLayers() {
           ["literal", [1.4, 1.6]],
           ["literal", [1, 0]],
         ],
+      },
+      layout: { "line-cap": "round", "line-join": "round" },
+    });
+  }
+
+  // Grey veil over already-passed segments — the company colour underneath
+  // stays visible, just muted (vs fully grey before).
+  if (!map.getLayer("route-line-passed-veil")) {
+    map.addLayer({
+      id: "route-line-passed-veil",
+      type: "line",
+      source: "route-line",
+      filter: ["==", ["get", "passed"], true],
+      paint: {
+        "line-color": "#5a5a66",
+        "line-width": 4,
+        "line-opacity": 0.4,
       },
       layout: { "line-cap": "round", "line-join": "round" },
     });
@@ -4107,12 +4122,8 @@ function ensureRouteLayers() {
           9,
           7,
         ],
-        "circle-color": [
-          "case",
-          ["==", ["get", "passed"], true],
-          "#5a5a66",
-          ["coalesce", ["get", "color"], "#c0aefc"],
-        ],
+        // Passed keeps the route colour — grey veil circle sits on top
+        "circle-color": ["coalesce", ["get", "color"], "#c0aefc"],
         "circle-stroke-color": [
           "case",
           ["==", ["get", "role"], "board"],
@@ -4130,10 +4141,30 @@ function ensureRouteLayers() {
         "circle-opacity": [
           "case",
           ["==", ["get", "passed"], true],
-          0.55,
+          0.85,
           1,
         ],
         "circle-stroke-opacity": 1,
+      },
+    });
+  }
+  // Grey veil over passed stops (same treatment as the passed line)
+  if (!map.getLayer("route-stops-passed-veil")) {
+    map.addLayer({
+      id: "route-stops-passed-veil",
+      type: "circle",
+      source: "route-stops",
+      filter: ["==", ["get", "passed"], true],
+      paint: {
+        "circle-radius": [
+          "case",
+          ["==", ["get", "role"], "board"],
+          9,
+          7,
+        ],
+        "circle-color": "#5a5a66",
+        "circle-opacity": 0.4,
+        "circle-stroke-width": 0,
       },
     });
   }
@@ -4171,8 +4202,6 @@ function ensureRouteLayers() {
     if (map.getLayer("route-line-main")) {
       map.setPaintProperty("route-line-main", "line-color", [
         "case",
-        ["==", ["get", "passed"], true],
-        "#5a5a66",
         ["==", ["get", "walk_style"], "indoor"],
         "#c4b5fd",
         ["==", ["get", "walk_style"], "free"],
@@ -4184,7 +4213,7 @@ function ensureRouteLayers() {
       map.setPaintProperty("route-line-main", "line-opacity", [
         "case",
         ["==", ["get", "passed"], true],
-        0.42,
+        0.85,
         0.95,
       ]);
     }
@@ -4196,10 +4225,7 @@ function ensureRouteLayers() {
         7,
       ]);
       map.setPaintProperty("route-stops-circle", "circle-color", [
-        "case",
-        ["==", ["get", "passed"], true],
-        "#5a5a66",
-        ["coalesce", ["get", "color"], "#c0aefc"],
+        "coalesce", ["get", "color"], "#c0aefc",
       ]);
       map.setPaintProperty("route-stops-circle", "circle-stroke-color", [
         "case",
@@ -4218,7 +4244,7 @@ function ensureRouteLayers() {
       map.setPaintProperty("route-stops-circle", "circle-opacity", [
         "case",
         ["==", ["get", "passed"], true],
-        0.55,
+        0.85,
         1,
       ]);
       map.setLayoutProperty("route-stops-circle", "visibility", "visible");
@@ -5811,6 +5837,23 @@ function rideStopCount(opt) {
     return Math.max(1, all.length - 1);
   }
   return 0;
+}
+
+/** color-mix support check (greyed-but-coloured passed rail). */
+let cssColorMix = null;
+function cssSupportsColorMix() {
+  if (cssColorMix == null) {
+    try {
+      cssColorMix = !!(
+        typeof CSS !== "undefined" &&
+        CSS.supports &&
+        CSS.supports("color", "color-mix(in srgb, red 50%, blue)")
+      );
+    } catch {
+      cssColorMix = false;
+    }
+  }
+  return cssColorMix;
 }
 
 /**
@@ -11279,9 +11322,6 @@ let etaSelectedStops = [];
  */
 let etaMapGeomCache = null;
 
-/** Grey for already-passed path / stops (matches list “is-past” feel) */
-const ETA_PASSED_GREY = "#5a5a66";
-
 /**
  * Index of nearest polyline vertex to a lon/lat.
  * @param {number[][]} coords
@@ -11519,7 +11559,7 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
       type: "Feature",
       properties: {
         kind: "transit",
-        color: ETA_PASSED_GREY,
+        color,
         passed: true,
         route: etaMapGeomCache.routeId,
       },
@@ -11559,7 +11599,7 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
         seq: s.seq || i + 1,
         role: isBoard ? "board" : isPassed ? "passed" : "via",
         passed: isPassed,
-        color: isPassed ? ETA_PASSED_GREY : color,
+        color,
       },
       geometry: { type: "Point", coordinates: [s.lon, s.lat] },
     };
@@ -11576,7 +11616,9 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
     for (const id of [
       "route-line-casing",
       "route-line-main",
+      "route-line-passed-veil",
       "route-stops-circle",
+      "route-stops-passed-veil",
       "route-stops-label",
     ]) {
       if (map.getLayer(id)) {
@@ -12987,8 +13029,12 @@ async function renderEtaRouteDetailBody(route, ctx) {
           s.visitTotal > 1
             ? `<span class="rt-stop-visit" title="Visit ${s.visitN} of ${s.visitTotal} on this route">${s.visitN}/${s.visitTotal}</span>`
             : "";
-        // Grey rail for stops already passed (before selected)
-        const stepColor = isBefore ? "rgba(255,255,255,0.28)" : color;
+        // Greyed-but-coloured rail for stops already passed (before selected)
+        const stepColor = isBefore
+          ? (cssSupportsColorMix()
+              ? `color-mix(in srgb, ${color} 60%, #5a5a66)`
+              : "rgba(255,255,255,0.28)")
+          : color;
         let row = routeLineRowHtml({
           kind: "stop",
           line: isLast ? "none" : "solid",
