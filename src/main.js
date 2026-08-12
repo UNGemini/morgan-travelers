@@ -4023,14 +4023,27 @@ els.btnPlanCta?.addEventListener("click", () => {
 /**
  * Stop marker radius scales with zoom: small at low zoom so nearby stops don't
  * merge into one blob, full size at high zoom. Board stop stays larger.
- * @param {boolean} board
+ * MapLibre only allows ONE zoom-based interpolate per expression, so the
+ * board/via case must live inside each zoom stop value, not outside.
  * @returns {unknown[]}
  */
-function stopRadiusExpr(board) {
-  const stops = board
-    ? [10, 3.2, 12, 4.2, 14, 5.6, 16, 7, 18, 9]
-    : [10, 2.6, 12, 3.4, 14, 4.6, 16, 6, 18, 8];
-  return ["interpolate", ["linear"], ["zoom"], ...stops];
+function stopRadiusExpr() {
+  const at = (via, board) => [
+    "case",
+    ["==", ["get", "role"], "board"],
+    board,
+    via,
+  ];
+  return [
+    "interpolate",
+    ["linear"],
+    ["zoom"],
+    10, at(2.6, 3.2),
+    12, at(3.4, 4.2),
+    14, at(4.6, 5.6),
+    16, at(6, 7),
+    18, at(8, 9),
+  ];
 }
 
 function ensureRouteLayers() {
@@ -4129,12 +4142,7 @@ function ensureRouteLayers() {
       source: "route-stops",
       paint: {
         // Radius scales with zoom so nearby stops don't merge at low zoom
-        "circle-radius": [
-          "case",
-          ["==", ["get", "role"], "board"],
-          stopRadiusExpr(true),
-          stopRadiusExpr(false),
-        ],
+        "circle-radius": stopRadiusExpr(),
         // Passed keeps the route colour — grey veil circle sits on top
         "circle-color": ["coalesce", ["get", "color"], "#c0aefc"],
         "circle-stroke-color": [
@@ -4169,12 +4177,7 @@ function ensureRouteLayers() {
       source: "route-stops",
       filter: ["==", ["get", "passed"], true],
       paint: {
-        "circle-radius": [
-          "case",
-          ["==", ["get", "role"], "board"],
-          stopRadiusExpr(true),
-          stopRadiusExpr(false),
-        ],
+        "circle-radius": stopRadiusExpr(),
         "circle-color": "#5a5a66",
         "circle-opacity": 0.4,
         "circle-stroke-width": 0,
@@ -4231,19 +4234,9 @@ function ensureRouteLayers() {
       ]);
     }
     if (map.getLayer("route-stops-circle")) {
-      map.setPaintProperty("route-stops-circle", "circle-radius", [
-        "case",
-        ["==", ["get", "role"], "board"],
-        stopRadiusExpr(true),
-        stopRadiusExpr(false),
-      ]);
+      map.setPaintProperty("route-stops-circle", "circle-radius", stopRadiusExpr());
       if (map.getLayer("route-stops-passed-veil")) {
-        map.setPaintProperty("route-stops-passed-veil", "circle-radius", [
-          "case",
-          ["==", ["get", "role"], "board"],
-          stopRadiusExpr(true),
-          stopRadiusExpr(false),
-        ]);
+        map.setPaintProperty("route-stops-passed-veil", "circle-radius", stopRadiusExpr());
       }
       map.setPaintProperty("route-stops-circle", "circle-color", [
         "coalesce", ["get", "color"], "#c0aefc",
