@@ -14532,7 +14532,6 @@ const BUS_POS_LAYER_IDS = [
   "bus-pos-halo",
   "bus-pos-radar",
   "bus-pos-dot",
-  "bus-pos-label",
 ];
 
 // Marker cosmetics + animation state (PRD 4.2 marker enhancements):
@@ -14803,26 +14802,13 @@ function busPosEnsureLayers() {
       },
     });
   }
-  if (!map.getLayer("bus-pos-label")) {
-    map.addLayer({
-      id: "bus-pos-label",
-      type: "symbol",
-      source: "bus-positions",
-      layout: {
-        "text-field": ["get", "label"],
-        // Boldest weight the shared glyph server serves (no Montserrat there);
-        // smaller to sit comfortably inside the white dot.
-        "text-size": 10,
-        "text-allow-overlap": true,
-        "text-ignore-placement": true,
-        "text-anchor": "center",
-        "text-font": ["Noto Sans Medium"],
-      },
-      paint: {
-        // Route number in the route line color, no stroke/border
-        "text-color": busPosColor,
-      },
-    });
+  // Route-number label: DOM overlay (not a symbol layer) so it can use the
+  // app's Montserrat Bold typeface — the map glyph server only ships Noto Sans.
+  if (!document.getElementById("bus-pos-label-layer")) {
+    const layer = document.createElement("div");
+    layer.id = "bus-pos-label-layer";
+    layer.className = "bus-pos-label-layer";
+    map.getContainer().appendChild(layer);
   }
   // Re-raise above any layers painted after the panel opened (e.g. MTR)
   for (const id of BUS_POS_LAYER_IDS) {
@@ -14848,6 +14834,7 @@ function busPosRemoveLayers() {
   } catch {
     /* ignore */
   }
+  document.getElementById("bus-pos-label-layer")?.remove();
   busPosLayersOn = false;
 }
 
@@ -14911,6 +14898,7 @@ function busPosStartAnim() {
         features: busPosBuildFeatures(now),
       });
     }
+    busPosSyncLabels();
     busPosAnimId = requestAnimationFrame(frame);
   };
   busPosAnimId = requestAnimationFrame(frame);
@@ -14942,6 +14930,9 @@ function busPosBuildFeatures(now) {
         e.lat = e.tLat;
       }
     }
+    // Rendered position for the DOM label overlay (next frame's from-position)
+    e.lon = lon;
+    e.lat = lat;
     features.push({
       type: "Feature",
       properties: {
@@ -14956,6 +14947,34 @@ function busPosBuildFeatures(now) {
     });
   }
   return features;
+}
+
+/**
+ * DOM label overlay: one Montserrat Bold span per vehicle, projected to the
+ * marker's screen position every frame. Stale spans (engine restarts, vehicle
+ * expiry) are removed. pointer-events: none, so map interaction is untouched.
+ */
+function busPosSyncLabels() {
+  const layer = document.getElementById("bus-pos-label-layer");
+  if (!layer) return;
+  const seen = new Set();
+  for (const [id, e] of busPosDisplay) {
+    seen.add(id);
+    let el = layer.querySelector(`[data-id="${id}"]`);
+    if (!el) {
+      el = document.createElement("span");
+      el.className = "bus-pos-label";
+      el.dataset.id = id;
+      layer.appendChild(el);
+    }
+    el.textContent = e.label;
+    el.style.color = busPosColor;
+    const p = map.project([e.lon, e.lat]);
+    el.style.transform = `translate(-50%,-50%) translate(${p.x}px, ${p.y}px)`;
+  }
+  for (const el of [...layer.children]) {
+    if (!seen.has(Number(el.dataset.id))) el.remove();
+  }
 }
 
 /** Beta toggle UI (mirrors initTrafficMethodUi; saves + syncs the engine). */

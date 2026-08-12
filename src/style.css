@@ -296,6 +296,27 @@ body.mobile-ui [data-acrylic]::before {
   will-change: filter;
 }
 
+/* Live bus marker labels: DOM overlay above the canvas so they can use the
+   app's Montserrat typeface — map glyph servers only ship Noto Sans. */
+.bus-pos-label-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.bus-pos-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-family: "Montserrat", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-weight: 700;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+  will-change: transform;
+}
+
 /* Blur basemap while densified path is calculated */
 .map-stage.is-drawing-route #map {
   filter: blur(8px) brightness(0.72) saturate(0.85);
