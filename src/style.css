@@ -3344,7 +3344,9 @@ body.contrib-desktop-ok .contrib-desktop-only {
 
 /* Hide main dock while contributing */
 body.contrib-mode .main-toolbar,
-#app[data-contrib="open"] .main-toolbar {
+#app[data-contrib="open"] .main-toolbar,
+body.contrib-mode .app-bottom-nav,
+#app[data-contrib="open"] .app-bottom-nav {
   display: none !important;
   pointer-events: none !important;
 }
