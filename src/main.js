@@ -4087,8 +4087,8 @@ function ensureRouteLayers() {
           "#c4b5fd",
           ["==", ["get", "kind"], "walk"],
           "#ff9500",
-          // Passed keeps the route colour — a grey veil layer sits on top
-          ["coalesce", ["get", "color"], "#c0aefc"],
+          // Passed features carry passed_color — opaque white-mixed route colour
+          ["coalesce", ["get", "passed_color"], ["coalesce", ["get", "color"], "#c0aefc"]],
         ],
         "line-width": [
           "case",
@@ -4101,7 +4101,7 @@ function ensureRouteLayers() {
         "line-opacity": [
           "case",
           ["==", ["get", "passed"], true],
-          0.85,
+          1,
           0.95,
         ],
         "line-dasharray": [
@@ -4117,24 +4117,6 @@ function ensureRouteLayers() {
     });
   }
 
-  // Grey veil over already-passed segments — the company colour underneath
-  // stays visible, just muted (vs fully grey before).
-  if (!map.getLayer("route-line-passed-veil")) {
-    map.addLayer({
-      id: "route-line-passed-veil",
-      type: "line",
-      source: "route-line",
-      filter: ["==", ["get", "passed"], true],
-      paint: {
-        "line-color": "#5a5a66",
-        "line-width": 4,
-        "line-opacity": 0.4,
-      },
-      layout: { "line-cap": "round", "line-join": "round" },
-    });
-  }
-
-  // Stop markers — always above route lines (and re-promoted after MTR layers)
   if (!map.getLayer("route-stops-circle")) {
     map.addLayer({
       id: "route-stops-circle",
@@ -4143,44 +4125,21 @@ function ensureRouteLayers() {
       paint: {
         // Radius scales with zoom so nearby stops don't merge at low zoom
         "circle-radius": stopRadiusExpr(),
-        // Passed keeps the route colour — grey veil circle sits on top
-        "circle-color": ["coalesce", ["get", "color"], "#c0aefc"],
-        "circle-stroke-color": [
-          "case",
-          ["==", ["get", "role"], "board"],
-          "#ffffff",
-          ["==", ["get", "passed"], true],
-          "rgba(255,255,255,0.35)",
-          "#ffffff",
+        // Passed features carry passed_color — opaque white-mixed route colour
+        "circle-color": [
+          "coalesce",
+          ["get", "passed_color"],
+          ["coalesce", ["get", "color"], "#c0aefc"],
         ],
+        "circle-stroke-color": "#ffffff",
         "circle-stroke-width": [
           "case",
           ["==", ["get", "role"], "board"],
           2.5,
           2,
         ],
-        "circle-opacity": [
-          "case",
-          ["==", ["get", "passed"], true],
-          0.85,
-          1,
-        ],
+        "circle-opacity": 1,
         "circle-stroke-opacity": 1,
-      },
-    });
-  }
-  // Grey veil over passed stops (same treatment as the passed line)
-  if (!map.getLayer("route-stops-passed-veil")) {
-    map.addLayer({
-      id: "route-stops-passed-veil",
-      type: "circle",
-      source: "route-stops",
-      filter: ["==", ["get", "passed"], true],
-      paint: {
-        "circle-radius": stopRadiusExpr(),
-        "circle-color": "#5a5a66",
-        "circle-opacity": 0.4,
-        "circle-stroke-width": 0,
       },
     });
   }
@@ -4224,43 +4183,28 @@ function ensureRouteLayers() {
         "#c4b5fd",
         ["==", ["get", "kind"], "walk"],
         "#ff9500",
-        ["coalesce", ["get", "color"], "#c0aefc"],
+        ["coalesce", ["get", "passed_color"], ["coalesce", ["get", "color"], "#c0aefc"]],
       ]);
       map.setPaintProperty("route-line-main", "line-opacity", [
         "case",
         ["==", ["get", "passed"], true],
-        0.85,
+        1,
         0.95,
       ]);
     }
     if (map.getLayer("route-stops-circle")) {
       map.setPaintProperty("route-stops-circle", "circle-radius", stopRadiusExpr());
-      if (map.getLayer("route-stops-passed-veil")) {
-        map.setPaintProperty("route-stops-passed-veil", "circle-radius", stopRadiusExpr());
-      }
       map.setPaintProperty("route-stops-circle", "circle-color", [
-        "coalesce", ["get", "color"], "#c0aefc",
+        "coalesce", ["get", "passed_color"], ["coalesce", ["get", "color"], "#c0aefc"],
       ]);
-      map.setPaintProperty("route-stops-circle", "circle-stroke-color", [
-        "case",
-        ["==", ["get", "role"], "board"],
-        "#ffffff",
-        ["==", ["get", "passed"], true],
-        "rgba(255,255,255,0.35)",
-        "#ffffff",
-      ]);
+      map.setPaintProperty("route-stops-circle", "circle-stroke-color", "#ffffff");
       map.setPaintProperty("route-stops-circle", "circle-stroke-width", [
         "case",
         ["==", ["get", "role"], "board"],
         2.5,
         2,
       ]);
-      map.setPaintProperty("route-stops-circle", "circle-opacity", [
-        "case",
-        ["==", ["get", "passed"], true],
-        0.85,
-        1,
-      ]);
+      map.setPaintProperty("route-stops-circle", "circle-opacity", 1);
       map.setLayoutProperty("route-stops-circle", "visibility", "visible");
     }
     if (map.getLayer("route-stops-label")) {
@@ -5853,7 +5797,7 @@ function rideStopCount(opt) {
   return 0;
 }
 
-/** color-mix support check (greyed-but-coloured passed rail). */
+/** color-mix support check (white-mixed passed rail). */
 let cssColorMix = null;
 function cssSupportsColorMix() {
   if (cssColorMix == null) {
@@ -5868,6 +5812,31 @@ function cssSupportsColorMix() {
     }
   }
   return cssColorMix;
+}
+
+/**
+ * Mix a hex colour toward white (opaque) — the passed-route look: company
+ * colour lightened, no grey / no alpha. Non-hex inputs pass through.
+ * @param {string} color
+ * @param {number} [whiteRatio] 0..1 (0.4 = 60% colour + 40% white)
+ * @returns {string}
+ */
+function mixTowardWhite(color, whiteRatio = 0.4) {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(color || "").trim());
+  if (!m) return color;
+  let hex = m[1];
+  if (hex.length === 3) {
+    hex = hex
+      .split("")
+      .map((c) => c + c)
+      .join("");
+  }
+  const w = Math.max(0, Math.min(1, Number(whiteRatio) || 0));
+  const to2 = (n) => n.toString(16).padStart(2, "0");
+  const mix = (v) => Math.round(v + (255 - v) * w);
+  return `#${[0, 2, 4]
+    .map((i) => to2(mix(parseInt(hex.slice(i, i + 2), 16))))
+    .join("")}`;
 }
 
 /**
@@ -11575,6 +11544,7 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
         kind: "transit",
         color,
         passed: true,
+        passed_color: mixTowardWhite(color),
         route: etaMapGeomCache.routeId,
       },
       geometry: { type: "LineString", coordinates: passed },
@@ -11614,6 +11584,8 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
         role: isBoard ? "board" : isPassed ? "passed" : "via",
         passed: isPassed,
         color,
+        // Passed stops: opaque route colour lightened toward white (no grey)
+        ...(isPassed ? { passed_color: mixTowardWhite(color) } : {}),
       },
       geometry: { type: "Point", coordinates: [s.lon, s.lat] },
     };
@@ -11630,9 +11602,7 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
     for (const id of [
       "route-line-casing",
       "route-line-main",
-      "route-line-passed-veil",
       "route-stops-circle",
-      "route-stops-passed-veil",
       "route-stops-label",
     ]) {
       if (map.getLayer(id)) {
@@ -13106,11 +13076,11 @@ async function renderEtaRouteDetailBody(route, ctx) {
           s.visitTotal > 1
             ? `<span class="rt-stop-visit" title="Visit ${s.visitN} of ${s.visitTotal} on this route">${s.visitN}/${s.visitTotal}</span>`
             : "";
-        // Greyed-but-coloured rail for stops already passed (before selected)
+        // Passed rail: route colour lightened toward white (no grey, no alpha)
         const stepColor = isBefore
           ? (cssSupportsColorMix()
-              ? `color-mix(in srgb, ${color} 60%, #5a5a66)`
-              : "rgba(255,255,255,0.28)")
+              ? `color-mix(in srgb, ${color} 60%, white)`
+              : "#ffffff")
           : color;
         let row = routeLineRowHtml({
           kind: "stop",
