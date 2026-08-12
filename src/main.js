@@ -1243,6 +1243,9 @@ let etaTrafficMode = "all";
 let etaUserGeo = null;
 /** GPS may re-centre the Nearby map until the user overrides it (map click) or a route fit runs */
 let nearbyGeoFollow = true;
+/** Last GPS-driven nearby refresh — throttle: skip when fix moved < 250 m
+ * or the previous refresh is < 45 s old. */
+let etaNearbyRefreshGeo = null; // { lat, lon, at }
 /** @type {Promise<{ lat: number, lon: number } | null> | null} */
 let etaGeoPromise = null;
 /** @type {Map<string, string[]> | null} station name_en lower → line codes */
@@ -9890,7 +9893,21 @@ geolocateControl.on?.("geolocate", (ev) => {
     } catch {
       /* ignore */
     }
-    void refreshEtaRouteSuggest();
+    // Throttle GPS-driven nearby refreshes: skip when the fix moved < 250 m
+    // or the last refresh is < 45 s old — list stays fresh without churn.
+    const gLast = etaNearbyRefreshGeo;
+    const gDist = gLast
+      ? haversineMEta(gLast.lat, gLast.lon, c.latitude, c.longitude)
+      : Infinity;
+    const gAge = gLast ? Date.now() - gLast.at : Infinity;
+    if (gDist >= 250 || gAge >= 45_000) {
+      etaNearbyRefreshGeo = {
+        lat: c.latitude,
+        lon: c.longitude,
+        at: Date.now(),
+      };
+      void refreshEtaRouteSuggest();
+    }
   }
 });
 
