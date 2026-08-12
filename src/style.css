@@ -6226,9 +6226,11 @@ html.pwa .offline-banner {
 .app-shell.is-scrolled .sheet-chrome::after {
   opacity: 1;
 }
-/* Route detail: the head is static and only the stop list scrolls below it,
-   so content never reaches the title bar — no dissolve band needed there. */
-.app-shell:has(#sidebar-page-eta-route:not([hidden])) .sheet-chrome::after {
+/* Route + trip detail: the head is static and only the stop list scrolls
+   below it, so content never reaches the title bar — no dissolve band
+   needed there. */
+.app-shell:has(#sidebar-page-eta-route:not([hidden])) .sheet-chrome::after,
+.app-shell:has(#sidebar-page-trip:not([hidden])) .sheet-chrome::after {
   display: none;
 }
 /* The band spans the chrome's own box — keep the grabber and title row
@@ -6249,7 +6251,10 @@ html.pwa .offline-banner {
  * perceived fade.
  */
 @media (min-width: 641px) {
-  .app-shell.is-scrolled .detail-sidebar-body {
+  .app-shell.is-scrolled .detail-sidebar-body:not(
+      :has(#sidebar-page-eta-route:not([hidden])),
+      :has(#sidebar-page-trip:not([hidden]))
+    ) {
     -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 28px);
     mask-image: linear-gradient(to bottom, transparent 0%, #000 28px);
   }
