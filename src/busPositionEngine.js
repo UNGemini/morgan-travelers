@@ -9,7 +9,12 @@
  *
  *   1. Schedule pass — every active trip of the route/direction is placed by
  *      bracket interpolation between its pattern's stop offsets, scaled by
- *      the traffic multiplier of the current segment.
+ *      the traffic multiplier of the current segment. Trips whose scheduled
+ *      arrival at the board stop lies inside the feed's verified horizon but
+ *      match no feed row are dropped: TD's headway data is a band model, not
+ *      the operators' exact timetable, so an unverified trip is a model
+ *      artifact rather than a real bus (a real bus that close would have a
+ *      feed row).
  *   2. ETA anchoring — up to 3 future ETAs at the board stop match the trip
  *      whose scheduled arrival there is closest (≤ 15 min); matched trips are
  *      placed at the schedule position shifted by their deviation (ETA −
@@ -77,6 +82,12 @@ const DWELL_S = 30;
 const DWELL_MS = DWELL_S * 1000;
 /** Max projection distance for a schedule stop onto the drawn shape (m). */
 const PROJECT_TOL_M = 400;
+/**
+ * Slack added to the board feed's latest row when the feed returned fewer
+ * than 3 rows (a sparse feed lists every real bus, so the horizon is exact).
+ * Covers headway-model jitter — see the phantom guard in computePositions.
+ */
+const PHANTOM_SLACK_MS = 20 * 60_000;
 
 const CONF_ETA = 1; // ETA-anchored (incl. synthetic)
 const CONF_SCHED = 0.85; // schedule + traffic
@@ -227,6 +238,8 @@ export class BusPositionEngine {
     this.lastEmit = null;
     this.lastTickMs = 0;
     this.initPromise = null;
+    /** Latest board-stop feed row's ETA (ms ahead of now) + slack; 0 = unverifiable */
+    this.boardHorizonMs = 0;
   }
 
   /**
@@ -272,6 +285,7 @@ export class BusPositionEngine {
     this.trafficIndex = null;
     this.lastEmit = null;
     this.initPromise = null;
+    this.boardHorizonMs = 0;
   }
 
   /** Load schedules (async, cached) + traffic index once at start. */
@@ -459,6 +473,18 @@ export class BusPositionEngine {
           const norm = normalizeRows(ctx.op, rows, ctx.bound, now);
           if (norm.length) stopEtas.set(i, norm);
         }
+      }
+      // Verified horizon at the board stop: the latest row's ETA (+ slack when
+      // the feed is sparse — every real bus inside it would be listed). The
+      // schedule pass hides trips arriving within it that no feed row matched
+      // (see the phantom guard in computePositions). Zero when the board feed
+      // returned nothing or schedules are unavailable — no suppression.
+      this.boardHorizonMs = 0;
+      const boardRows = stopEtas.get(ctx.boardStopIndex);
+      if (boardRows?.length && this.schedules) {
+        const maxRowT = boardRows[boardRows.length - 1].t;
+        const slack = boardRows.length >= 3 ? 0 : PHANTOM_SLACK_MS;
+        this.boardHorizonMs = Math.max(0, maxRowT - now + slack);
       }
       this.matchAnchors(ctx, stopEtas, now);
       this.computePositions(now);
@@ -680,6 +706,19 @@ export class BusPositionEngine {
       // from the scheduled arrival; a plain revert would skip the stop).
       const c = this.constraints.get(trip.id);
       const st = this.tripState.get(trip.id);
+      // Phantom guard — TD headway data is a headway-band model, not the
+      // operators' exact timetable, so the schedule pass can synthesize a
+      // trip that has no real counterpart today. A bus truly approaching the
+      // board stop inside the feed's verified horizon would have a feed row;
+      // a trip still AHEAD of the stop with neither a live constraint nor an
+      // arrival state is a model artifact — hide it, so a marker never
+      // arrives at the stop while the panel shows the next real bus 20+ min
+      // away. Trips already past the stop stay: the board feed never lists
+      // them (they departed), so they are unverifiable here, not wrong.
+      if (!c && !st && this.boardHorizonMs > 0 && pd.boardIdx >= 0) {
+        const ahead = trip.startEpoch + pd.boardOffSec * 1000 - now;
+        if (ahead > 0 && ahead <= this.boardHorizonMs) continue;
+      }
       let d;
       if (c && c.etaT <= now) {
         const k = this.patternIdxForDist(pd, c.d);
