@@ -95,19 +95,29 @@ export function hashId(s) {
   return Math.abs(h) || 1;
 }
 
-/** Default per-operator ETA row fetcher (browser; lazy eta.js import). */
+/** Default per-operator ETA row fetcher (browser; lazy eta.js import).
+ * 1. Reuses the ETA panel's just-fetched rows when fresh (one fetch drives
+ *    both panel and engine — the panel strips operator prefixes, so this
+ *    also never hits the prefixed-id empty-feed bug).
+ * 2. On a cache miss (first poll racing the panel, or stale) fetches itself,
+ *    always with the operator prefix STRIPPED — KMB/CTB/NLB APIs reject
+ *    prefixed stop ids with empty data, which used to starve the anchors. */
 async function defaultFetchRows(ctx, stop) {
-  const { fetchJson } = await import("./eta.js");
+  const { fetchJson, getRawEtaRows, stripOperatorStopId } = await import("./eta.js");
   const op = String(ctx.op || "").toLowerCase();
+  const cached = getRawEtaRows(op, ctx.routeShort, ctx.serviceType, stop.stopId);
+  if (cached) return cached;
+  const sid = stripOperatorStopId(stop.stopId) || String(stop.stopId || "");
+  if (!sid) return [];
   if (op === "kmb") {
     const data = await fetchJson(
-      `/eta/kmb/eta/${encodeURIComponent(stop.stopId)}/${encodeURIComponent(ctx.routeShort)}/${encodeURIComponent(ctx.serviceType || 1)}`,
+      `/eta/kmb/eta/${encodeURIComponent(sid)}/${encodeURIComponent(ctx.routeShort)}/${encodeURIComponent(ctx.serviceType || 1)}`,
     );
     return Array.isArray(data?.data) ? data.data : [];
   }
   if (op === "ctb") {
     const data = await fetchJson(
-      `/eta/ctb/eta/CTB/${encodeURIComponent(stop.stopId)}/${encodeURIComponent(ctx.routeShort)}`,
+      `/eta/ctb/eta/CTB/${encodeURIComponent(sid)}/${encodeURIComponent(ctx.routeShort)}`,
     );
     return Array.isArray(data?.data) ? data.data : [];
   }
@@ -116,7 +126,7 @@ async function defaultFetchRows(ctx, stop) {
     for (const rid of routeIds) {
       if (!rid) continue;
       const data = await fetchJson(
-        `/eta/nlb/stop.php?action=estimatedArrivals&routeId=${encodeURIComponent(rid)}&stopId=${encodeURIComponent(stop.stopId)}&language=en`,
+        `/eta/nlb/stop.php?action=estimatedArrivals&routeId=${encodeURIComponent(rid)}&stopId=${encodeURIComponent(sid)}&language=en`,
       );
       const rows = Array.isArray(data?.estimatedArrivals)
         ? data.estimatedArrivals

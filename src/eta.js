@@ -76,6 +76,77 @@ export function stripOperatorStopId(raw) {
 }
 
 /**
+ * Shared raw-ETA row cache: the ETA panel writes the rows its operator fetch
+ * just got; the bus-position engine reads them so one fetch drives both (the
+ * engine never re-queries with its own stop-id spelling, which can be
+ * prefixed — those spellings the operator APIs reject with empty data).
+ * Keys are normalized to the stripped stop id, so both sides agree.
+ */
+const rawEtaCache = new Map();
+const RAW_ETA_TTL_MS = 90_000;
+
+/** @param {number} serviceType */
+function rawEtaKey(op, route, serviceType, stopId) {
+  return [
+    String(op || "").toLowerCase(),
+    String(route || "").toUpperCase(),
+    Math.max(1, Math.min(99, Number(serviceType) || 1)),
+    stripOperatorStopId(stopId),
+  ].join("|");
+}
+
+/**
+ * Store raw operator rows for one board stop (panel side).
+ * @param {string} op
+ * @param {string} route
+ * @param {number | string | null | undefined} serviceType
+ * @param {string} stopId
+ * @param {any[]} rows
+ */
+export function setRawEtaRows(op, route, serviceType, stopId, rows) {
+  const key = rawEtaKey(op, route, serviceType, stopId);
+  if (!key || key.endsWith("|") || !Array.isArray(rows)) return;
+  rawEtaCache.set(key, { at: Date.now(), rows });
+  // Bound the cache: browsing many stops can churn keys.
+  if (rawEtaCache.size > 64) {
+    const oldest = rawEtaCache.keys().next().value;
+    if (oldest) rawEtaCache.delete(oldest);
+  }
+}
+
+/**
+ * Read cached raw rows for one board stop (engine side), or null when stale.
+ * Tolerates CTB numeric padding ("1870" vs "001870").
+ * @param {string} op
+ * @param {string} route
+ * @param {number | string | null | undefined} serviceType
+ * @param {string} stopId
+ * @param {number} [maxAgeMs]
+ * @returns {any[] | null}
+ */
+export function getRawEtaRows(op, route, serviceType, stopId, maxAgeMs = RAW_ETA_TTL_MS) {
+  const base = rawEtaKey(op, route, serviceType, stopId);
+  const sid = stripOperatorStopId(stopId);
+  const candidates = [base];
+  // CTB open data accepts padded or unpadded 6-digit ids — try both spellings.
+  if (String(op || "").toLowerCase() === "ctb" && /^\d+$/.test(sid)) {
+    candidates.push(rawEtaKey(op, route, serviceType, sid.padStart(6, "0")));
+    candidates.push(rawEtaKey(op, route, serviceType, String(Number(sid))));
+  }
+  const now = Date.now();
+  for (const key of candidates) {
+    const hit = rawEtaCache.get(key);
+    if (!hit) continue;
+    if (now - hit.at > maxAgeMs) {
+      rawEtaCache.delete(key);
+      continue;
+    }
+    return hit.rows;
+  }
+  return null;
+}
+
+/**
  * @param {object} [opt]
  * @returns {"kmb"|"ctb"|"nlb"|"mtr"|"lrt"|"mtr_bus"|"rbs"|"unknown"}
  */
@@ -838,6 +909,7 @@ async function fetchKmbEta(opt, board) {
     const filtered = rows.filter((r) => String(r.dir || "").toUpperCase() === dir);
     if (filtered.length) rows = filtered;
   }
+  setRawEtaRows("kmb", route, serviceType, stopId, rows);
   const now = Date.now();
   const plat = platformFromStop(board);
   const slots = [];
@@ -896,6 +968,7 @@ async function fetchCtbEta(opt, board) {
       /* try next */
     }
   }
+  setRawEtaRows("ctb", route, 1, usedStop, rows);
   const now = Date.now();
   const plat = platformFromStop(board);
   const slots = [];
@@ -1068,6 +1141,7 @@ async function fetchNlbEta(opt, board) {
       }
       if (!rows.length) continue;
       usedRouteId = routeId;
+      setRawEtaRows("nlb", route, 1, stopId, rows);
       for (const r of rows) {
         if (String(r.departed) === "1" || r.departed === true) continue;
         const iso = normalizeEtaIso(
