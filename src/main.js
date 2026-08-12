@@ -14528,7 +14528,39 @@ const getBusPosMod = () =>
   (busPosModPromise ||= import("./busPositionEngine.js"));
 const getBusPosRouteShapesMod = () =>
   (busPosRouteShapesPromise ||= import("./routeShapes.js"));
-const BUS_POS_LAYER_IDS = ["bus-pos-halo", "bus-pos-dot", "bus-pos-label"];
+const BUS_POS_LAYER_IDS = [
+  "bus-pos-halo",
+  "bus-pos-radar",
+  "bus-pos-dot",
+  "bus-pos-label",
+];
+
+// Marker cosmetics + animation state (PRD 4.2 marker enhancements):
+// eased glide between emits, route-colored outline/text, white fill, radar
+// pulse. All values are (re)set when the engine (re)starts for a route.
+const busPosDisplay = new Map(); // id → eased display state
+let busPosAnimId = 0; // rAF handle of the marker/radar render loop
+let busPosColor = ETA_AGENCY_GTFS_COLORS.kmb; // route line color
+let busPosRgb = [238, 23, 31]; // same color as [r, g, b] for rgba() expressions
+const busPosReducedMotion =
+  window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+const BUS_POS_RADAR_MS = 5000; // radar pulse period
+
+/** Equirectangular distance between two lon/lat points (m). */
+function busPosDistM(lon1, lat1, lon2, lat2) {
+  const cos = Math.cos((lat1 + lat2) * (Math.PI / 360));
+  const dLat = (lat2 - lat1) * 111_320;
+  const dLon = (lon2 - lon1) * 111_320 * cos;
+  return Math.hypot(dLat, dLon);
+}
+
+/** "#RRGGBB" → [r, g, b] (radar ring needs rgba() with a per-phase alpha). */
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ""));
+  if (!m) return [238, 23, 31];
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
 
 /**
  * Current detail-page state the engine needs, or null when it must not run:
@@ -14683,6 +14715,9 @@ async function busPosSyncState() {
     busPosEngine.start(built.ctx);
     busPosSig = built.sig;
     if (busPosEngine.running) {
+      // Route line color → marker outline, route-number text, radar ring
+      busPosColor = companyLineColor(st.route) || ETA_AGENCY_GTFS_COLORS.kmb;
+      busPosRgb = hexToRgb(busPosColor);
       busPosEnsureLayers();
       void busPosEngine.poll();
     }
@@ -14695,6 +14730,9 @@ function busPosStopEngine() {
   busPosEngine?.stop();
   busPosEngine = null;
   busPosSig = "";
+  if (busPosAnimId) cancelAnimationFrame(busPosAnimId);
+  busPosAnimId = 0;
+  busPosDisplay.clear();
   busPosRemoveLayers();
 }
 
@@ -14720,6 +14758,29 @@ function busPosEnsureLayers() {
       },
     });
   }
+  // Radar pulse: transparent ring in the route color, expanding + fading on a
+  // 5 s loop. The per-frame radarPhase feature property (0..1) drives both the
+  // radius and the stroke alpha via data-driven expressions.
+  if (!map.getLayer("bus-pos-radar")) {
+    map.addLayer({
+      id: "bus-pos-radar",
+      type: "circle",
+      source: "bus-positions",
+      layout: busPosReducedMotion ? { visibility: "none" } : {},
+      paint: {
+        "circle-radius": ["+", 16, ["*", 74, ["get", "radarPhase"]]],
+        "circle-color": "rgba(0,0,0,0)",
+        "circle-stroke-color": [
+          "rgba",
+          busPosRgb[0],
+          busPosRgb[1],
+          busPosRgb[2],
+          ["*", 0.45, ["-", 1, ["get", "radarPhase"]]],
+        ],
+        "circle-stroke-width": 2.5,
+      },
+    });
+  }
   if (!map.getLayer("bus-pos-dot")) {
     map.addLayer({
       id: "bus-pos-dot",
@@ -14727,7 +14788,8 @@ function busPosEnsureLayers() {
       source: "bus-positions",
       paint: {
         "circle-radius": 14,
-        "circle-color": "#c0aefc",
+        // Inner fill: white; outer outline: the route line color
+        "circle-color": "#ffffff",
         // Fades when the stitch confidence drops (marker stays visible but honest)
         "circle-opacity": [
           "case",
@@ -14735,8 +14797,8 @@ function busPosEnsureLayers() {
           0.25,
           0.95,
         ],
-        "circle-stroke-color": "rgba(255,255,255,0.85)",
-        "circle-stroke-width": 2,
+        "circle-stroke-color": busPosColor,
+        "circle-stroke-width": 2.5,
       },
     });
   }
@@ -14754,9 +14816,8 @@ function busPosEnsureLayers() {
         "text-font": ["Noto Sans Regular"],
       },
       paint: {
-        "text-color": "#ffffff",
-        "text-halo-color": "rgba(0,0,0,0.75)",
-        "text-halo-width": 1,
+        // Route number in the route line color, no stroke/border
+        "text-color": busPosColor,
       },
     });
   }
@@ -14787,25 +14848,111 @@ function busPosRemoveLayers() {
   busPosLayersOn = false;
 }
 
-/** Engine emit → GeoJSON features (route number + confidence per vehicle). */
+/**
+ * Engine emit → retarget the eased display positions. The rAF loop renders
+ * them, so the marker glides non-linearly instead of jumping between polls.
+ */
 function busPosOnUpdate(evt) {
   if (!map?.getStyle) return;
   // Layers may not exist yet if the first emit raced a not-ready style.
   if (!busPosLayersOn && !map.getSource("bus-positions")) busPosEnsureLayers();
-  const src = map?.getSource?.("bus-positions");
-  if (!src) return;
-  const features = (evt?.vehicles || []).map((v) => ({
-    type: "Feature",
-    properties: {
+  const now = performance.now();
+  for (const v of evt?.vehicles || []) {
+    const id = Number(v.id) || 0;
+    const tLon = Number(v.lon);
+    const tLat = Number(v.lat);
+    if (!Number.isFinite(tLon) || !Number.isFinite(tLat)) continue;
+    const prev = busPosDisplay.get(id);
+    /** @type {{ fromLon: number, fromLat: number, lon: number, lat: number, tLon: number, tLat: number, label: string, confidence: number, t0: number, dur: number }} */
+    const next = {
       label: String(v.label || ""),
       confidence: Math.max(0.1, Math.min(1, Number(v.confidence) || 0)),
-    },
-    geometry: {
-      type: "Point",
-      coordinates: [Number(v.lon), Number(v.lat)],
-    },
-  }));
-  src.setData({ type: "FeatureCollection", features });
+      tLon,
+      tLat,
+      t0: now,
+    };
+    if (busPosReducedMotion || !prev) {
+      // First sighting (or reduced motion): snap straight to the target.
+      next.fromLon = tLon;
+      next.fromLat = tLat;
+      next.lon = tLon;
+      next.lat = tLat;
+      next.dur = 0;
+    } else {
+      // Retarget from the currently displayed position; the glide time scales
+      // with distance so big poll corrections catch up gracefully.
+      next.fromLon = prev.lon;
+      next.fromLat = prev.lat;
+      next.lon = prev.lon;
+      next.lat = prev.lat;
+      next.dur = Math.min(
+        3000,
+        Math.max(600, busPosDistM(prev.lon, prev.lat, tLon, tLat) * 1.2),
+      );
+    }
+    busPosDisplay.set(id, next);
+  }
+  busPosStartAnim();
+}
+
+/** rAF loop: eased marker glide + radar phase → GeoJSON source updates. */
+function busPosStartAnim() {
+  if (busPosAnimId || !map?.getStyle) return;
+  const frame = (now) => {
+    busPosAnimId = 0;
+    if (!busPosLayersOn || !busPosEngine?.running) return;
+    const src = map.getSource("bus-positions");
+    if (src) {
+      src.setData({
+        type: "FeatureCollection",
+        features: busPosBuildFeatures(now),
+      });
+    }
+    busPosAnimId = requestAnimationFrame(frame);
+  };
+  busPosAnimId = requestAnimationFrame(frame);
+}
+
+function busPosBuildFeatures(now) {
+  const features = [];
+  for (const [id, e] of busPosDisplay) {
+    let lon = e.tLon;
+    let lat = e.tLat;
+    if (!busPosReducedMotion && e.dur > 0) {
+      const t = Math.min(1, (now - e.t0) / e.dur);
+      if (t < 1) {
+        // smoothstep: non-linear ease between the last rendered position and
+        // the target (the Kalman constant-velocity output becomes a gentle
+        // glide, and poll-to-poll corrections ease instead of snapping)
+        const k = t * t * (3 - 2 * t);
+        lon = e.fromLon + (e.tLon - e.fromLon) * k;
+        lat = e.fromLat + (e.tLat - e.fromLat) * k;
+        e.lon = lon;
+        e.lat = lat;
+      } else if (now - e.t0 > e.dur + 1500) {
+        // Stale target (tab hidden, rAF paused): snap instead of a long glide.
+        e.fromLon = e.tLon;
+        e.fromLat = e.tLat;
+        e.dur = 0;
+      } else {
+        e.lon = e.tLon;
+        e.lat = e.tLat;
+      }
+    }
+    features.push({
+      type: "Feature",
+      properties: {
+        label: e.label,
+        confidence: e.confidence,
+        // Radar pulse phase 0..1, staggered per vehicle, repeats every 5 s.
+        radarPhase: busPosReducedMotion
+          ? 0
+          : ((now + id * 1373) % BUS_POS_RADAR_MS) / BUS_POS_RADAR_MS,
+      },
+      geometry: { type: "Point", coordinates: [lon, lat] },
+    });
+  }
+  return features;
 }
 
 /** Beta toggle UI (mirrors initTrafficMethodUi; saves + syncs the engine). */
