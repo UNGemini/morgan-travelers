@@ -3346,7 +3346,9 @@ body.contrib-desktop-ok .contrib-desktop-only {
 body.contrib-mode .main-toolbar,
 #app[data-contrib="open"] .main-toolbar,
 body.contrib-mode #panel-bottom-stack,
-#app[data-contrib="open"] #panel-bottom-stack {
+#app[data-contrib="open"] #panel-bottom-stack,
+body.contrib-mode .map-brand-logo,
+#app[data-contrib="open"] .map-brand-logo {
   display: none !important;
   pointer-events: none !important;
 }
