@@ -12826,6 +12826,10 @@ function etaOperatorDisplayName(route) {
 let etaDetailStopIndex = 0;
 /** Generation for stop-ETA fetches (ignore stale). */
 let etaDetailEtaGen = 0;
+/** Last successful full-render ctx of the ETA route detail body (silent refresh). */
+let etaDetailCtx = null;
+/** Refresh generation — a newer render / stop pick / superseding refresh wins. */
+let etaDetailRefreshGen = 0;
 /**
  * One-shot MTR branch override when auto-flipping at a branch terminus
  * (e.g. LOHAS → North Point must reverse the LHP path, not Po Lam).
@@ -13373,7 +13377,84 @@ async function renderEtaRouteDetailBody(route, ctx) {
     );
     sel?.scrollIntoView({ block: "center", behavior: "auto" });
   }
+
+  // Remember the rendered state so the 60 s silent ETA-card refresh can reuse it
+  etaDetailCtx = { ...ctx, route, boardStop, boardName, boardIndex };
 }
+
+/**
+ * Silent 60 s refresh of the route-detail ETA card while the page stays open.
+ * Patches only the card (slots / board line / “Updated Ns ago” chip) from the
+ * last full-render ctx; the stop list and the map are left untouched. A
+ * superseding refresh, a newer full render, or a stop switch all win via the
+ * guards below — a failed fetch keeps the previous card for the next tick.
+ */
+async function refreshEtaRouteDetailEta() {
+  if (document.visibilityState !== "visible") return;
+  if (sidebarPage !== "eta-route") return;
+  const route = etaSelectedForDetails;
+  const ctx = etaDetailCtx;
+  if (!route || !ctx || !ctx.named?.length) return;
+  if (etaRouteKey(ctx.route) !== etaRouteKey(route)) return;
+  if (etaDetailStopIndex !== ctx.boardIndex) return; // stop switched mid-flight
+  const root = els.etaRouteDetailBody;
+  if (!root) return;
+  if (root.querySelector(".wheels-route-detail")?.classList.contains("is-eta-collapsed")) return;
+
+  const fetchId = ++etaDetailRefreshGen;
+  let etaResult = null;
+  try {
+    const opt = etaRouteAsOption(ctx.route, etaSelectedStops, ctx.dir, ctx.boardStop);
+    const raw = await fetchBoardEta(opt);
+    etaResult = resolveBrowseEta(raw, opt, {
+      dest: ctx.dest,
+      route: ctx.route.id,
+    });
+  } catch (e) {
+    console.warn("[eta] detail silent refresh", e);
+    return; // keep the previous card — the next tick retries
+  }
+  if (fetchId !== etaDetailRefreshGen) return; // a newer refresh superseded us
+  if (etaDetailCtx !== ctx) return; // a newer full render replaced us
+  if (etaDetailStopIndex !== ctx.boardIndex) return;
+  if (sidebarPage !== "eta-route" || !els.etaRouteDetailBody) return;
+
+  const { html: etaBigHtml, hasLive } = wheelsEtaSlotsHtml(etaResult, {
+    kind: ctx.route.kind,
+  });
+  const slotsEl = els.etaRouteDetailBody.querySelector("#eta-detail-slots");
+  if (slotsEl) {
+    slotsEl.innerHTML = etaBigHtml;
+    slotsEl.setAttribute(
+      "aria-label",
+      hasLive ? "Live arrivals" : "Scheduled departures",
+    );
+  }
+  // Board line — serving platforms can differ per live result
+  const platOk = etaOperatorShowsPlatform(etaResult.operator);
+  const plats = platOk ? etaResult?.servingPlatforms || [] : [];
+  const boardText =
+    ctx.boardName && plats.length
+      ? stationNameWithPlatforms(stationBaseName(ctx.boardName), plats)
+      : ctx.boardName;
+  const boardEl = els.etaRouteDetailBody.querySelector("#eta-detail-board");
+  if (boardEl) {
+    boardEl.textContent = boardText;
+    boardEl.hidden = !boardText;
+  }
+  // “Updated Ns ago” chip — reset to the fresh fetch time
+  const updatedEl = els.etaRouteDetailBody.querySelector("[data-eta-updated]");
+  if (updatedEl) {
+    const t = Number(etaResult?.fetchedAt);
+    updatedEl.dataset.fetchedAt = Number.isFinite(t) ? String(t) : "";
+    updatedEl.textContent = formatUpdatedAgo(etaResult?.fetchedAt);
+  }
+}
+
+// Route-detail ETA card: silent refresh every minute while the page is open
+setInterval(() => {
+  void refreshEtaRouteDetailEta();
+}, 60_000);
 
 /**
  * Open ETA route detail page — Wheels-style hero + ETA card + stop timeline.
@@ -15268,6 +15349,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
   void busPosSyncState();
   if (busPosEngine?.running) void busPosEngine.poll();
+  void refreshEtaRouteDetailEta();
 });
 
 // ── Boot splash ─────────────────────────────────────────────────────────────
