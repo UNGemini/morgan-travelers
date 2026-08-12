@@ -261,6 +261,7 @@ const els = {
   detailTitle: document.getElementById("detail-title"),
   btnSettings: document.getElementById("btn-settings"),
   btnInfo: document.getElementById("btn-info"),
+  btnLicenses: document.getElementById("btn-licenses"),
   btnProfile: document.getElementById("btn-profile"),
   profileMenu: document.getElementById("profile-menu"),
   mapProfile: document.getElementById("map-profile"),
