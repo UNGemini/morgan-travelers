@@ -3378,11 +3378,10 @@ async function confirmDisableCache(onRadio, applyPref) {
 }
 
 function initDataCacheUi() {
-  const on = document.getElementById("data-cache-on");
-  const off = document.getElementById("data-cache-off");
+  const toggle = document.getElementById("data-cache-toggle");
   const btn = document.getElementById("btn-download-offline");
-  if (!on || !off) return;
-  (loadDataCachePref() ? on : off).checked = true;
+  if (!toggle) return;
+  toggle.checked = loadDataCachePref();
   // The download option and data-source picker only make sense while
   // caching is enabled.
   const sourceField = document.getElementById("data-source-field");
@@ -3397,16 +3396,17 @@ function initDataCacheUi() {
   };
   if (!loadDataCachePref()) resetDataSourceToCloud();
   const syncButtonVisibility = () => {
-    if (btn) btn.hidden = !on.checked;
+    if (btn) btn.hidden = !toggle.checked;
     if (sourceField) {
-      sourceField.classList.toggle("is-disabled", !on.checked);
+      sourceField.classList.toggle("is-disabled", !toggle.checked);
       for (const input of sourceField.querySelectorAll("input")) {
-        input.disabled = !on.checked;
+        input.disabled = !toggle.checked;
       }
     }
   };
   syncButtonVisibility();
   const applyPref = (enabled) => {
+    toggle.checked = enabled;
     const next = saveDataCachePref(enabled);
     notifyDataCachePref();
     if (!next) resetDataSourceToCloud();
@@ -3418,16 +3418,14 @@ function initDataCacheUi() {
     );
     syncButtonVisibility();
   };
-  const sync = () => {
-    if (!on.checked) {
+  toggle.addEventListener("change", () => {
+    if (!toggle.checked) {
       // Turning the cache off deletes the downloaded set — ask first.
-      void confirmDisableCache(on, applyPref);
+      void confirmDisableCache(toggle, applyPref);
       return;
     }
     applyPref(true);
-  };
-  on.addEventListener("change", sync);
-  off.addEventListener("change", sync);
+  });
 }
 initDataCacheUi();
 
@@ -3581,39 +3579,33 @@ function initBetaBannerSwipe() {
 
 /** Settings → Beta warning banner: persistent show/hide for the banner. */
 function initBetaBannerPrefUi() {
-  const on = document.getElementById("beta-banner-on");
-  const off = document.getElementById("beta-banner-off");
-  if (!on || !off) return;
-  (loadBetaBannerPref() ? on : off).checked = true;
-  for (const el of [on, off]) {
-    el.addEventListener("change", () => {
-      if (!el.checked) return;
-      if (el === off) {
-        // Turning it off requires acknowledging the disclaimer first.
-        const opened = showUpdateDialog({
-          title: t("Hide beta banner?"),
-          message: t("Turning off the banner means you understand and agree that predicted live bus positions are inaccurate and for reference only."),
-          confirmLabel: t("I understand"),
-          cancelLabel: t("Keep banner"),
-          onConfirm: () => {
-            saveBetaBannerPref(false);
-            showToast(t("Beta banner hidden"), 1600);
-            syncBetaBanner();
-          },
-          onCancel: () => {
-            on.checked = true; // revert to showing the banner
-          },
-        });
-        if (!opened) on.checked = true; // dialog busy/unavailable — revert
-        return;
-      }
-      saveBetaBannerPref(true);
-      // Re-enabling clears the swipe dismissal so the banner returns.
-      setBetaBannerDismissed(false);
-      showToast(t("Beta banner enabled"), 1600);
-      syncBetaBanner();
-    });
-  }
+  const tgl = document.getElementById("beta-banner-toggle");
+  if (!tgl) return;
+  tgl.checked = loadBetaBannerPref();
+  tgl.addEventListener("change", () => {
+    if (!tgl.checked) {
+      const opened = showUpdateDialog({
+        title: t("Hide beta banner?"),
+        message: t("Turning off the banner means you understand and agree that predicted live bus positions are inaccurate and for reference only."),
+        confirmLabel: t("I understand"),
+        cancelLabel: t("Keep banner"),
+        onConfirm: () => {
+          saveBetaBannerPref(false);
+          showToast(t("Beta banner hidden"), 1600);
+          syncBetaBanner();
+        },
+        onCancel: () => {
+          tgl.checked = true;
+        },
+      });
+      if (!opened) tgl.checked = true;
+      return;
+    }
+    saveBetaBannerPref(true);
+    setBetaBannerDismissed(false);
+    showToast(t("Beta banner enabled"), 1600);
+    syncBetaBanner();
+  });
 }
 
 /**
@@ -3673,8 +3665,8 @@ function initOfflineDownloadUi() {
     // Downloading implies caching stays on — enable it explicitly.
     saveDataCachePref(true);
     notifyDataCachePref();
-    const on = document.getElementById("data-cache-on");
-    if (on) on.checked = true;
+    const cacheTgl = document.getElementById("data-cache-toggle");
+    if (cacheTgl) cacheTgl.checked = true;
     void startOfflineDownload(sw);
   });
 }
@@ -3895,25 +3887,19 @@ initEalFirstClassUi();
 function initRbsResidentFareUi() {
   rbsResidentFare = loadRbsResidentFare();
   setRbsResidentFare(rbsResidentFare);
-  const radios = document.querySelectorAll('input[name="rbs-resident-fare"]');
-  if (!radios.length) return;
-  radios.forEach((el) => {
-    if (!(el instanceof HTMLInputElement)) return;
-    el.checked =
-      (rbsResidentFare && el.value === "on") ||
-      (!rbsResidentFare && el.value === "off");
-    el.addEventListener("change", () => {
-      if (!el.checked) return;
-      rbsResidentFare = setRbsResidentFare(el.value === "on");
-      showToast(
-        rbsResidentFare
-          ? "RBS · Resident fare on"
-          : "RBS · Resident fare off",
-        1600,
-      );
-      if (repricePlansForFareType()) return;
-      if (origin && destination && isRouterReady()) runPlan();
-    });
+  const tgl = document.getElementById("rbs-resident-toggle");
+  if (!tgl) return;
+  tgl.checked = !!rbsResidentFare;
+  tgl.addEventListener("change", () => {
+    rbsResidentFare = setRbsResidentFare(!!tgl.checked);
+    showToast(
+      rbsResidentFare
+        ? "RBS · Resident fare on"
+        : "RBS · Resident fare off",
+      1600,
+    );
+    if (repricePlansForFareType()) return;
+    if (origin && destination && isRouterReady()) runPlan();
   });
 }
 initRbsResidentFareUi();
@@ -16120,73 +16106,52 @@ function busPosSyncLabels() {
 
 /** Beta toggle UI (mirrors initTrafficMethodUi; saves + syncs the engine). */
 function initLiveBusPrefUi() {
-  const on = document.getElementById("live-bus-on");
-  const off = document.getElementById("live-bus-off");
-  if (!on || !off) return;
+  const tgl = document.getElementById("live-bus-toggle");
+  if (!tgl) return;
   const moreField = document.getElementById("live-bus-more-field");
-  const moreOn = document.getElementById("live-bus-more-on");
-  const moreOff = document.getElementById("live-bus-more-off");
+  const moreTgl = document.getElementById("live-bus-more-toggle");
   const syncMoreVisibility = () => {
     // Sub-option only makes sense while the engine itself is on.
     if (moreField) moreField.hidden = !loadLiveBusPref();
   };
-  const syncMoreChecked = () => {
-    if (moreOn && moreOff) (loadLiveBusMorePref() ? moreOn : moreOff).checked = true;
-  };
-  (loadLiveBusPref() ? on : off).checked = true;
-  syncMoreChecked();
+  tgl.checked = loadLiveBusPref();
+  if (moreTgl) moreTgl.checked = loadLiveBusMorePref();
   syncMoreVisibility();
-  for (const el of [on, off]) {
-    el.addEventListener("change", () => {
-      if (!el.checked) return;
-      const next = saveLiveBusPref(el === on);
-      showToast(
-        next ? t("Live bus positions enabled") : t("Live bus positions disabled"),
-        1600,
-      );
-      syncMoreVisibility();
-      void busPosSyncState();
-    });
-  }
-  for (const el of [moreOn, moreOff]) {
-    el?.addEventListener("change", () => {
-      if (!el.checked) return;
-      const next = saveLiveBusMorePref(el === moreOn);
-      showToast(
-        next ? t("Fetch more live data enabled") : t("Fetch more live data disabled"),
-        1600,
-      );
-      // fetchMore is part of the cheap signature, so the engine rebuilds with
-      // the wider anchor-stop set on the next sync.
-      void busPosSyncState();
-    });
-  }
+  tgl.addEventListener("change", () => {
+    const next = saveLiveBusPref(!!tgl.checked);
+    showToast(
+      next ? t("Live bus positions enabled") : t("Live bus positions disabled"),
+      1600,
+    );
+    syncMoreVisibility();
+    void busPosSyncState();
+  });
+  moreTgl?.addEventListener("change", () => {
+    const next = saveLiveBusMorePref(!!moreTgl.checked);
+    showToast(
+      next ? t("Fetch more live data enabled") : t("Fetch more live data disabled"),
+      1600,
+    );
+    void busPosSyncState();
+  });
 }
 initLiveBusPrefUi();
 
 // ── Language settings ────────────────────────────────────────────────────────
-/** Wire the Language radios to the saved preference (initLang applied at boot). */
+/** Wire the Language dropdown to the saved preference (initLang applied at boot). */
 function initLanguageUi() {
-  const radios = document.querySelectorAll('input[name="app-language"]');
-  if (!radios.length) return;
-  radios.forEach((el) => {
-    if (!(el instanceof HTMLInputElement)) return;
-    el.checked = el.value === getLang();
-    el.addEventListener("change", () => {
-      if (!el.checked) return;
-      const next = setLang(el.value);
-      showToast(t("Language · {label}", { label: LANG_META[next].label }), 1600);
-      void refreshLanguageViews();
-      // Offer a full reload: refreshLanguageViews live-updates the open view,
-      // but a reload guarantees every surface (fonts, persisted DOM, cached
-      // assets) is re-rendered in the new language. t() already resolves in
-      // the just-selected language.
-      showUpdateDialog({
-        title: t("Reload to apply language?"),
-        message: t("Reload now to fully apply the new language?"),
-        confirmLabel: t("Reload"),
-        onConfirm: () => location.reload(),
-      });
+  const sel = document.getElementById("select-app-language");
+  if (!(sel instanceof HTMLSelectElement)) return;
+  sel.value = getLang();
+  sel.addEventListener("change", () => {
+    const next = setLang(sel.value);
+    showToast(t("Language · {label}", { label: LANG_META[next].label }), 1600);
+    void refreshLanguageViews();
+    showUpdateDialog({
+      title: t("Reload to apply language?"),
+      message: t("Reload now to fully apply the new language?"),
+      confirmLabel: t("Reload"),
+      onConfirm: () => location.reload(),
     });
   });
 }

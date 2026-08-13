@@ -1203,36 +1203,22 @@
             <section class="panel-section" id="settings-language-section">
               <h3>Language</h3>
               <div class="pref-field" id="language-field">
-                <div
-                  class="pref-segment pref-segment-6"
-                  role="group"
+                <label class="loc-label pref-label" for="select-app-language">
+                  <span class="material-symbols-outlined" aria-hidden="true">translate</span>
+                  Language
+                </label>
+                <select
+                  id="select-app-language"
+                  class="fare-type-select"
                   aria-label="Language"
                 >
-                  <label class="pref-opt">
-                    <input type="radio" name="app-language" value="en" id="lang-en" />
-                    <span>English</span>
-                  </label>
-                  <label class="pref-opt">
-                    <input type="radio" name="app-language" value="zh-hk" id="lang-zh-hk" />
-                    <span>廣東話</span>
-                  </label>
-                  <label class="pref-opt">
-                    <input type="radio" name="app-language" value="zh-tw" id="lang-zh-tw" />
-                    <span>繁體中文</span>
-                  </label>
-                  <label class="pref-opt">
-                    <input type="radio" name="app-language" value="zh-cn" id="lang-zh-cn" />
-                    <span>简体中文</span>
-                  </label>
-                  <label class="pref-opt">
-                    <input type="radio" name="app-language" value="ja" id="lang-ja" />
-                    <span>日本語</span>
-                  </label>
-                  <label class="pref-opt">
-                    <input type="radio" name="app-language" value="ko" id="lang-ko" />
-                    <span>한국어</span>
-                  </label>
-                </div>
+                  <option value="en">English</option>
+                  <option value="zh-hk">廣東話</option>
+                  <option value="zh-tw">繁體中文</option>
+                  <option value="zh-cn">简体中文</option>
+                  <option value="ja">日本語</option>
+                  <option value="ko">한국어</option>
+                </select>
                 <p class="pref-field-note">
                   Station names show in Chinese for 廣東話, 繁體中文 and 简体中文; English for others.
                 </p>
@@ -1285,22 +1271,14 @@
                 </select>
               </div>
               <div class="pref-field" id="rbs-resident-fare-field">
-                <span class="loc-label pref-label">
-                  <span class="material-symbols-outlined" aria-hidden="true">badge</span>
-                  Use Resident Fare on RBS
-                </span>
-                <div
-                  class="pref-segment pref-segment-2"
-                  role="group"
-                  aria-label="Use Resident Fare on RBS"
-                >
-                  <label class="pref-opt">
-                    <input type="radio" name="rbs-resident-fare" value="off" checked />
-                    <span>Off</span>
-                  </label>
-                  <label class="pref-opt">
-                    <input type="radio" name="rbs-resident-fare" value="on" />
-                    <span>On</span>
+                <div class="settings-toggle-row">
+                  <span class="loc-label pref-label">
+                    <span class="material-symbols-outlined" aria-hidden="true">badge</span>
+                    Use Resident Fare on RBS
+                  </span>
+                  <label class="onb-toggle">
+                    <input type="checkbox" id="rbs-resident-toggle" aria-label="Use Resident Fare on RBS" />
+                    <span class="onb-toggle-track"></span>
                   </label>
                 </div>
                 <p class="pref-field-note">
@@ -1313,18 +1291,14 @@
             <section class="panel-section" id="settings-cache-section">
               <h3>Data cache</h3>
               <div class="pref-field">
-                <span class="loc-label pref-label">
-                  <span class="material-symbols-outlined" aria-hidden="true">storage</span>
-                  Cache data on device
-                </span>
-                <div class="pref-segment pref-segment-2" role="group" aria-label="Data cache">
-                  <label class="pref-opt">
-                    <input type="radio" name="data-cache" value="on" id="data-cache-on" />
-                    <span>On</span>
-                  </label>
-                  <label class="pref-opt">
-                    <input type="radio" name="data-cache" value="off" id="data-cache-off" />
-                    <span>Off</span>
+                <div class="settings-toggle-row">
+                  <span class="loc-label pref-label">
+                    <span class="material-symbols-outlined" aria-hidden="true">storage</span>
+                    Cache data on device
+                  </span>
+                  <label class="onb-toggle">
+                    <input type="checkbox" id="data-cache-toggle" aria-label="Cache data on device" />
+                    <span class="onb-toggle-track"></span>
                   </label>
                 </div>
                 <p class="pref-field-note" id="data-cache-note">
@@ -1378,18 +1352,14 @@
             <section class="panel-section">
               <h3>Beta features</h3>
               <div class="pref-field" id="live-bus-field">
-                <span class="loc-label pref-label">
-                  <span class="material-symbols-outlined" aria-hidden="true">navigation</span>
-                  Live bus positions
-                </span>
-                <div class="pref-segment pref-segment-2" role="group" aria-label="Live bus positions">
-                  <label class="pref-opt">
-                    <input type="radio" name="live-bus-positions" value="on" id="live-bus-on" />
-                    <span>On</span>
-                  </label>
-                  <label class="pref-opt">
-                    <input type="radio" name="live-bus-positions" value="off" id="live-bus-off" />
-                    <span>Off</span>
+                <div class="settings-toggle-row">
+                  <span class="loc-label pref-label">
+                    <span class="material-symbols-outlined" aria-hidden="true">navigation</span>
+                    Live bus positions
+                  </span>
+                  <label class="onb-toggle">
+                    <input type="checkbox" id="live-bus-toggle" aria-label="Live bus positions" />
+                    <span class="onb-toggle-track"></span>
                   </label>
                 </div>
                 <p class="pref-field-note">
@@ -1399,18 +1369,14 @@
                 </p>
               </div>
               <div class="pref-field" id="live-bus-more-field" hidden>
-                <span class="loc-label pref-label">
-                  <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-                  Fetch more live data
-                </span>
-                <div class="pref-segment pref-segment-2" role="group" aria-label="Fetch more live data">
-                  <label class="pref-opt">
-                    <input type="radio" name="live-bus-more" value="on" id="live-bus-more-on" />
-                    <span>On</span>
-                  </label>
-                  <label class="pref-opt">
-                    <input type="radio" name="live-bus-more" value="off" id="live-bus-more-off" />
-                    <span>Off</span>
+                <div class="settings-toggle-row">
+                  <span class="loc-label pref-label">
+                    <span class="material-symbols-outlined" aria-hidden="true">radar</span>
+                    Fetch more live data
+                  </span>
+                  <label class="onb-toggle">
+                    <input type="checkbox" id="live-bus-more-toggle" aria-label="Fetch more live data" />
+                    <span class="onb-toggle-track"></span>
                   </label>
                 </div>
                 <p class="pref-field-note">
@@ -1420,18 +1386,14 @@
                 </p>
               </div>
               <div class="pref-field" id="beta-banner-field">
-                <span class="loc-label pref-label">
-                  <span class="material-symbols-outlined" aria-hidden="true">campaign</span>
-                  Beta warning banner
-                </span>
-                <div class="pref-segment pref-segment-2" role="group" aria-label="Beta warning banner">
-                  <label class="pref-opt">
-                    <input type="radio" name="beta-banner" value="on" id="beta-banner-on" />
-                    <span>On</span>
-                  </label>
-                  <label class="pref-opt">
-                    <input type="radio" name="beta-banner" value="off" id="beta-banner-off" />
-                    <span>Off</span>
+                <div class="settings-toggle-row">
+                  <span class="loc-label pref-label">
+                    <span class="material-symbols-outlined" aria-hidden="true">campaign</span>
+                    Beta warning banner
+                  </span>
+                  <label class="onb-toggle">
+                    <input type="checkbox" id="beta-banner-toggle" aria-label="Beta warning banner" />
+                    <span class="onb-toggle-track"></span>
                   </label>
                 </div>
                 <p class="pref-field-note">
