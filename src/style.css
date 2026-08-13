@@ -5965,6 +5965,35 @@ html.pwa .offline-banner {
   text-transform: uppercase;
   color: #fff;
 }
+/* Close button — desktop only (mobile dismisses by swiping up) */
+.beta-banner-close {
+  display: none;
+  margin-left: auto;
+  flex-shrink: 0;
+  align-self: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(255, 212, 121, 0.8);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+}
+.beta-banner-close .material-symbols-outlined {
+  font-size: 15px;
+}
+.beta-banner-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffd479;
+}
+@media (min-width: 900px) {
+  .beta-banner-close {
+    display: inline-flex;
+  }
+}
 /* Wider than the offline card: spans the top with 16px margins, no 560px cap */
 .offline-banner.beta-banner {
   left: 16px;

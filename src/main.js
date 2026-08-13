@@ -3326,10 +3326,33 @@ function initBetaBanner() {
   betaBannerEl = document.getElementById("beta-banner");
   if (!betaBannerEl) return;
   initBetaBannerSwipe();
+  initBetaBannerClose();
   initBetaBannerPrefUi();
   // Starts hidden; syncBetaBanner() flips it with the engine lifecycle.
 }
 initBetaBanner();
+
+/** Dismiss the banner for the rest of the session (swipe or close button). */
+function dismissBetaBanner() {
+  if (!betaBannerEl || betaBannerEl.hidden) return;
+  // Hidden for the rest of the session; the Settings toggle is permanent.
+  setBetaBannerDismissed(true);
+  betaBannerEl.style.transition = "transform 0.22s ease, opacity 0.22s ease";
+  betaBannerEl.style.transform = "translateY(-120%)";
+  betaBannerEl.style.opacity = "0";
+  window.setTimeout(() => {
+    betaBannerEl.hidden = true;
+    betaBannerEl.style.transition = "";
+    betaBannerEl.style.transform = "";
+    betaBannerEl.style.opacity = "";
+  }, 240);
+}
+
+/** Desktop close button — same session dismissal as the swipe. */
+function initBetaBannerClose() {
+  const btn = document.getElementById("beta-banner-close");
+  btn?.addEventListener("click", dismissBetaBanner);
+}
 
 /** Swipe up on the banner to dismiss it for the rest of the session. */
 function initBetaBannerSwipe() {
@@ -3367,15 +3390,7 @@ function initBetaBannerSwipe() {
   );
   const finish = (dismiss) => {
     if (dismiss) {
-      // Hidden for the rest of the session; the Settings toggle is permanent.
-      setBetaBannerDismissed(true);
-      betaBannerEl.style.transition = "transform 0.22s ease, opacity 0.22s ease";
-      betaBannerEl.style.transform = "translateY(-120%)";
-      betaBannerEl.style.opacity = "0";
-      window.setTimeout(() => {
-        betaBannerEl.hidden = true;
-        clearStyles();
-      }, 240);
+      dismissBetaBanner();
     } else {
       // Below the threshold — spring back.
       betaBannerEl.style.transition = "transform 0.2s ease, opacity 0.2s ease";
