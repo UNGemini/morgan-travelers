@@ -222,13 +222,14 @@ const bootSplashDonePromise = new Promise((resolve) => {
   resolveBootSplashDone = resolve;
 });
 
-// First-run onboarding: waits for the boot splash opening animation to finish
-// (cover fully removed), then covers the app with the opaque wizard while the
-// map/router keep initializing underneath, so they are ready when the flow
-// ends. The geolocation permission prompt below also waits for this gate.
+// First-run onboarding: the wizard renders immediately but sits BEHIND the
+// boot splash (z-index 9990 < 9999), so the opening animation plays on top of
+// it and the flow is already in view the moment the splash leaves. The app
+// keeps initializing underneath; the geolocation prompt below waits for both
+// the splash and this gate.
 const onboardingGate = isOnboarded()
   ? Promise.resolve()
-  : bootSplashDonePromise.then(() => startOnboarding({ firstRun: true }));
+  : startOnboarding({ firstRun: true });
 
 // Hand-maintained static overrides (public/overrides/*) — never from collect pipeline
 loadStaticOverrides()
@@ -16052,7 +16053,7 @@ document.addEventListener("visibilitychange", () => {
 const BOOT_SPLASH_MIN_MS = 700;
 const BOOT_STARTED_AT = Date.now();
 // bootSplashDonePromise + resolveBootSplashDone are declared at the top of
-// the module so the onboarding gate can chain onto the splash's completion.
+// the module so the geolocation gate can chain onto the splash's completion.
 
 /**
  * Paint page + map backgrounds black while the cover is up. On iOS PWA the
