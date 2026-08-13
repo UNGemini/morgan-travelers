@@ -1685,6 +1685,11 @@ body.mobile-ui [data-acrylic]::before {
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  /* Start below the overlay title bar; content then scrolls under it. */
+  padding-top: var(--sheet-chrome-h-px, var(--sheet-chrome-h));
+}
+.app-shell:has(#sidebar-page-trip:not([hidden])) .detail-sidebar-body {
+  padding-top: 0;
 }
 
 /* Pinned routes page — plan-card style (multiple cards stack)
@@ -7373,11 +7378,10 @@ html.pwa .offline-banner.gl-error-banner {
 .app-shell.is-scrolled .sheet-chrome::after {
   opacity: 1;
 }
-/* Route + trip detail: the head is static and only the stop list scrolls
-   below it, so content never reaches the title bar — no dissolve band
-   needed there. */
-.app-shell:has(#sidebar-page-eta-route:not([hidden])) .sheet-chrome::after,
-.app-shell:has(#sidebar-page-trip:not([hidden])) .sheet-chrome::after {
+/* Route detail: the head is static and only the stop list scrolls below
+   it, so content never reaches the title bar. Trip detail does scroll
+   under the chrome — keep the dissolve there. */
+.app-shell:has(#sidebar-page-eta-route:not([hidden])) .sheet-chrome::after {
   display: none;
 }
 /* The band spans the chrome's own box — keep the grabber and title row
@@ -7402,6 +7406,10 @@ html.pwa .offline-banner.gl-error-banner {
       :has(#sidebar-page-eta-route:not([hidden])),
       :has(#sidebar-page-trip:not([hidden]))
     ) {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 28px);
+    mask-image: linear-gradient(to bottom, transparent 0%, #000 28px);
+  }
+  .app-shell.is-scrolled #sidebar-page-trip:not([hidden]) {
     -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 28px);
     mask-image: linear-gradient(to bottom, transparent 0%, #000 28px);
   }
@@ -8133,6 +8141,12 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     display: none !important;
   }
   .sheet-chrome {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 4;
+    background: transparent;
     padding: 12px 16px 8px !important;
     touch-action: auto;
     cursor: default;

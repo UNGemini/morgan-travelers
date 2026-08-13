@@ -420,6 +420,7 @@ const TOP_FADE_SCROLLERS = [
   ".panel-page-scroll",
   ".pinned-route-body",
   ".wheels-stop-panel",
+  "#sidebar-page-trip",
 ];
 
 function syncTopFade() {
