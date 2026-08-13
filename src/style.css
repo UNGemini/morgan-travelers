@@ -5930,12 +5930,6 @@ body.contrib-submitting .bg-orb {
     width: 35%;
     max-width: none;
   }
-  /* Scope the beta banner's full-width override back down on desktop */
-  .offline-banner.beta-banner {
-    left: auto;
-    right: 16px;
-    width: 35%;
-  }
 }
 
 /* Installed PWA: floating card below the Dynamic Island / status bar */
@@ -6007,6 +6001,21 @@ html.pwa .offline-banner.beta-banner {
   left: 16px;
   right: 16px;
   transform: none;
+}
+/* Desktop: same 35% cap as the offline card, back at the right edge.
+   Must come after the full-width rule above (equal specificity). */
+@media (min-width: 900px) {
+  .offline-banner.beta-banner {
+    left: auto;
+    right: 16px;
+    width: 35%;
+  }
+  html.pwa .offline-banner.beta-banner {
+    left: auto;
+    right: 16px;
+    width: 35%;
+    transform: none;
+  }
 }
 /* Offline + beta cards at once: stack, don't overlap */
 #offline-banner:not([hidden]) + #beta-banner {
