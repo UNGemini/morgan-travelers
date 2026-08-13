@@ -269,11 +269,6 @@ function stepBodyHtml(idx) {
             <span class="onb-term-title">${esc(t("UNLOOP MORGAN Universal Terms of Use for Open-Source Software"))}</span>
             <span class="material-symbols-outlined onb-term-open" aria-hidden="true">open_in_new</span>
           </a>
-          <a class="onb-term-row" href="${TERMS_URL}" target="_blank" rel="noopener noreferrer">
-            <span class="material-symbols-outlined onb-term-icon" aria-hidden="true">description</span>
-            <span class="onb-term-title">${esc(t("Terms of Service"))}</span>
-            <span class="material-symbols-outlined onb-term-open" aria-hidden="true">open_in_new</span>
-          </a>
           <a class="onb-term-row" href="${PRIVACY_URL}" target="_blank" rel="noopener noreferrer">
             <span class="material-symbols-outlined onb-term-icon" aria-hidden="true">privacy_tip</span>
             <span class="onb-term-title">${esc(t("Privacy Policy"))}</span>

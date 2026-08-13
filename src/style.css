@@ -6422,7 +6422,7 @@ html.pwa .offline-banner.gl-error-banner {
   transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .onb-toggle input:checked + .onb-toggle-track {
-  background: #34c759; /* iOS switch green */
+  background: var(--accent, #8ab4ff); /* Travelers theme accent */
 }
 .onb-toggle input:checked + .onb-toggle-track::after {
   transform: translateX(20px);
