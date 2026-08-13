@@ -6899,6 +6899,13 @@ html.pwa .offline-banner.gl-error-banner {
   border-color: rgba(192, 174, 252, 0.28);
 }
 
+.onb-beta-standalone {
+  margin-top: 4px;
+}
+.onb-beta-standalone .onb-sub-note {
+  margin: 8px 4px 0;
+}
+
 .onb-details {
   margin-bottom: 10px;
   border-radius: 18px;

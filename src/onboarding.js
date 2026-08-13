@@ -6,7 +6,6 @@
  */
 import { getLang, LANG_META, setLang, t } from "./lang.js";
 import {
-  BETA_BANNER_STORAGE_KEY,
   LIVE_BUS_MORE_STORAGE_KEY,
   loadBetaBannerPref,
   loadDataCachePref,
@@ -94,15 +93,19 @@ const BETA_SECTIONS = [
         type: "toggle",
         defaultValue: loadLiveBusMorePref() ? "1" : "0",
       },
-      {
-        // Same pref as Settings → Live position → “Beta warning banner”.
-        id: "beta-banner",
-        labelKey: "Beta warning banner",
-        storageKey: BETA_BANNER_STORAGE_KEY,
-        type: "toggle",
-        defaultValue: loadBetaBannerPref() ? "1" : "0",
-      },
     ],
+  },
+  {
+    // Same pref as Settings → Beta features → “Beta warning banner”.
+    // Standalone: not nested under Live Position.
+    id: "beta-banner",
+    titleKey: "Beta warning banner",
+    descKey:
+      "Show the “Beta Feature” disclaimer while live bus positions are active. Swipe the banner up to hide it for the session.",
+    loadEnabled: loadBetaBannerPref,
+    saveEnabled: saveBetaBannerPref,
+    standalone: true,
+    subs: [],
   },
 ];
 
@@ -357,7 +360,7 @@ function stepBodyHtml(idx) {
         ${stepHero(STEP_ICONS[3])}
         <p class="onb-desc">${esc(t("Cache transit data on this device for offline use and mobile data savings."))}</p>
         <div class="onb-toggle-row">
-          <span class="onb-toggle-label">${esc(t("Cache all data"))}</span>
+          <span class="onb-toggle-label">${esc(t("Cache data on device"))}</span>
           <label class="onb-toggle">
             <input type="checkbox" id="onb-cache-toggle" ${cacheOn ? "checked" : ""} />
             <span class="onb-toggle-track"></span>
@@ -393,6 +396,24 @@ function stepBodyHtml(idx) {
 
 function betaSectionHtml(section) {
   const enabled = section.loadEnabled();
+  if (section.standalone) {
+    return `
+    <div class="onb-beta-standalone">
+      <div class="onb-toggle-row">
+        <span class="onb-toggle-label">${esc(t(section.titleKey))}</span>
+        <label class="onb-toggle">
+          <input
+            type="checkbox"
+            class="onb-beta-enable"
+            data-section="${section.id}"
+            ${enabled ? "checked" : ""}
+          />
+          <span class="onb-toggle-track"></span>
+        </label>
+      </div>
+      <p class="onb-sub-note">${esc(t(section.descKey))}</p>
+    </div>`;
+  }
   const subs = section.subs
     .map((sub) => {
       let current = sub.defaultValue;
@@ -450,9 +471,13 @@ function betaSectionHtml(section) {
             <span class="onb-toggle-track"></span>
           </label>
         </div>
-        <div class="onb-sub-options" ${enabled ? "" : "hidden"}>
+        ${
+          section.subs?.length
+            ? `<div class="onb-sub-options" ${enabled ? "" : "hidden"}>
           ${subs}
-        </div>
+        </div>`
+            : ""
+        }
       </div>
     </details>`;
 }
