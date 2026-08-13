@@ -841,10 +841,11 @@ body.mobile-ui [data-acrylic]::before {
   padding-left: 24px;
   padding-right: 24px;
 }
-/* Pre-plan (no results yet): the form is the only content — keep a blank
-   below the last preference field so it doesn't end flush against the dock. */
+/* Pre-plan (no results yet): blank below EAL First Class so the last
+   card isn’t flush against the Plan Trip CTA / dock. !important so it
+   wins over .trip-plan-sidebar-panel’s shorthand padding. */
 .app-shell:has(#plan-results[hidden]) #trip-plan-sidebar-panel {
-  padding-bottom: calc(var(--nav-dock-h, 80px) + 16px);
+  padding-bottom: calc(var(--nav-dock-h, 80px) + 56px) !important;
 }
 
 .app-shell[data-toolbar="closed"] .main-toolbar {
@@ -4335,7 +4336,7 @@ body.contrib-submitting .bg-orb {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 6px 16px 32px !important;
+  padding: 6px 24px 40px !important;
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
@@ -4343,7 +4344,7 @@ body.contrib-submitting .bg-orb {
   -webkit-backdrop-filter: none !important;
 }
 #eal-first-class-field {
-  margin-bottom: 20px;
+  margin-bottom: 36px;
 }
 
 .loc-field {
