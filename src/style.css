@@ -536,7 +536,9 @@ body.mobile-ui [data-acrylic]::before {
   }
 }
 .map-route-badge-co {
-  font-size: 0.78rem;
+  /* Compact company label with breathing room above the route pill */
+  padding: 2px 6px 8px;
+  font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   color: rgba(255, 255, 255, 0.92);
@@ -2891,9 +2893,18 @@ body.mobile-ui [data-acrylic]::before {
   opacity: 0.94;
   white-space: nowrap;
 }
-/* ETA list cards — badge replaces the big company-coloured route number */
-.eta-card-route-mtr {
+/* ETA list cards — colored two-line text, no pill background (same line
+ * colour as before, text only; pinned cards keep the pill) */
+.eta-card-route-text {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--mtr-color, #003da5);
   font-size: 1.5rem;
+}
+.eta-card-route-text .mtr-route-badge-sub {
+  opacity: 0.72;
 }
 /* Pinned cards (route number was 1.35rem inline) */
 .pinned-route-badge {
@@ -2903,9 +2914,10 @@ body.mobile-ui [data-acrylic]::before {
 .rt-route-badge {
   font-size: 0.88rem;
 }
-/* Map route-detail pill (plain number was clamp(2.6rem,12vw,3.6rem)) */
+/* Map route-detail pill — compact: smaller text, tighter pill (plain
+ * number was clamp(2.6rem,12vw,3.6rem)) */
 .map-route-badge-mtr {
-  font-size: clamp(1.9rem, 8vw, 2.7rem);
+  font-size: clamp(1.25rem, 5vw, 1.7rem);
 }
 
 .eta-card-dest {

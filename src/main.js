@@ -11067,11 +11067,11 @@ function etaRouteCardInnerHtml(r, dir, eta = {}, opts = {}) {
             ? "is-live"
             : "is-na";
   const color = companyLineColor(r);
-  // MTR: coloured pill badge (localized line name over English full name);
+  // MTR: colored two-line text (localized line name over English full name);
   // bus / LRT keep the plain company-coloured route number.
   const routeIdHtml =
     r.kind === "mtr"
-      ? mtrLineBadgeHtml(r.id, color, r.label, "eta-card-route-mtr")
+      ? mtrLineBadgeHtml(r.id, color, r.label, "eta-card-route-mtr eta-card-route-text")
       : `<div class="eta-card-route ${etaCompanyColorClass(r)}" style="color:${escapeHtml(color)}">${escapeHtml(r.id)}</div>`;
   return `
     <div class="eta-card-main">
