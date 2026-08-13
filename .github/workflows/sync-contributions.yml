@@ -1,0 +1,86 @@
+# Pull merged path contributions from morgan-travelers-overrides
+# into this repo's bundled offline copy (public/overrides/bus-shapes.json).
+#
+# Only already-merged / published shapes are copied — pending PRs stay
+# in the overrides repo until a moderator merges them there.
+#
+# Required: contents:write (GITHUB_TOKEN can push to this repo).
+# Optional vars:
+#   OVERRIDES_BUS_SHAPES_URL  — override the raw GitHub URL
+
+name: Sync merged contributions
+
+on:
+  schedule:
+    # Every 3 days at 17:00 UTC ≈ 01:00 HKT (after the daily GTFS pipeline)
+    - cron: "0 17 */3 * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sync-merged-contributions
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  OVERRIDES_BUS_SHAPES_URL: ${{ vars.OVERRIDES_BUS_SHAPES_URL || 'https://raw.githubusercontent.com/UNGemini/morgan-travelers-overrides/main/bus-shapes.json' }}
+
+jobs:
+  sync:
+    name: Pull published bus shapes → main
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Sync bus-shapes.json from overrides repo
+        env:
+          OVERRIDES_BUS_SHAPES_URL: ${{ env.OVERRIDES_BUS_SHAPES_URL }}
+        run: node scripts/sync-bus-shapes-from-remote.mjs
+
+      - name: Commit and push if changed
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/overrides/bus-shapes.json
+          if git diff --cached --quiet; then
+            echo "No published contribution changes."
+            echo "changed=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          ROUTES=$(jq '.routes | length' public/overrides/bus-shapes.json)
+          git commit -m "$(cat <<EOF
+          chore(overrides): sync merged path contributions
+
+          Published bus-shapes.json from morgan-travelers-overrides (${ROUTES} routes).
+          EOF
+          )"
+          git push origin HEAD:main
+          echo "changed=true" >> "$GITHUB_ENV"
+          echo "routes=${ROUTES}" >> "$GITHUB_ENV"
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Sync merged contributions"
+            echo
+            echo "- Source: \`${{ env.OVERRIDES_BUS_SHAPES_URL }}\`"
+            echo "- Target: \`public/overrides/bus-shapes.json\` on \`main\`"
+            if [ "${changed:-false}" = "true" ]; then
+              echo "- Result: **committed** (${routes:-?} routes)"
+            else
+              echo "- Result: already up to date (or sync failed earlier)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
