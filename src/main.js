@@ -15858,6 +15858,16 @@ function initLanguageUi() {
       const next = setLang(el.value);
       showToast(t("Language · {label}", { label: LANG_META[next].label }), 1600);
       void refreshLanguageViews();
+      // Offer a full reload: refreshLanguageViews live-updates the open view,
+      // but a reload guarantees every surface (fonts, persisted DOM, cached
+      // assets) is re-rendered in the new language. t() already resolves in
+      // the just-selected language.
+      showUpdateDialog({
+        title: t("Reload to apply language?"),
+        message: t("Reload now to fully apply the new language?"),
+        confirmLabel: t("Reload"),
+        onConfirm: () => location.reload(),
+      });
     });
   });
 }
