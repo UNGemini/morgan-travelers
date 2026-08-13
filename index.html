@@ -961,6 +961,61 @@
                 ></ul>
               </div>
 
+              <button
+                type="button"
+                id="btn-add-via"
+                class="btn-add-via"
+                data-acrylic
+                title="Add via"
+                aria-label="Add via"
+              >
+                <span class="material-symbols-outlined" aria-hidden="true">group_add</span>
+                <span class="btn-add-via-copy">
+                  <span>Add via</span>
+                  <span class="btn-add-via-hint">Meet friends here</span>
+                </span>
+              </button>
+
+              <div class="loc-field loc-field-via" data-field="via" id="via-field" hidden>
+                <label class="loc-label" for="input-via">
+                  <span class="material-symbols-outlined" aria-hidden="true">group</span>
+                  Via
+                </label>
+                <div class="loc-input-row">
+                  <input
+                    id="input-via"
+                    class="loc-input"
+                    type="search"
+                    enterkeyhint="search"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="e.g. Times Square · meet here"
+                    aria-autocomplete="list"
+                    aria-controls="suggest-via"
+                  />
+                  <button
+                    type="button"
+                    id="btn-clear-via"
+                    class="btn btn-icon"
+                    data-acrylic
+                    title="Clear via"
+                    aria-label="Clear via"
+                  >
+                    <span class="material-symbols-outlined" aria-hidden="true">close</span>
+                  </button>
+                </div>
+                <p class="pref-field-note" id="via-field-note">
+                  Meet friends here (optional)
+                </p>
+                <ul
+                  id="suggest-via"
+                  class="loc-suggest"
+                  hidden
+                  role="listbox"
+                  aria-label="Via suggestions"
+                ></ul>
+              </div>
+
               <div class="loc-field" data-field="destination">
                 <label class="loc-label" for="input-dest">
                   <span class="material-symbols-outlined" aria-hidden="true">flag</span>
@@ -1192,9 +1247,9 @@
               <div id="eta-route-detail-body" class="eta-route-detail-body"></div>
             </div>
 
-            <!-- Page: Pinned routes (plan-style cards + live/scheduled ETA) -->
+            <!-- Page: Pinned trips + stops (one page scroller) -->
             <div id="sidebar-page-pinned" class="sidebar-page" hidden>
-              <div id="pinned-route-body" class="pinned-route-body" role="list" aria-label="Pinned routes"></div>
+              <div id="pinned-route-body" class="pinned-route-body" role="list" aria-label="Pinned"></div>
             </div>
 
             <!-- Page: Settings -->

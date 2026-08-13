@@ -335,10 +335,15 @@ const els = {
   routerStatus: document.getElementById("router-status"),
   inputOrigin: document.getElementById("input-origin"),
   inputDest: document.getElementById("input-dest"),
+  inputVia: document.getElementById("input-via"),
   suggestOrigin: document.getElementById("suggest-origin"),
   suggestDest: document.getElementById("suggest-dest"),
+  suggestVia: document.getElementById("suggest-via"),
   btnUseLocation: document.getElementById("btn-use-location"),
   btnSwap: document.getElementById("btn-swap"),
+  btnAddVia: document.getElementById("btn-add-via"),
+  btnClearVia: document.getElementById("btn-clear-via"),
+  viaField: document.getElementById("via-field"),
   btnPickOrigin: document.getElementById("btn-pick-origin"),
   btnPickDest: document.getElementById("btn-pick-dest"),
   mapPickHint: document.getElementById("map-pick-hint"),
@@ -1237,9 +1242,9 @@ async function renderPinnedRoutePage() {
     );
   }
   if (list.length) {
-    parts.push(`<h3 class="results-section-title">${escapeHtml(t("Pinned Routes"))}</h3>`);
+    parts.push(`<h3 class="results-section-title">${escapeHtml(t("Pinned Stops"))}</h3>`);
     parts.push(
-      `<p class="hint" id="pinned-eta-loading" style="padding:12px">${escapeHtml(t("Loading {n} pinned route{s}…", { n: list.length, s: list.length > 1 ? "s" : "" }))}</p>`,
+      `<p class="hint" id="pinned-eta-loading" style="padding:12px">${escapeHtml(t("Loading {n} pinned stop{s}…", { n: list.length, s: list.length > 1 ? "s" : "" }))}</p>`,
     );
   }
   body.innerHTML = parts.join("");
@@ -1357,10 +1362,10 @@ async function renderPinnedRoutePage() {
   }
 
   const etaHtml =
-    `<ul class="eta-route-list-sidebar pinned-route-list" role="listbox" aria-label="${escapeHtml(t("Pinned routes"))}">` +
+    `<ul class="eta-route-list-sidebar pinned-route-list" role="listbox" aria-label="${escapeHtml(t("Pinned stops"))}">` +
     resolved.map((r, i) => pinnedEtaCardHtml(r, i)).join("") +
     `</ul>` +
-    `<p class="hint pinned-foot">${escapeHtml(t("{n} pinned route{s}", { n: resolved.length, s: resolved.length > 1 ? "s" : "" }))}</p>`;
+    `<p class="hint pinned-foot">${escapeHtml(t("{n} pinned stop{s}", { n: resolved.length, s: resolved.length > 1 ? "s" : "" }))}</p>`;
   const loadingEl = body.querySelector("#pinned-eta-loading");
   if (loadingEl) loadingEl.outerHTML = etaHtml;
   else body.innerHTML += etaHtml;
@@ -3017,16 +3022,20 @@ map.once("idle", () => {
 window.addEventListener("resize", () => map.resize());
 
 // ── Trip planning state ──────────────────────────────────────────────────────
-/** Secondary pick mode: map tap sets origin or destination */
-let pickMode = "destination"; // origin | destination
+/** Secondary pick mode: map tap sets origin, destination, or via */
+let pickMode = "destination"; // origin | destination | via
 let mapPickArmed = false; // true while user chose "tap map" for a field
 let origin = null; // { lat, lon, label? }
 let destination = null;
+let via = null;
 let originMarker = null;
 let destMarker = null;
+let viaMarker = null;
 let plans = [];
-let searchTimers = { origin: null, destination: null };
-let searchAbort = { origin: null, destination: null };
+let searchTimers = { origin: null, destination: null, via: null };
+let searchAbort = { origin: null, destination: null, via: null };
+
+const PLAN_POINT_KINDS = ["origin", "destination", "via"];
 
 function setPickMode(mode, { armMap = true } = {}) {
   pickMode = mode;
@@ -3035,13 +3044,35 @@ function setPickMode(mode, { armMap = true } = {}) {
   els.btnPickDest?.classList.toggle("active", mode === "destination");
   els.mapPickHint?.classList.toggle("is-picking", mapPickArmed);
   if (mapPickArmed) {
-    showToast(
+    const toast =
       mode === "origin"
-        ? "Tap the map to set origin"
-        : "Tap the map to set destination",
-      2200,
-    );
+        ? t("Tap the map to set origin")
+        : mode === "via"
+          ? t("Tap the map to set via")
+          : t("Tap the map to set destination");
+    showToast(toast, 2200);
   }
+}
+
+function isViaFieldOpen() {
+  return !!(els.viaField && !els.viaField.hidden);
+}
+
+function setViaFieldOpen(open, { focus = true } = {}) {
+  if (els.viaField) els.viaField.hidden = !open;
+  if (els.btnAddVia) els.btnAddVia.hidden = !!open;
+  if (open && focus) {
+    requestAnimationFrame(() => els.inputVia?.focus());
+  }
+}
+
+function clearViaPoint() {
+  viaMarker?.remove();
+  viaMarker = null;
+  via = null;
+  if (els.inputVia) els.inputVia.value = "";
+  hideSuggest("via");
+  updatePlanButton();
 }
 
 function readPrefCheckboxes() {
@@ -3910,7 +3941,7 @@ function updatePlanButton() {
 }
 
 /**
- * @param {"origin"|"destination"} kind
+ * @param {"origin"|"destination"|"via"} kind
  * @param {number} lat
  * @param {number} lon
  * @param {string} [label]
@@ -3919,7 +3950,12 @@ function updatePlanButton() {
 function setPoint(kind, lat, lon, label, meta = {}) {
   const el = document.createElement("div");
   el.className = `map-pin map-pin-${kind}`;
-  el.title = kind === "origin" ? t("Origin") : t("Destination");
+  el.title =
+    kind === "origin"
+      ? t("Origin")
+      : kind === "via"
+        ? t("Via")
+        : t("Destination");
 
   const marker = new Marker({ element: el, anchor: "bottom" })
     .setLngLat([lon, lat])
@@ -3949,6 +3985,13 @@ function setPoint(kind, lat, lon, label, meta = {}) {
     origin = point;
     if (els.inputOrigin) els.inputOrigin.value = text;
     hideSuggest("origin");
+  } else if (kind === "via") {
+    viaMarker?.remove();
+    viaMarker = marker;
+    via = point;
+    if (els.inputVia) els.inputVia.value = text;
+    hideSuggest("via");
+    setViaFieldOpen(true, { focus: false });
   } else {
     destMarker?.remove();
     destMarker = marker;
@@ -4057,13 +4100,13 @@ map.on("click", (e) => {
     } else if (!destination) {
       pickMode = "destination";
     } else {
-      return; // both set — ignore unless armed via hint
+      return; // origin + dest set — ignore unless armed (via needs explicit pick)
     }
   }
-  const kind = pickMode;
+  const kind = pickMode === "via" ? "via" : pickMode === "origin" ? "origin" : "destination";
   setPoint(kind, lat, lng, fmtCoord(lat, lng));
   reverseGeocode(lat, lng).then((label) => {
-    const cur = kind === "origin" ? origin : destination;
+    const cur = kind === "origin" ? origin : kind === "via" ? via : destination;
     if (cur && Math.abs(cur.lat - lat) < 1e-8 && Math.abs(cur.lon - lng) < 1e-8) {
       setPoint(kind, lat, lng, label, {
         isMtr: looksLikeMtrStation(label),
@@ -4086,11 +4129,19 @@ els.btnPickDest?.addEventListener("click", () =>
 );
 
 // ── Search suggest ───────────────────────────────────────────────────────────
-/** @type {{ origin: Array|null, destination: Array|null }} */
-const lastResults = { origin: null, destination: null };
+/** @type {{ origin: Array|null, destination: Array|null, via: Array|null }} */
+const lastResults = { origin: null, destination: null, via: null };
 
 function suggestList(which) {
-  return which === "origin" ? els.suggestOrigin : els.suggestDest;
+  if (which === "origin") return els.suggestOrigin;
+  if (which === "via") return els.suggestVia;
+  return els.suggestDest;
+}
+
+function hideSuggestExcept(keep) {
+  for (const k of PLAN_POINT_KINDS) {
+    if (k !== keep) hideSuggest(k);
+  }
 }
 
 function hideSuggest(which) {
@@ -4114,8 +4165,9 @@ function showSuggestMessage(which, message, kind = "muted") {
 }
 
 function mapPickSuggestItemHtml(which) {
-  const field = which === "origin" ? "origin" : "destination";
-  const fieldLabel = which === "origin" ? t("Origin") : t("Destination");
+  const field = PLAN_POINT_KINDS.includes(which) ? which : "destination";
+  const fieldLabel =
+    field === "origin" ? t("Origin") : field === "via" ? t("Via") : t("Destination");
   return `<li role="option">
     <button type="button" class="loc-suggest-item loc-suggest-map" data-action="map-pick" data-field="${field}">
       <span class="material-symbols-outlined s-icon" aria-hidden="true">touch_app</span>
@@ -4132,7 +4184,10 @@ function wireMapPickSuggest(list, which) {
     btn.addEventListener("mousedown", (e) => e.preventDefault());
     btn.addEventListener("click", () => {
       hideSuggest(which);
-      setPickMode(which === "origin" ? "origin" : "destination", { armMap: true });
+      setPickMode(
+        which === "origin" ? "origin" : which === "via" ? "via" : "destination",
+        { armMap: true },
+      );
     });
   });
 }
@@ -4233,7 +4288,7 @@ function pickResult(which, r) {
     }
   }
 
-  setPoint(which === "origin" ? "origin" : "destination", lat, lon, label, {
+  setPoint(which === "via" ? "via" : which === "origin" ? "origin" : "destination", lat, lon, label, {
     // Keep LRT distinct from heavy-rail MTR so runPlan does not snap to TML
     isMtr: isMtr && !isLrt,
     isLrt,
@@ -4247,7 +4302,7 @@ function pickResult(which, r) {
     padding: mapVisiblePadding(),
   });
   hideSuggest(which);
-  if (which === "origin" && !destination) {
+  if ((which === "origin" || which === "via") && !destination) {
     els.inputDest?.focus();
   }
 }
@@ -4394,6 +4449,7 @@ function wireSearchInput(input, which) {
 
   input.addEventListener("input", (e) => {
     if (which === "origin") origin = null;
+    else if (which === "via") via = null;
     else destination = null;
     updatePlanButton();
     scheduleSearch(which, e.target.value);
@@ -4401,8 +4457,11 @@ function wireSearchInput(input, which) {
 
   input.addEventListener("focus", () => {
     // Switching fields closes the other field’s suggest popup
-    hideSuggest(which === "origin" ? "destination" : "origin");
-    setPickMode(which === "origin" ? "origin" : "destination", { armMap: false });
+    hideSuggestExcept(which);
+    setPickMode(
+      which === "origin" ? "origin" : which === "via" ? "via" : "destination",
+      { armMap: false },
+    );
     const q = input.value.trim();
     if (q.length >= 1) {
       if (lastResults[which]?.length) {
@@ -4431,23 +4490,28 @@ function wireSearchInput(input, which) {
 
 wireSearchInput(els.inputOrigin, "origin");
 wireSearchInput(els.inputDest, "destination");
+wireSearchInput(els.inputVia, "via");
 
 // Hide suggestions when clicking outside the field — or when switching fields
 // (each .loc-field carries its own popup, so clicking the other field closes it)
 document.addEventListener("pointerdown", (e) => {
   const field = e.target.closest?.(".loc-field")?.getAttribute("data-field");
-  if (!field) {
-    hideSuggest("origin");
-    hideSuggest("destination");
-  } else if (field === "origin") {
-    hideSuggest("destination");
-  } else if (field === "destination") {
-    hideSuggest("origin");
+  if (field === "origin" || field === "destination" || field === "via") {
+    hideSuggestExcept(field);
   } else {
-    // Any other field (e.g. Departure time): close both suggest popups
-    hideSuggest("origin");
-    hideSuggest("destination");
+    hideSuggestExcept(null);
   }
+});
+
+els.btnAddVia?.addEventListener("click", () => {
+  setViaFieldOpen(true);
+  renderSuggest("via", lastResults.via || [], {});
+});
+
+els.btnClearVia?.addEventListener("click", () => {
+  clearViaPoint();
+  setViaFieldOpen(false);
+  showToast(t("Via cleared"), 1400);
 });
 
 // ETA panels: “Updated Ns ago” chips tick every second (route detail / trip / pinned)
@@ -5391,6 +5455,11 @@ async function geometryFromPlan(plan, opts = {}) {
 function adjacentTransitLeg(legs, walkIdx, dir) {
   for (let i = walkIdx + dir; i >= 0 && i < legs.length; i += dir) {
     if (legs[i].type === "transit") return { leg: legs[i], index: i };
+    if (legs[i].type === "meet") {
+      // Via / meet-up is a journey break — do not treat walks on either
+      // side as one transfer between the two hops.
+      break;
+    }
     if (legs[i].type === "walk" && dir !== 0) {
       // another walk — stop scanning past it for "adjacent" transfer context
       break;
@@ -5622,103 +5691,246 @@ async function walkFeatureForLeg(legs, walkIdx, opts = {}) {
   };
 }
 
+function addSecondsIso(iso, seconds) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return iso;
+  return new Date(t + Math.max(0, Number(seconds) || 0) * 1000).toISOString();
+}
+
+function placesTooClose(a, b, meters = 80) {
+  if (!a || !b) return false;
+  const dLat = Number(a.lat) - Number(b.lat);
+  const dLon = Number(a.lon) - Number(b.lon);
+  if (!Number.isFinite(dLat) || !Number.isFinite(dLon)) return false;
+  return Math.hypot(dLat, dLon) * 111320 < meters;
+}
+
+/**
+ * Snap a trip-plan pin: LRT stays on Light Rail; heavy-rail may snap to
+ * station centroids. Same rules as the original OD snap in runPlan.
+ * @param {{ lat: number, lon: number, label?: string, name?: string, isMtr?: boolean, isLrt?: boolean }} point
+ */
+function snapPlanEndpoint(point) {
+  let lat = point.lat;
+  let lon = point.lon;
+  let isLrt = !!point.isLrt;
+  let isMtr = !!point.isMtr && !isLrt;
+  const label = point.label || point.name || "";
+
+  const pinLrt = (lbl, la, lo) => matchLrtStop(lbl, la, lo, 350);
+  if (isLrt || matchLrtStop(label, null, null, 0)) {
+    const hit = pinLrt(label, lat, lon);
+    if (hit) {
+      const dualHub = /^(tin shui wai|yuen long|tuen mun|siu hong)$/i.test(
+        String(hit.name_en || "").trim(),
+      );
+      const lrtSpecific = !dualHub || isLrt || /light\s*rail|輕鐵/i.test(label);
+      if (lrtSpecific) {
+        lat = hit.lat;
+        lon = hit.lon;
+        isLrt = true;
+        isMtr = false;
+      }
+    }
+  }
+  if (!isLrt) {
+    const snap = snapToMtrStation(lat, lon, label, isMtr ? 500 : 200);
+    if (snap && (isMtr || wantsStationQuery(label))) {
+      const lrtOnly = matchLrtStop(label, null, null, 0);
+      const dualHub =
+        lrtOnly &&
+        /^(tin shui wai|yuen long|tuen mun|siu hong)$/i.test(
+          String(lrtOnly.name_en || "").trim(),
+        );
+      if (!lrtOnly || dualHub) {
+        lat = snap.lat;
+        lon = snap.lon;
+        isMtr = true;
+      }
+    }
+  }
+  return { lat, lon, isMtr, isLrt, label };
+}
+
+function planHop(from, to, departAtIso, { compact = false } = {}) {
+  const bothMtr = !!(from.isMtr && to.isMtr && !from.isLrt && !to.isLrt);
+  // Access-to-station only. Keep under ~1.5 km so RAPTOR cannot treat a
+  // Victoria Harbour crossing as a single walk (Central↔Austin ≈ 2.5 km).
+  const maxWalk = bothMtr ? 1000 : from.isMtr || to.isMtr ? 1400 : 1200;
+
+  function runQuery(walkM, speed, transfers) {
+    return planTrip({
+      origin: [from.lat, from.lon],
+      destination: [to.lat, to.lon],
+      departAt: departAtIso,
+      maxResults: compact ? 4 : bothMtr ? 8 : 5,
+      maxTransfers: transfers ?? (bothMtr ? 5 : 3),
+      maxWalkDistance: walkM,
+      walkingSpeed: speed,
+      originIsMtr: !!from.isMtr,
+      destIsMtr: !!to.isMtr,
+      originIsStation: !!(from.isMtr || from.isLrt),
+      destIsStation: !!(to.isMtr || to.isLrt),
+      originLabel: from.label || "",
+      destLabel: to.label || "",
+      preferences: routePreferences,
+      trafficMethods,
+      busCompanies,
+      modes: routerModesFromTrafficMethods(trafficMethods, ROUTER_MODES),
+      fareEstimator: (p) => {
+        try {
+          const f = estimatePlanFare(p, getFareType());
+          if (!f || f.total == null) return null;
+          if (f.incomplete) return null;
+          return f.total;
+        } catch {
+          return null;
+        }
+      },
+    });
+  }
+
+  let result = runQuery(maxWalk, "slow");
+  if (!result.plans?.length) {
+    result = runQuery(bothMtr ? 1200 : Math.max(maxWalk, 1800), "normal");
+  }
+  if (!result.plans?.length && (from.isMtr || to.isMtr)) {
+    result = runQuery(bothMtr ? 1400 : 2000, "normal", bothMtr ? 6 : 4);
+  }
+  return { result, bothMtr };
+}
+
+function stitchViaPlans(first, second, viaPoint) {
+  const meetLeg = {
+    type: "meet",
+    duration_seconds: 0,
+    via_label: viaPoint.label,
+    via_lat: viaPoint.lat,
+    via_lon: viaPoint.lon,
+  };
+  const startMs = Date.parse(first.start_time);
+  const endIso = addSecondsIso(second.start_time, second.duration_seconds || 0);
+  const endMs = Date.parse(endIso);
+  const duration =
+    Number.isFinite(startMs) && Number.isFinite(endMs)
+      ? Math.max(0, Math.round((endMs - startMs) / 1000))
+      : (first.duration_seconds || 0) + (second.duration_seconds || 0);
+  return {
+    duration_seconds: duration,
+    start_time: first.start_time,
+    legs: [...(first.legs || []), meetLeg, ...(second.legs || [])],
+    transfer_count: (first.transfer_count || 0) + (second.transfer_count || 0),
+    bus_transfer_count:
+      (first.bus_transfer_count || 0) + (second.bus_transfer_count || 0),
+    mtr_transfer_count:
+      (first.mtr_transfer_count || 0) + (second.mtr_transfer_count || 0),
+    mixed_transfer_count:
+      (first.mixed_transfer_count || 0) + (second.mixed_transfer_count || 0),
+    kcr_mtr_legacy_interchange_count:
+      (first.kcr_mtr_legacy_interchange_count || 0) +
+      (second.kcr_mtr_legacy_interchange_count || 0),
+    walk_meters: (first.walk_meters || 0) + (second.walk_meters || 0),
+    free_mtr_interchange_walks:
+      (first.free_mtr_interchange_walks || 0) +
+      (second.free_mtr_interchange_walks || 0),
+    mtr_only: !!(first.mtr_only && second.mtr_only),
+    via_point: viaPoint,
+    via_label: viaPoint.label,
+    via_stitched: true,
+    human_score: (first.human_score || 0) + (second.human_score || 0),
+  };
+}
+
+function rankStitchedViaPlans(list) {
+  const prefs = new Set(routePreferences.length ? routePreferences : ["fastest"]);
+  const scored = list.map((p, i) => ({ p, i }));
+  scored.sort((a, b) => {
+    if (prefs.has("cheapest")) {
+      const fa = a.p.fare;
+      const fb = b.p.fare;
+      const aOk = !!(fa && !fa.incomplete && fa.total != null);
+      const bOk = !!(fb && !fb.incomplete && fb.total != null);
+      if (aOk !== bOk) return aOk ? -1 : 1;
+      if (aOk && bOk && fa.total !== fb.total) return fa.total - fb.total;
+    }
+    if (prefs.has("simplest")) {
+      const ta = a.p.transfer_count ?? 99;
+      const tb = b.p.transfer_count ?? 99;
+      if (ta !== tb) return ta - tb;
+    }
+    const da = a.p.duration_seconds ?? 1e9;
+    const db = b.p.duration_seconds ?? 1e9;
+    if (da !== db) return da - db;
+    return a.i - b.i;
+  });
+  return scored.map(({ p }, idx) => ({
+    ...p,
+    is_recommended: idx === 0,
+  }));
+}
+
+function planThroughVia(from, viaPt, to, departAtIso, viaLabelPoint) {
+  const firstHop = planHop(from, viaPt, departAtIso, { compact: true });
+  const firstPlans = (firstHop.result.plans || []).slice(0, 3);
+  const stitched = [];
+  const seen = new Set();
+  for (const a of firstPlans) {
+    const arrive = addSecondsIso(a.start_time, a.duration_seconds || 0);
+    const secondHop = planHop(viaPt, to, arrive, { compact: true });
+    for (const b of (secondHop.result.plans || []).slice(0, 3)) {
+      const combined = stitchViaPlans(a, b, viaLabelPoint);
+      const key = planPinKey(combined);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      stitched.push(combined);
+    }
+  }
+  return {
+    plans: stitched.slice(0, 5),
+    bothMtr: !!(from.isMtr && to.isMtr && !from.isLrt && !to.isLrt),
+    firstEmpty: !firstPlans.length,
+  };
+}
+
+function activeViaPoint() {
+  if (!isViaFieldOpen() || !via) return null;
+  return via;
+}
+
 function runPlan() {
   if (els.btnPlanCta) els.btnPlanCta.disabled = true;
   els.planResults.hidden = false;
-  els.planResults.innerHTML = `<p class="hint">Planning…</p>`;
+  els.planResults.innerHTML = `<p class="hint">${escapeHtml(t("Planning…"))}</p>`;
   // Hide any previous path; blur until densified geometry is ready
   clearRouteGeometry();
-  setMapRouteLoading(true, "Planning…");
+  setMapRouteLoading(true, t("Planning…"));
   const t0 = performance.now();
   try {
-    // Snap OD: LRT pins stay on Light Rail; heavy-rail may snap to station centroids
-    let oLat = origin.lat;
-    let oLon = origin.lon;
-    let dLat = destination.lat;
-    let dLon = destination.lon;
-    let oLrt = !!origin.isLrt;
-    let dLrt = !!destination.isLrt;
-    let oMtr = !!origin.isMtr && !oLrt;
-    let dMtr = !!destination.isMtr && !dLrt;
-
-    // Prefer explicit LRT directory pins (Tuen Mun Hospital / Ferry Pier ≠ Tuen Mun MTR)
-    const pinLrt = (label, lat, lon) => {
-      const hit = matchLrtStop(label, lat, lon, 350);
-      if (!hit) return null;
-      // Don't remap bare dual-hub labels that were intentionally set as MTR
-      return hit;
-    };
-    if (oLrt || matchLrtStop(origin.label, null, null, 0)) {
-      const hit = pinLrt(origin.label, oLat, oLon);
-      if (hit) {
-        // For LRT-only names (Hospital / Ferry Pier) always use LRT coords.
-        // For dual hubs, keep LRT coords only when already flagged isLrt.
-        const dualHub = /^(tin shui wai|yuen long|tuen mun|siu hong)$/i.test(
-          String(hit.name_en || "").trim(),
-        );
-        const lrtSpecific = !dualHub || oLrt || /light\s*rail|輕鐵/i.test(origin.label || "");
-        if (lrtSpecific) {
-          oLat = hit.lat;
-          oLon = hit.lon;
-          oLrt = true;
-          oMtr = false;
-        }
-      }
-    }
-    if (dLrt || matchLrtStop(destination.label, null, null, 0)) {
-      const hit = pinLrt(destination.label, dLat, dLon);
-      if (hit) {
-        const dualHub = /^(tin shui wai|yuen long|tuen mun|siu hong)$/i.test(
-          String(hit.name_en || "").trim(),
-        );
-        const lrtSpecific = !dualHub || dLrt || /light\s*rail|輕鐵/i.test(destination.label || "");
-        if (lrtSpecific) {
-          dLat = hit.lat;
-          dLon = hit.lon;
-          dLrt = true;
-          dMtr = false;
-        }
-      }
+    const viaTyped = String(els.inputVia?.value || "").trim();
+    if (isViaFieldOpen() && viaTyped && !via) {
+      setMapRouteLoading(false);
+      els.planResults.innerHTML = `<p class="hint">${escapeHtml(
+        t("Pick a via place from the list, or clear Via"),
+      )}</p>`;
+      showToast(t("Pick a via place from the list, or clear Via"), 2800);
+      return;
     }
 
-    // Heavy-rail centroid snap only when not LRT
-    if (!oLrt) {
-      const oSnap = snapToMtrStation(oLat, oLon, origin.label, oMtr ? 500 : 200);
-      if (oSnap && (oMtr || wantsStationQuery(origin.label))) {
-        // Block if label is an LRT-specific stop
-        const lrtOnly = matchLrtStop(origin.label, null, null, 0);
-        const dualHub = lrtOnly && /^(tin shui wai|yuen long|tuen mun|siu hong)$/i.test(
-          String(lrtOnly.name_en || "").trim(),
-        );
-        if (!lrtOnly || dualHub) {
-          oLat = oSnap.lat;
-          oLon = oSnap.lon;
-          oMtr = true;
-        }
-      }
+    const from = snapPlanEndpoint(origin);
+    const to = snapPlanEndpoint(destination);
+    let viaUser = activeViaPoint();
+    let viaSnap = viaUser ? snapPlanEndpoint(viaUser) : null;
+    if (viaSnap && placesTooClose(from, viaSnap)) {
+      showToast(t("Via is the same as the origin"), 2200);
+      viaSnap = null;
+      viaUser = null;
     }
-    if (!dLrt) {
-      const dSnap = snapToMtrStation(dLat, dLon, destination.label, dMtr ? 500 : 200);
-      if (dSnap && (dMtr || wantsStationQuery(destination.label))) {
-        const lrtOnly = matchLrtStop(destination.label, null, null, 0);
-        const dualHub = lrtOnly && /^(tin shui wai|yuen long|tuen mun|siu hong)$/i.test(
-          String(lrtOnly.name_en || "").trim(),
-        );
-        if (!lrtOnly || dualHub) {
-          dLat = dSnap.lat;
-          dLon = dSnap.lon;
-          dMtr = true;
-        }
-      }
+    if (viaSnap && placesTooClose(viaSnap, to)) {
+      showToast(t("Via is the same as the destination"), 2200);
+      viaSnap = null;
+      viaUser = null;
     }
 
-    const bothMtr = oMtr && dMtr && !oLrt && !dLrt;
-    // Access-to-station only. Keep under ~1.5 km so RAPTOR cannot treat a
-    // Victoria Harbour crossing as a single walk (Central↔Austin ≈ 2.5 km).
-    // planTrip() also retries with tighter walk + more transfers for bothMtr.
-    const maxWalk = bothMtr ? 1000 : oMtr || dMtr ? 1400 : 1200;
-
-    // Re-read departure from the time input (fixed HH:MM or Now)
     const departTimeResolved = resolveDepartTimeForPlan();
     const departAtIso = departAtForServiceDay(
       serviceDay,
@@ -5730,65 +5942,38 @@ function runPlan() {
       departTimeResolved,
       serviceDay,
       departAtIso,
+      viaSnap ? `via ${viaUser?.label || viaSnap.label}` : "direct",
     );
 
-    function runQuery(walkM, speed, transfers) {
-      return planTrip({
-        origin: [oLat, oLon],
-        destination: [dLat, dLon],
-        // Usual/Holiday calendar day + Now or fixed Hong Kong clock time
-        departAt: departAtIso,
-        maxResults: bothMtr ? 8 : 5,
-        maxTransfers: transfers ?? (bothMtr ? 5 : 3),
-        maxWalkDistance: walkM,
-        walkingSpeed: speed,
-        originIsMtr: oMtr,
-        destIsMtr: dMtr,
-        // Stop/station OD: Walk-off still keeps plans (no “walk to destination” reject)
-        originIsStation: !!(oMtr || oLrt || origin?.isMtr || origin?.isLrt),
-        destIsStation: !!(dMtr || dLrt || destination?.isMtr || destination?.isLrt),
-        // Dual-access: also plan from Hong Kong when origin is Central (and vice versa)
-        originLabel: origin.label || origin.name || "",
-        destLabel: destination.label || destination.name || "",
-        preferences: routePreferences,
-        trafficMethods,
-        busCompanies,
-        modes: routerModesFromTrafficMethods(trafficMethods, ROUTER_MODES),
-        fareEstimator: (p) => {
-          try {
-            const f = estimatePlanFare(p, getFareType());
-            // Least fare: incomplete/unsure totals do not count as a known fare
-            if (!f || f.total == null) return null;
-            if (f.incomplete) return null;
-            return f.total;
-          } catch {
-            return null;
-          }
-        },
-      });
-    }
-
-    let result = runQuery(maxWalk, "slow");
-    // Looser access only for walk-graph gaps — never large enough for harbour
-    if (!result.plans?.length) {
-      result = runQuery(bothMtr ? 1200 : Math.max(maxWalk, 1800), "normal");
-    }
-    if (!result.plans?.length && (oMtr || dMtr)) {
-      result = runQuery(bothMtr ? 1400 : 2000, "normal", bothMtr ? 6 : 4);
+    let resultPlans;
+    let bothMtr;
+    if (viaSnap && viaUser) {
+      setMapRouteLoading(
+        true,
+        t("Planning via {place}…", { place: viaUser.label || viaSnap.label }),
+      );
+      const viaResult = planThroughVia(from, viaSnap, to, departAtIso, viaUser);
+      bothMtr = viaResult.bothMtr;
+      resultPlans = viaResult.plans;
+    } else {
+      const hop = planHop(from, to, departAtIso);
+      bothMtr = hop.bothMtr;
+      resultPlans = hop.result.plans || [];
     }
 
     const ms = Math.round(performance.now() - t0);
     const ticket = getFareType();
     const leastFareOn = routePreferences.includes("cheapest");
-    plans = (result.plans || []).map((p) => {
+    plans = (resultPlans || []).map((p) => {
       const fare = estimatePlanFare(p, ticket);
       return { ...p, fare };
     });
-    // Least fare: promote plans with complete fares; demote unsure to the end
-    if (leastFareOn && plans.length > 1) {
+    if (viaSnap && plans.length > 1) {
+      plans = rankStitchedViaPlans(plans);
+    } else if (leastFareOn && plans.length > 1) {
       plans = prioritizeCompleteFares(plans);
     }
-    renderPlans(plans, ms, { bothMtr, leastFareOn });
+    renderPlans(plans, ms, { bothMtr, leastFareOn, viaLabel: viaUser?.label });
     if (plans.length) {
       // selectPlan keeps the veil until densified path is painted
       setMapRouteLoading(true, "Drawing route…");
@@ -5809,11 +5994,17 @@ function runPlan() {
         ? " · " + t("MTR preferred")
         : " · " + t("MTR ends")
       : "";
-    showToast(
-      plans.length
-        ? t("{n} plan(s) · {ms} ms", { n: plans.length, ms }) + fareHint + hint
-        : t("No routes found — try other points"),
-    );
+    const emptyMsg = viaSnap
+      ? t("No routes found through via — try another meeting point")
+      : t("No routes found — try other points");
+    const okMsg = viaUser
+      ? t("{n} plan(s) via {place} · {ms} ms", {
+          n: plans.length,
+          place: viaUser.label,
+          ms,
+        })
+      : t("{n} plan(s) · {ms} ms", { n: plans.length, ms });
+    showToast(plans.length ? okMsg + fareHint + hint : emptyMsg);
   } catch (err) {
     console.error("[plan]", err);
     clearRouteGeometry();
@@ -6449,6 +6640,8 @@ function routeLineRowHtml(row) {
   } else if (row.kind === "via") {
     // Smaller hollow circle — intermediate “Ride N stops”
     marker = `<span class="rt-marker rt-marker-via" aria-hidden="true"></span>`;
+  } else if (row.kind === "meet") {
+    marker = `<span class="rt-marker rt-marker-meet material-symbols-outlined" aria-hidden="true">group</span>`;
   } else {
     // stop (board / alight)
     marker = `<span class="rt-marker rt-marker-dot" aria-hidden="true"></span>`;
@@ -6550,6 +6743,18 @@ function planRouteLineHtml(legsArr, opts = {}) {
         kind: "wait",
         line: "dotted",
         bodyHtml: `<span class="rt-wait-text">${escapeHtml(`Wait ${formatDuration(leg.duration_seconds)}`)}</span>`,
+      });
+      continue;
+    }
+
+    if (leg.type === "meet") {
+      const place = leg.via_label || t("Via");
+      rows.push({
+        kind: "meet",
+        line: next ? "dotted" : "none",
+        bodyHtml: `<span class="rt-meet-text">${escapeHtml(
+          t("Meet at {place}", { place }),
+        )}</span>`,
       });
       continue;
     }
@@ -7025,6 +7230,13 @@ function planCardHtml(p, idx, opts = {}) {
   if (p.mtr_only) {
     badges.push(`<span class="plan-badge plan-badge-mtr">${t("MTR")}</span>`);
   }
+  if (p.via_label) {
+    badges.push(
+      `<span class="plan-badge plan-badge-via">${escapeHtml(
+        t("Meet at {place}", { place: p.via_label }),
+      )}</span>`,
+    );
+  }
   const aelPromo = aelPromoForPlan(
     p,
     opts.originPt ?? origin,
@@ -7260,6 +7472,11 @@ function tripDetailHeadHtml(plan, live = {}) {
     destination?.label ||
     destination?.name ||
     (destination ? fmtCoord(destination.lat, destination.lon) : "Destination");
+  const viaLabel =
+    plan.via_label ||
+    plan.via_point?.label ||
+    via?.label ||
+    "";
   const fare = plan.fare || estimatePlanFare(plan, getFareType());
   const fareText = formatPlanFare(fare);
   const aelPromo = aelPromoForPlan(plan, origin, destination);
@@ -7289,6 +7506,12 @@ function tripDetailHeadHtml(plan, live = {}) {
       <div class="trip-detail-od">
         <span class="trip-od-from">${escapeHtml(from)}</span>
         <span class="material-symbols-outlined trip-od-arrow" aria-hidden="true">arrow_downward</span>
+        ${
+          viaLabel
+            ? `<span class="trip-od-via">${escapeHtml(t("Meet at {place}", { place: viaLabel }))}</span>
+        <span class="material-symbols-outlined trip-od-arrow" aria-hidden="true">arrow_downward</span>`
+            : ""
+        }
         <span class="trip-od-to">${escapeHtml(to)}</span>
       </div>
       <div class="trip-detail-meta">
@@ -15531,6 +15754,7 @@ if (typeof window !== "undefined") {
     promoteRouteStopLayers,
     setPoint,
     getPlans: () => plans,
+    getVia: () => via,
     selectPlan,
     runPlan,
   };
