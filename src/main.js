@@ -212,12 +212,23 @@ initAcrylic();
 initLang();
 applyLangToDom();
 
-// First-run onboarding: an opaque cover sits above the boot splash while the
-// app keeps initializing underneath, so the map/router are ready when the
-// flow ends. The geolocation permission prompt below also waits for this gate.
+/**
+ * Resolves once the splash cover has fully left the screen — work that must
+ * not run over the opening animation (e.g. the location permission prompt)
+ * chains onto this promise.
+ */
+let resolveBootSplashDone = () => {};
+const bootSplashDonePromise = new Promise((resolve) => {
+  resolveBootSplashDone = resolve;
+});
+
+// First-run onboarding: waits for the boot splash opening animation to finish
+// (cover fully removed), then covers the app with the opaque wizard while the
+// map/router keep initializing underneath, so they are ready when the flow
+// ends. The geolocation permission prompt below also waits for this gate.
 const onboardingGate = isOnboarded()
   ? Promise.resolve()
-  : startOnboarding({ firstRun: true });
+  : bootSplashDonePromise.then(() => startOnboarding({ firstRun: true }));
 
 // Hand-maintained static overrides (public/overrides/*) — never from collect pipeline
 loadStaticOverrides()
@@ -16040,16 +16051,8 @@ document.addEventListener("visibilitychange", () => {
 // ── Boot splash ─────────────────────────────────────────────────────────────
 const BOOT_SPLASH_MIN_MS = 700;
 const BOOT_STARTED_AT = Date.now();
-
-/**
- * Resolves once the splash cover has fully left the screen — work that must
- * not run over the opening animation (e.g. the location permission prompt)
- * chains onto this promise.
- */
-let resolveBootSplashDone = () => {};
-const bootSplashDonePromise = new Promise((resolve) => {
-  resolveBootSplashDone = resolve;
-});
+// bootSplashDonePromise + resolveBootSplashDone are declared at the top of
+// the module so the onboarding gate can chain onto the splash's completion.
 
 /**
  * Paint page + map backgrounds black while the cover is up. On iOS PWA the
