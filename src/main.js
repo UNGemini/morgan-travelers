@@ -3984,12 +3984,13 @@ function showSuggestMessage(which, message, kind = "muted") {
 
 function mapPickSuggestItemHtml(which) {
   const field = which === "origin" ? "origin" : "destination";
+  const fieldLabel = which === "origin" ? t("Origin") : t("Destination");
   return `<li role="option">
     <button type="button" class="loc-suggest-item loc-suggest-map" data-action="map-pick" data-field="${field}">
       <span class="material-symbols-outlined s-icon" aria-hidden="true">touch_app</span>
       <span class="s-text">
-        <span class="s-name">Tap the map to set</span>
-        <span class="s-label">Click anywhere on the map for ${field}</span>
+        <span class="s-name">${t("Tap the map to set")}</span>
+        <span class="s-label">${t("Click anywhere on the map for {field}", { field: fieldLabel })}</span>
       </span>
     </button>
   </li>`;
@@ -4127,21 +4128,21 @@ function wantsStationQuery(s) {
 function modeBadgeHtml(r) {
   const mode = String(r.mode || "").toLowerCase();
   if (mode === "lrt" || r.isLrt || r.source === "lrt-local") {
-    return `<span class="s-badge s-badge-lrt">LRT</span>`;
+    return `<span class="s-badge s-badge-lrt">${t("LRT")}</span>`;
   }
   if (mode === "bus") {
-    return `<span class="s-badge s-badge-bus">Bus</span>`;
+    return `<span class="s-badge s-badge-bus">${t("Bus")}</span>`;
   }
   // Never badge LRT-looking names as MTR if they match the LRT directory
   if (matchLrtStop(r.name || r.label, r.lat, r.lon, 120)) {
-    return `<span class="s-badge s-badge-lrt">LRT</span>`;
+    return `<span class="s-badge s-badge-lrt">${t("LRT")}</span>`;
   }
   const isRail =
     r.isMtr ||
     mode === "mtr" ||
     String(r.category || r.class || "").toLowerCase() === "railway" ||
     String(r.type || "").toLowerCase() === "station";
-  if (isRail) return `<span class="s-badge">MTR</span>`;
+  if (isRail) return `<span class="s-badge">${t("MTR")}</span>`;
   return "";
 }
 
@@ -6805,7 +6806,7 @@ function planCardHtml(p, idx, opts = {}) {
     );
   }
   if (p.mtr_only) {
-    badges.push(`<span class="plan-badge plan-badge-mtr">MTR</span>`);
+    badges.push(`<span class="plan-badge plan-badge-mtr">${t("MTR")}</span>`);
   }
   const aelPromo = aelPromoForPlan(
     p,

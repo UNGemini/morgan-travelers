@@ -34,6 +34,17 @@ let lang = "en";
 /** @type {Set<(code: string) => void>} */
 const langCallbacks = new Set();
 
+/**
+ * English-source tracking for re-translation: once a node is translated the
+ * English source is gone from the DOM, so the next applyLangToDom() pass
+ * (e.g. language switch) would find nothing to match. Record the source key
+ * here; stale entries self-heal — a node rewritten by a re-render no longer
+ * matches its recorded output and is re-derived from its current text.
+ * Maps: textNode → { src, out }, element → attrName → { src, out }.
+ */
+const textSrc = new WeakMap();
+const attrSrc = new WeakMap();
+
 /** Simplified-Chinese char map (lazy, only needed for zh-cn). */
 let zhMap = null;
 let zhMapPromise = null;
@@ -137,11 +148,15 @@ export function applyLangToDom(root = document) {
     if (SKIP.has(parentTag)) continue;
     const collapsed = raw.replace(/\s+/g, " ").trim();
     if (!collapsed) continue;
-    const translated = t(collapsed);
-    if (translated !== collapsed) {
+    const prev = textSrc.get(node);
+    const key = prev && prev.out === raw ? prev.src : collapsed;
+    const translated = t(key);
+    if (translated !== key) {
       const lead = raw.slice(0, raw.length - raw.trimStart().length);
       const trail = raw.slice(raw.trimEnd().length);
-      node.nodeValue = lead + translated + trail;
+      const out = lead + translated + trail;
+      textSrc.set(node, { src: key, out });
+      node.nodeValue = out;
     }
   }
   for (const el of root.querySelectorAll("[aria-label],[title],[placeholder]")) {
@@ -149,8 +164,16 @@ export function applyLangToDom(root = document) {
       const v = el.getAttribute(attr);
       if (!v || !/[A-Za-z]/.test(v)) continue;
       const collapsed = v.replace(/\s+/g, " ").trim();
-      const translated = t(collapsed);
-      if (translated !== collapsed) el.setAttribute(attr, translated);
+      const prev = attrSrc.get(el)?.[attr];
+      const key = prev && prev.out === v ? prev.src : collapsed;
+      const translated = t(key);
+      if (translated !== key) {
+        attrSrc.set(el, {
+          ...(attrSrc.get(el) || {}),
+          [attr]: { src: key, out: translated },
+        });
+        el.setAttribute(attr, translated);
+      }
     }
   }
   // data-i18n escape hatches for the rare node scanning can't reach
