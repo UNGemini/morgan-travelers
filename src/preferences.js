@@ -305,10 +305,12 @@ export function formatServiceClock(iso) {
  * that calendar date. So we emit the HKT clock face as the ISO time portion
  * (with a decorative `Z`), NOT a true UTC conversion (which was 8h early).
  *
- * Calendar day must never be in the past. MTR (and some LRT) services are
- * encoded as a rolling `calendar_dates` window starting “today”. Snapping
- * Usual back to this week’s Wednesday (or Holiday back to last Sunday)
- * drops every rail trip after last train — even if you set a 10:00 depart.
+ * Calendar day is Hong Kong **today** (or tomorrow if the clock already
+ * passed). MTR/LRT `calendar_dates` are a short rolling window from today —
+ * jumping to next Monday/Sunday often has no rail trips at all.
+ *
+ * RAPTOR only waits 3 hours for a trip. After last train (~01:15) “Now”
+ * cannot see first trains (~05:30), so we search from 05:30 instead.
  *
  * @param {ServiceDayId} day
  * @param {Date} [now]
@@ -317,6 +319,7 @@ export function formatServiceClock(iso) {
  */
 export function departAtForServiceDay(day, now = new Date(), time = "now") {
   const hk = getHongKongParts(now);
+  const nowMins = (hk.hour || 0) * 60 + (hk.minute || 0);
   let hour = hk.hour;
   let minute = hk.minute;
   const hm = time === "now" ? null : parseDepartTimeHm(time);
@@ -324,17 +327,19 @@ export function departAtForServiceDay(day, now = new Date(), time = "now") {
     const [hh, mm] = hm.split(":").map((x) => Number(x));
     hour = hh;
     minute = mm;
+  } else if (nowMins >= 75 && nowMins < 5 * 60 + 30) {
+    // 01:15–05:29: last train gone, first train not yet in the 3h wait window
+    hour = 5;
+    minute = 30;
   }
-  // Usual = weekday timetable: today if Mon–Fri, otherwise next Monday.
-  // Holiday = Sunday timetable: today if Sunday, otherwise next Sunday.
-  // Always snap forward so the date stays inside rolling GTFS calendars.
   let dayOffset = 0;
-  if (day === "holiday") {
-    dayOffset = (7 - hk.weekday) % 7;
-  } else if (hk.weekday === 0) {
-    dayOffset = 1;
-  } else if (hk.weekday === 6) {
-    dayOffset = 2;
+  if (hm) {
+    const req = hour * 60 + minute;
+    if (req + 1 < nowMins) dayOffset = 1;
+  }
+  // Holiday on Saturday → tomorrow (Sunday). Do not jump 2–6 days ahead.
+  if (day === "holiday" && hk.weekday !== 0) {
+    if (hk.weekday === 6) dayOffset = Math.max(dayOffset, 1);
   }
   const shifted = new Date(
     Date.UTC(hk.year, hk.month - 1, hk.day + dayOffset, 12, 0, 0),

@@ -3346,18 +3346,37 @@ function syncDepartTimeUi() {
  * Always re-reads the DOM so Plan trip never uses a stale "now".
  * @returns {import("./preferences.js").DepartTimeValue}
  */
+function hmToMins(hm) {
+  const p = parseDepartTimeHm(hm);
+  if (!p) return null;
+  const [hh, mm] = p.split(":").map(Number);
+  return hh * 60 + mm;
+}
+
 function resolveDepartTimeForPlan() {
   const input = document.getElementById("input-depart-time");
   const row = document.querySelector(".depart-time-row");
+  const inputHm =
+    input instanceof HTMLInputElement ? parseDepartTimeHm(input.value) : null;
+  const nowHm = hongKongHmString();
+  // Time pickers often skip `input` until blur. If the field no longer
+  // matches Now, honor it — otherwise Plan still searches from 02:00 and
+  // RAPTOR's 3h wait never reaches first MTR (~06:00).
+  if (inputHm) {
+    const a = hmToMins(inputHm);
+    const b = hmToMins(nowHm);
+    if (a != null && b != null && Math.abs(a - b) > 1) {
+      departTime = saveDepartTime(inputHm);
+      row?.classList.remove("is-now");
+      return inputHm;
+    }
+  }
   const usingNow =
     departTime === "now" &&
     (!row || row.classList.contains("is-now"));
-  if (!usingNow && input instanceof HTMLInputElement) {
-    const hm = parseDepartTimeHm(input.value);
-    if (hm) {
-      departTime = saveDepartTime(hm);
-      return hm;
-    }
+  if (!usingNow && inputHm) {
+    departTime = saveDepartTime(inputHm);
+    return inputHm;
   }
   if (departTime !== "now") {
     const hm = parseDepartTimeHm(departTime);
@@ -6090,17 +6109,46 @@ function snapPlanEndpoint(point) {
   return { lat, lon, isMtr, isLrt, label };
 }
 
+function shiftServiceDayIso(iso, days) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(.+)$/.exec(String(iso || ""));
+  if (!m) return iso;
+  const d = new Date(
+    Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days, 12, 0, 0),
+  );
+  const y = d.getUTCFullYear();
+  const mo = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const da = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${mo}-${da}T${m[4]}`;
+}
+
+function planListHasRail(list) {
+  return (list || []).some((p) => {
+    if (p.mtr_only || p.has_mtr || p.has_lrt) return true;
+    return (p.legs || []).some((l) => {
+      if (l.type !== "transit") return false;
+      const opt = l.route_options?.[0];
+      const mode = String(opt?.mode || "").toLowerCase();
+      return (
+        mode === "subway" ||
+        mode === "rail" ||
+        mode === "light_rail" ||
+        !!detectMtrLineCode(opt)
+      );
+    });
+  });
+}
+
 function planHop(from, to, departAtIso, { compact = false } = {}) {
   const bothMtr = !!(from.isMtr && to.isMtr && !from.isLrt && !to.isLrt);
   // Access-to-station only. Keep under ~1.5 km so RAPTOR cannot treat a
   // Victoria Harbour crossing as a single walk (Central↔Austin ≈ 2.5 km).
   const maxWalk = bothMtr ? 1000 : from.isMtr || to.isMtr ? 1400 : 1200;
 
-  function runQuery(walkM, speed, transfers) {
+  function runQuery(walkM, speed, transfers, departOverride) {
     return planTrip({
       origin: [from.lat, from.lon],
       destination: [to.lat, to.lon],
-      departAt: departAtIso,
+      departAt: departOverride || departAtIso,
       maxResults: compact ? 4 : bothMtr ? 8 : 5,
       maxTransfers: transfers ?? (bothMtr ? 5 : 3),
       maxWalkDistance: walkM,
@@ -6134,6 +6182,19 @@ function planHop(from, to, departAtIso, { compact = false } = {}) {
   }
   if (!result.plans?.length && (from.isMtr || to.isMtr)) {
     result = runQuery(bothMtr ? 1400 : 2000, "normal", bothMtr ? 6 : 4);
+  }
+  // After last train, today's remaining rail can be empty even at 10:00 if
+  // the feed's calendar_dates already rolled. Retry tomorrow morning.
+  if ((from.isMtr || to.isMtr || from.isLrt || to.isLrt) && !planListHasRail(result.plans)) {
+    const nextMorning = shiftServiceDayIso(departAtIso, 1).replace(
+      /T\d{2}:\d{2}:/,
+      "T05:30:",
+    );
+    const retry = runQuery(maxWalk, "normal", bothMtr ? 6 : 4, nextMorning);
+    if (planListHasRail(retry.plans)) {
+      console.info("[plan] rail retry next morning", nextMorning);
+      result = retry;
+    }
   }
   return { result, bothMtr };
 }

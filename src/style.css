@@ -1678,6 +1678,15 @@ body.mobile-ui [data-acrylic]::before {
   height: 100%;
 }
 
+/* Trip detail must scroll itself: in ETA mode the sidebar body is
+ * overflow:hidden (Nearby list scrolls inside), and height:100% on this
+ * page does not grow the parent scrollHeight on desktop. */
+#sidebar-page-trip:not([hidden]) {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
 /* Pinned routes page — plan-card style (multiple cards stack)
  * Side inset matches Nearby's 24px card inset (16px panel + 8px list) */
 .pinned-route-body {
