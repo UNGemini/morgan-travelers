@@ -222,7 +222,7 @@ function detectMtrLineCodeFromLongName(opt) {
   return null;
 }
 
-function normalizeHex(color) {
+export function normalizeHex(color) {
   if (!color) return null;
   const c = String(color).replace(/^#/, "").trim();
   if (!/^[0-9a-fA-F]{6}$/.test(c)) return null;

@@ -17,18 +17,26 @@ import {
   openOverridesPullRequest,
   DEFAULT_OVERRIDES_REPO,
 } from "../_shared/github.js";
+import {
+  foreignOriginResponse,
+  sameOriginCors,
+} from "../_shared/security.js";
 
 const MAX_BODY_BYTES = 400_000;
 const MAX_POINTS = 2_000;
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Allow-Credentials": "true",
-  "Cross-Origin-Resource-Policy": "cross-origin",
-  "Content-Type": "application/json; charset=utf-8",
-  "Cache-Control": "no-store",
-};
+
+function contribHeaders(request) {
+  return {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    ...sameOriginCors(request, {
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Credentials": "true",
+      "Cross-Origin-Resource-Policy": "same-origin",
+    }),
+  };
+}
 
 /**
  * @param {unknown} draft
@@ -192,10 +200,10 @@ async function notifyWebhook(env, draft) {
   }
 }
 
-function json(status, payload) {
+function json(request, status, payload) {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: CORS,
+    headers: contribHeaders(request),
   });
 }
 
@@ -203,33 +211,36 @@ export async function onRequest(context) {
   const { request, env } = context;
 
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS });
+    return new Response(null, { status: 204, headers: contribHeaders(request) });
   }
 
+  const blocked = foreignOriginResponse(request);
+  if (blocked) return blocked;
+
   if (request.method !== "POST") {
-    return json(405, { ok: false, error: "POST only" });
+    return json(request, 405, { ok: false, error: "POST only" });
   }
 
   const cl = Number(request.headers.get("content-length") || 0);
   if (cl > MAX_BODY_BYTES) {
-    return json(413, { ok: false, error: "Payload too large" });
+    return json(request, 413, { ok: false, error: "Payload too large" });
   }
 
   let raw;
   try {
     raw = await request.text();
   } catch {
-    return json(400, { ok: false, error: "Could not read body" });
+    return json(request, 400, { ok: false, error: "Could not read body" });
   }
   if (raw.length > MAX_BODY_BYTES) {
-    return json(413, { ok: false, error: "Payload too large" });
+    return json(request, 413, { ok: false, error: "Payload too large" });
   }
 
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return json(400, { ok: false, error: "Invalid JSON" });
+    return json(request, 400, { ok: false, error: "Invalid JSON" });
   }
 
   const submitMode =
@@ -238,8 +249,16 @@ export async function onRequest(context) {
       ? "bot"
       : "oauth";
 
+  // Bot mode uses the site token — only first-party browsers may trigger it.
+  if (submitMode === "bot" && !request.headers.get("Origin")) {
+    return json(request, 403, {
+      ok: false,
+      error: "browser origin required for bot submit",
+    });
+  }
+
   const v = validateDraft(parsed);
-  if (!v.ok) return json(400, { ok: false, error: v.error });
+  if (!v.ok) return json(request, 400, { ok: false, error: v.error });
 
   const draft = v.draft;
   const store = await storeDraft(env || {}, draft);
@@ -252,7 +271,7 @@ export async function onRequest(context) {
 
   if (submitMode === "oauth") {
     if (!sess?.token) {
-      return json(401, {
+      return json(request, 401, {
         ok: false,
         error: "GitHub login required for OAuth submit",
         need_login: true,
@@ -296,7 +315,7 @@ export async function onRequest(context) {
 
   // OAuth mode with failed PR and nothing else → surface as error-ish but still 200 if stored
   if (submitMode === "oauth" && !gh.ok && !accepted) {
-    return json(gh.need_login ? 401 : 502, {
+    return json(request, gh.need_login ? 401 : 502, {
       ok: false,
       id: draft.id,
       accepted: false,
@@ -309,7 +328,7 @@ export async function onRequest(context) {
     });
   }
 
-  return json(accepted ? 200 : 202, {
+  return json(request, accepted ? 200 : 202, {
     ok: true,
     id: draft.id,
     accepted,

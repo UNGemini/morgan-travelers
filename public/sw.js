@@ -46,7 +46,7 @@
  * deploy path for "force fresh shell". The data cache survives upgrades
  * unless the user clears it.
  */
-const CACHE = "mtravelers-shell-v13";
+const CACHE = "mtravelers-shell-v14";
 const DATA_CACHE = "mtravelers-data-v3"; // v3: all-data serve-only regime
 const TILES_CACHE = "mtravelers-tiles-v1";
 const STAGING_CACHE = "mtravelers-stage-v1"; // atomic download staging
@@ -275,6 +275,27 @@ async function swrFetch(event, cacheName, ttlMs, logTag) {
  * message port.
  * @param {string[]} urls
  */
+/** Offline download may only fetch first-party data + the PMTiles CDN. */
+function isAllowedPrecacheUrl(href) {
+  let u;
+  try {
+    u = new URL(href, self.location.href);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+  if (u.origin === self.location.origin) {
+    return (
+      isDataPath(u.pathname) ||
+      isTilesPath(u.pathname) ||
+      u.pathname.startsWith("/fares/") ||
+      u.pathname.startsWith("/overrides/") ||
+      u.pathname.startsWith("/mtr/")
+    );
+  }
+  return u.hostname === "hk-gtfsdata.morgandev.cc";
+}
+
 async function precacheData(urls) {
   let done = 0;
   let totalBytes = 0;
@@ -287,6 +308,9 @@ async function precacheData(urls) {
   const stage = await caches.open(STAGING_CACHE);
   for (const href of urls) {
     try {
+      if (!isAllowedPrecacheUrl(href)) {
+        throw new Error("url not allowed");
+      }
       const key = new URL(href, self.location.href).href;
       const res = await fetch(key, { cache: "reload" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

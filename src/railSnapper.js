@@ -45,6 +45,14 @@ const EXCLUDE_NAME =
 let pmtiles = null;
 /** @type {Map<string, Array<{ coords: LngLat[], name: string, detail: string, network: string }>>} */
 const tileCache = new Map();
+const TILE_CACHE_MAX = 64;
+
+function rememberTile(key, value) {
+  tileCache.set(key, value);
+  if (tileCache.size <= TILE_CACHE_MAX) return;
+  const oldest = tileCache.keys().next().value;
+  if (oldest && oldest !== key) tileCache.delete(oldest);
+}
 
 function pmtilesUrl() {
   const useProxy =
@@ -552,13 +560,13 @@ async function loadTileSegments(key) {
   try {
     const t = await getPmtiles().getZxy(zs, xs, ys);
     if (!t?.data) {
-      tileCache.set(key, []);
+      rememberTile(key, []);
       return [];
     }
     const vt = new VectorTile(new PbfReader(new Uint8Array(t.data)));
     const roads = vt.layers.roads;
     if (!roads) {
-      tileCache.set(key, []);
+      rememberTile(key, []);
       return [];
     }
     /** @type {Array<{ coords: LngLat[], name: string, detail: string, network: string }>} */
@@ -585,11 +593,11 @@ async function loadTileSegments(key) {
         if (coords.length >= 2) out.push({ coords, name, detail, network });
       }
     }
-    tileCache.set(key, out);
+    rememberTile(key, out);
     return out;
   } catch (e) {
     console.warn("[railSnapper] tile", key, e);
-    tileCache.set(key, []);
+    rememberTile(key, []);
     return [];
   }
 }

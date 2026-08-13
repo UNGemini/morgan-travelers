@@ -21,22 +21,24 @@ import {
   clearSessionCookieHeader,
   fetchGithubUser,
 } from "../../_shared/github.js";
+import { sameOriginCors } from "../../_shared/security.js";
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Allow-Credentials": "true",
-  "Cross-Origin-Resource-Policy": "cross-origin",
-};
+function authCors(request) {
+  return sameOriginCors(request, {
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Credentials": "true",
+    "Cross-Origin-Resource-Policy": "same-origin",
+  });
+}
 
-function json(status, body, extraHeaders = {}) {
+function json(request, status, body, extraHeaders = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
-      ...CORS,
+      ...authCors(request),
       ...extraHeaders,
     },
   });
@@ -76,6 +78,15 @@ function oauthEnvFlags(env) {
   };
 }
 
+/** Same-origin path only — never protocol-relative or off-site. */
+function safeReturnPath(raw) {
+  const s = String(raw || "/");
+  if (!s.startsWith("/") || s.startsWith("//") || s.includes("\\") || s.includes("://")) {
+    return "/";
+  }
+  return s;
+}
+
 function redirectUri(request, env) {
   if (env.GITHUB_OAUTH_REDIRECT_URI) return String(env.GITHUB_OAUTH_REDIRECT_URI);
   const url = new URL(request.url);
@@ -87,7 +98,15 @@ export async function onRequest(context) {
   const url = new URL(request.url);
 
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS });
+    return new Response(null, {
+      status: 204,
+      headers: sameOriginCors(request, {
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Credentials": "true",
+        "Cross-Origin-Resource-Policy": "same-origin",
+      }),
+    });
   }
 
   // path after /api/auth/
@@ -100,13 +119,13 @@ export async function onRequest(context) {
     const configured = oauthConfigured(env || {});
     const sess = parseSessionCookie(request.headers.get("Cookie"));
     if (!sess) {
-      return json(200, {
+      return json(request, 200, {
         logged_in: false,
         oauth_configured: configured,
         ...flags,
       });
     }
-    return json(200, {
+    return json(request, 200, {
       logged_in: true,
       login: sess.login,
       name: sess.name || sess.login,
@@ -119,6 +138,7 @@ export async function onRequest(context) {
   // ── logout ────────────────────────────────────────────────────────
   if (action === "logout" && (request.method === "POST" || request.method === "GET")) {
     return json(
+      request,
       200,
       { ok: true, logged_in: false },
       {
@@ -132,14 +152,14 @@ export async function onRequest(context) {
   // ── github (start OAuth) ──────────────────────────────────────────
   if ((action === "github" || action === "login") && request.method === "GET") {
     if (!oauthConfigured(env || {})) {
-      return json(503, {
+      return json(request, 503, {
         ok: false,
         error:
           "GitHub OAuth not configured. Set GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET.",
       });
     }
     const state = crypto.randomUUID().replace(/-/g, "");
-    const returnTo = url.searchParams.get("return_to") || "/";
+    const returnTo = safeReturnPath(url.searchParams.get("return_to") || "/");
     // store state in short-lived cookie
     const stateCookie = [
       `morgan_gh_state=${encodeURIComponent(
@@ -166,12 +186,12 @@ export async function onRequest(context) {
   // ── callback ──────────────────────────────────────────────────────
   if (action === "callback" && request.method === "GET") {
     if (!oauthConfigured(env || {})) {
-      return json(503, { ok: false, error: "OAuth not configured" });
+      return json(request, 503, { ok: false, error: "OAuth not configured" });
     }
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
     if (!code || !state) {
-      return json(400, { ok: false, error: "Missing code/state" });
+      return json(request, 400, { ok: false, error: "Missing code/state" });
     }
 
     // verify state cookie
@@ -185,14 +205,12 @@ export async function onRequest(context) {
           b64decode(decodeURIComponent(raw.slice("morgan_gh_state=".length))),
         );
         if (data.state !== state || (data.exp && Date.now() > data.exp)) {
-          return json(400, { ok: false, error: "Invalid OAuth state" });
+          return json(request, 400, { ok: false, error: "Invalid OAuth state" });
         }
-        if (data.returnTo && String(data.returnTo).startsWith("/")) {
-          returnTo = data.returnTo;
-        }
+        if (data.returnTo) returnTo = safeReturnPath(data.returnTo);
       }
     } catch {
-      return json(400, { ok: false, error: "Invalid OAuth state cookie" });
+      return json(request, 400, { ok: false, error: "Invalid OAuth state cookie" });
     }
 
     const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
@@ -210,7 +228,7 @@ export async function onRequest(context) {
     });
     const tokenJson = await tokenRes.json();
     if (!tokenJson.access_token) {
-      return json(400, {
+      return json(request, 400, {
         ok: false,
         error: tokenJson.error_description || tokenJson.error || "Token exchange failed",
       });
@@ -218,7 +236,7 @@ export async function onRequest(context) {
 
     const me = await fetchGithubUser(tokenJson.access_token);
     if (!me.ok) {
-      return json(400, { ok: false, error: "Could not load GitHub user" });
+      return json(request, 400, { ok: false, error: "Could not load GitHub user" });
     }
 
     const sessHeader = sessionCookieHeader(
@@ -250,5 +268,5 @@ export async function onRequest(context) {
     return new Response(null, { status: 302, headers });
   }
 
-  return json(404, { ok: false, error: "Unknown auth route", action });
+  return json(request, 404, { ok: false, error: "Unknown auth route", action });
 }

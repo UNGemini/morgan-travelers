@@ -4,6 +4,8 @@
   Cross-Origin-Resource-Policy: same-origin
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://avatars.githubusercontent.com https://protomaps.github.io; connect-src 'self' https://hk-gtfsdata.morgandev.cc https://protomaps.github.io https://fonts.googleapis.com https://fonts.gstatic.com https://resource.data.one.gov.hk https://static.data.gov.hk https://opendata.mtr.com.hk https://raw.githubusercontent.com; media-src 'none'
 
 /sw.js
   Cache-Control: no-cache, no-store, must-revalidate

@@ -1,10 +1,50 @@
 /**
  * Cloudflare Pages Function — OSRM proxy for bus route densification.
- * /osrm/* → https://router.project-osrm.org/*
+ * Allowlisted: /osrm/{route|nearest|match}/v1/driving/…
  */
+import {
+  foreignOriginResponse,
+  sameOriginCors,
+} from "../_shared/security.js";
+
+const OSRM_PATH =
+  /^\/(route|nearest|match)\/v1\/driving\/[0-9.\-;,]+$/;
+
 export async function onRequest(context) {
-  const url = new URL(context.request.url);
+  const req = context.request;
+  const blocked = foreignOriginResponse(req);
+  if (blocked) return blocked;
+
+  const cors = sameOriginCors(req, {
+    "Cross-Origin-Resource-Policy": "same-origin",
+  });
+
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        ...cors,
+        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers": "Accept",
+      },
+    });
+  }
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    return Response.json(
+      { ok: false, error: "method not allowed" },
+      { status: 405, headers: cors },
+    );
+  }
+
+  const url = new URL(req.url);
   const path = url.pathname.replace(/^\/osrm/, "") || "/";
+  if (!OSRM_PATH.test(path) || path.includes("..")) {
+    return Response.json(
+      { ok: false, error: "unknown osrm route" },
+      { status: 404, headers: cors },
+    );
+  }
+
   const target = new URL(`https://router.project-osrm.org${path}`);
   target.search = url.search;
 
@@ -25,8 +65,7 @@ export async function onRequest(context) {
         status: 504,
         headers: {
           "Cache-Control": "no-store",
-          "Access-Control-Allow-Origin": "*",
-          "Cross-Origin-Resource-Policy": "cross-origin",
+          ...cors,
         },
       },
     );
@@ -40,8 +79,7 @@ export async function onRequest(context) {
     headers: {
       "Content-Type": res.headers.get("Content-Type") || "application/json",
       "Cache-Control": "public, max-age=3600",
-      "Access-Control-Allow-Origin": "*",
-      "Cross-Origin-Resource-Policy": "cross-origin",
+      ...cors,
     },
   });
 }

@@ -83,7 +83,7 @@ import {
   localizeDirLabel,
   simplifyZh,
 } from "./lang.js";
-import { resolveRouteColor, detectMtrLineCode } from "./mtrColors.js";
+import { resolveRouteColor, detectMtrLineCode, normalizeHex } from "./mtrColors.js";
 import {
   initFares,
   estimatePlanFare,
@@ -6476,6 +6476,24 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+/** Hex-only colour for style attributes — never interpolate raw GTFS strings. */
+function safeCssColor(color, fallback = "") {
+  return normalizeHex(color) || fallback;
+}
+
+/** Class tokens only (no quotes / style breakout). */
+function safeCssClass(s) {
+  return String(s || "")
+    .split(/\s+/)
+    .filter((t) => /^[a-zA-Z][a-zA-Z0-9_-]*$/.test(t))
+    .join(" ");
+}
+
+/** Material Symbols ligature names. */
+function safeIconName(s, fallback = "directions_bus") {
+  return /^[a-z0-9_]+$/i.test(String(s || "")) ? String(s) : fallback;
+}
+
 /**
  * Route colour for UI + map: prefer official MTR brand colours,
  * then GTFS/WASM color (often generic #003DA5 for all MTR lines).
@@ -6549,7 +6567,9 @@ function mtrLineDisplayNames(code, labelFallback) {
  */
 function mtrLineBadgeHtml(code, color, label, extraClass = "") {
   const names = mtrLineDisplayNames(code, label);
-  return `<span class="mtr-route-badge${extraClass ? ` ${extraClass}` : ""}" style="--mtr-color:${escapeHtml(color)}">
+  const klass = safeCssClass(extraClass);
+  const hex = safeCssColor(color, "#003DA5");
+  return `<span class="mtr-route-badge${klass ? ` ${klass}` : ""}" style="--mtr-color:${hex}">
     <span class="mtr-route-badge-main">${escapeHtml(names.upper)}</span>
     <span class="mtr-route-badge-sub">${escapeHtml(names.lower)}</span>
   </span>`;
@@ -7074,7 +7094,7 @@ function mixTowardWhite(color, whiteRatio = 0.4) {
  * @param {{ kind: string, line: 'solid'|'dotted'|'none', color?: string, icon?: string, bodyHtml: string, last?: boolean, extraClass?: string }} row
  */
 function routeLineRowHtml(row) {
-  const color = row.color || "";
+  const color = safeCssColor(row.color);
   const styleColor = color ? ` style="--rt-color:${color}"` : "";
   const lineClass =
     row.line === "solid"
@@ -7088,7 +7108,7 @@ function routeLineRowHtml(row) {
   } else if (row.kind === "wait") {
     marker = `<span class="rt-marker rt-marker-wait material-symbols-outlined" aria-hidden="true">schedule</span>`;
   } else if (row.kind === "transit") {
-    marker = `<span class="rt-marker rt-marker-mode material-symbols-outlined" aria-hidden="true">${row.icon || "directions_bus"}</span>`;
+    marker = `<span class="rt-marker rt-marker-mode material-symbols-outlined" aria-hidden="true">${safeIconName(row.icon)}</span>`;
   } else if (row.kind === "via") {
     // Smaller hollow circle — intermediate “Ride N stops”
     marker = `<span class="rt-marker rt-marker-via" aria-hidden="true"></span>`;
@@ -7098,7 +7118,8 @@ function routeLineRowHtml(row) {
     // stop (board / alight)
     marker = `<span class="rt-marker rt-marker-dot" aria-hidden="true"></span>`;
   }
-  const extra = row.extraClass ? ` ${row.extraClass}` : "";
+  const extraClass = safeCssClass(row.extraClass);
+  const extra = extraClass ? ` ${extraClass}` : "";
   return `<div class="rt-step rt-step-${row.kind}${extra}${row.last ? " rt-step-last" : ""}"${styleColor}>
     <div class="rt-rail" aria-hidden="true">
       ${marker}
@@ -7318,7 +7339,7 @@ function planRouteLineHtml(legsArr, opts = {}) {
                 : "";
           const etaCard =
             liveEta && isFirst
-              ? `<div class="wheels-eta-card trip-detail-eta-card" data-eta-card-leg="${origIndex}" aria-live="polite" aria-label="Live status" style="--wheels-route-color:${escapeHtml(color)}">
+              ? `<div class="wheels-eta-card trip-detail-eta-card" data-eta-card-leg="${origIndex}" aria-live="polite" aria-label="Live status" style="--wheels-route-color:${safeCssColor(color, "#888888")}">
                   <div class="wheels-eta-dest">
                     <span class="material-symbols-outlined wheels-eta-dest-icon" aria-hidden="true">arrow_forward</span>
                     <span class="wheels-eta-dest-text">${dir ? escapeHtml(dir) : ""}</span>
@@ -12084,7 +12105,7 @@ function etaRouteCardInnerHtml(r, dir, eta = {}, opts = {}) {
   const routeIdHtml =
     r.kind === "mtr"
       ? mtrLineBadgeHtml(r.id, color, r.label, "eta-card-route-mtr eta-card-route-text")
-      : `<div class="eta-card-route ${etaCompanyColorClass(r)}" style="color:${escapeHtml(color)}">${escapeHtml(r.id)}</div>`;
+      : `<div class="eta-card-route ${safeCssClass(etaCompanyColorClass(r))}" style="color:${safeCssColor(color, "#888888")}">${escapeHtml(r.id)}</div>`;
   return `
     <div class="eta-card-main">
       ${routeIdHtml}
@@ -14631,7 +14652,7 @@ async function renderEtaRouteDetailBody(route, ctx) {
   els.etaRouteDetailBody.innerHTML = `
     <div class="wheels-route-detail">
       <div class="wheels-route-detail-fixed">
-        <div class="wheels-eta-card" id="eta-detail-card" style="--wheels-route-color:${escapeHtml(color)}">
+        <div class="wheels-eta-card" id="eta-detail-card" style="--wheels-route-color:${safeCssColor(color, "#888888")}">
           <div class="wheels-eta-dest">
             <span class="material-symbols-outlined wheels-eta-dest-icon" aria-hidden="true">arrow_forward</span>
             <span class="wheels-eta-dest-text">${escapeHtml(panelDest)}</span>
@@ -16984,6 +17005,7 @@ initSettingsDangerZone();
 // 1 s cadence: keep the engine state in sync + advance Kalman interpolation.
 setInterval(() => {
   if (document.visibilityState !== "visible") return;
+  if (sidebarPage !== "eta-route" && !busPosEngine?.running) return;
   void busPosSyncState();
   busPosEngine?.tick();
 }, 1_000);

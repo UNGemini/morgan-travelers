@@ -29,7 +29,24 @@ function nextCorrelationId() {
 
 /** @type {Map<string, { t: number, data: any }>} */
 const cache = new Map();
+/** @type {Map<string, Promise<any>>} */
+const inflight = new Map();
 const CACHE_MS = 25_000;
+const CACHE_MAX = 80;
+
+function rememberJson(url, data) {
+  cache.set(url, { t: Date.now(), data });
+  if (cache.size <= CACHE_MAX) return;
+  const now = Date.now();
+  for (const [k, v] of cache) {
+    if (now - v.t >= CACHE_MS) cache.delete(k);
+  }
+  while (cache.size > CACHE_MAX) {
+    const oldest = cache.keys().next().value;
+    if (!oldest || oldest === url) break;
+    cache.delete(oldest);
+  }
+}
 
 /** @type {Promise<Map<string, string>> | null} */
 let nlbRouteMapPromise = null;
@@ -45,22 +62,32 @@ export async function fetchJson(url, opts = {}) {
   const ttl = opts.ttlMs ?? CACHE_MS;
   const hit = cache.get(url);
   if (hit && Date.now() - hit.t < ttl) return hit.data;
-  const correlationId = nextCorrelationId();
-  const res = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-      [CORRELATION_HEADER]: correlationId,
-    },
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    const echo = res.headers.get(CORRELATION_HEADER) || correlationId;
-    console.warn("[eta] proxy failure", res.status, url, { correlationId: echo });
-    throw new Error(`ETA ${res.status} ${url} correlation=${echo}`);
+  const pending = inflight.get(url);
+  if (pending) return pending;
+  const work = (async () => {
+    const correlationId = nextCorrelationId();
+    const res = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        [CORRELATION_HEADER]: correlationId,
+      },
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const echo = res.headers.get(CORRELATION_HEADER) || correlationId;
+      console.warn("[eta] proxy failure", res.status, url, { correlationId: echo });
+      throw new Error(`ETA ${res.status} ${url} correlation=${echo}`);
+    }
+    const data = await res.json();
+    rememberJson(url, data);
+    return data;
+  })();
+  inflight.set(url, work);
+  try {
+    return await work;
+  } finally {
+    inflight.delete(url);
   }
-  const data = await res.json();
-  cache.set(url, { t: Date.now(), data });
-  return data;
 }
 
 /**

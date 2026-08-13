@@ -30,6 +30,14 @@ const ETA = "/eta";
 
 /** @type {Map<string, any>} */
 const cache = new Map();
+const FETCH_CACHE_MAX = 48;
+
+function rememberBounded(map, key, value, max) {
+  map.set(key, value);
+  if (map.size <= max) return;
+  const oldest = map.keys().next().value;
+  if (oldest && oldest !== key) map.delete(oldest);
+}
 
 /**
  * @param {string} url
@@ -41,7 +49,7 @@ async function fetchJson(url, ttlMs = 300_000) {
   const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`${res.status} ${url}`);
   const data = await res.json();
-  cache.set(url, { t: Date.now(), data });
+  rememberBounded(cache, url, { t: Date.now(), data }, FETCH_CACHE_MAX);
   return data;
 }
 
@@ -625,7 +633,7 @@ async function fetchText(url, ttlMs = 300_000) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${res.status} ${url}`);
   const text = await res.text();
-  textCache.set(url, { t: Date.now(), text });
+  rememberBounded(textCache, url, { t: Date.now(), text }, FETCH_CACHE_MAX);
   return text;
 }
 

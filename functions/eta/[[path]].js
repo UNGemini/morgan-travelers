@@ -12,6 +12,11 @@
  *   POST /eta/mtr/bus/getSchedule  { language, routeName }
  */
 
+import {
+  foreignOriginResponse,
+  sameOriginCors,
+} from "../_shared/security.js";
+
 const TARGETS = {
   kmb: "https://data.etabus.gov.hk/v1/transport/kmb",
   ctb: "https://rt.data.gov.hk/v2/transport/citybus",
@@ -21,12 +26,8 @@ const TARGETS = {
   "mtr-open": "https://opendata.mtr.com.hk",
 };
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept",
-  "Cross-Origin-Resource-Policy": "cross-origin",
-};
+const MAX_BODY = 16_384;
+const SAFE_SUB = /^\/[A-Za-z0-9._~/-]*$/;
 
 /** Header joining a client request to this proxy across the boundary. */
 const CORRELATION_HEADER = "x-correlation-id";
@@ -43,26 +44,44 @@ function correlationId(req) {
 }
 
 /** Structured JSON failure with the correlation id echoed in header + body. */
-function jsonError(body, status, correlation) {
+function jsonError(body, status, correlation, extraHeaders = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
       [CORRELATION_HEADER]: correlation,
-      ...CORS,
+      ...extraHeaders,
     },
   });
 }
 
 export async function onRequest(context) {
   const req = context.request;
+  const blocked = foreignOriginResponse(req);
+  if (blocked) return blocked;
+
   const url = new URL(req.url);
   const correlation = correlationId(req);
-  const corsHeaders = { ...CORS, [CORRELATION_HEADER]: correlation };
+  const corsHeaders = {
+    ...sameOriginCors(req, {
+      "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Accept, x-correlation-id",
+      "Cross-Origin-Resource-Policy": "same-origin",
+    }),
+    [CORRELATION_HEADER]: correlation,
+  };
 
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
+  }
+  if (!["GET", "HEAD", "POST"].includes(req.method)) {
+    return jsonError(
+      { ok: false, error: "method not allowed", correlationId: correlation },
+      405,
+      correlation,
+      corsHeaders,
+    );
   }
 
   // /eta/kmb/stop-eta/XXX  → path parts after /eta/
@@ -76,10 +95,34 @@ export async function onRequest(context) {
       { ok: false, error: "unknown eta operator", op, correlationId: correlation },
       404,
       correlation,
+      corsHeaders,
+    );
+  }
+  if (
+    sub &&
+    (sub.includes("..") ||
+      sub.includes("//") ||
+      sub.includes("\\") ||
+      sub.includes("@") ||
+      !SAFE_SUB.test(sub))
+  ) {
+    return jsonError(
+      { ok: false, error: "invalid eta path", correlationId: correlation },
+      400,
+      correlation,
+      corsHeaders,
     );
   }
 
   const target = new URL(`${base}${sub || ""}`);
+  if (target.origin !== new URL(base).origin) {
+    return jsonError(
+      { ok: false, error: "invalid eta target", correlationId: correlation },
+      400,
+      correlation,
+      corsHeaders,
+    );
+  }
   target.search = url.search;
 
   /** @type {RequestInit} */
@@ -91,11 +134,20 @@ export async function onRequest(context) {
     },
   };
 
-  // Forward POST/PUT body (MTR Bus getSchedule)
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    const ct = req.headers.get("Content-Type");
-    if (ct) init.headers["Content-Type"] = ct;
-    init.body = await req.arrayBuffer();
+  // Forward POST body only (MTR Bus getSchedule)
+  if (req.method === "POST") {
+    const buf = await req.arrayBuffer();
+    if (buf.byteLength > MAX_BODY) {
+      return jsonError(
+        { ok: false, error: "payload too large", correlationId: correlation },
+        413,
+        correlation,
+        corsHeaders,
+      );
+    }
+    const ct = req.headers.get("Content-Type") || "application/json";
+    init.headers["Content-Type"] = ct.split(";")[0].trim() || "application/json";
+    init.body = buf;
   }
 
   let res;
@@ -113,6 +165,7 @@ export async function onRequest(context) {
       },
       502,
       correlation,
+      corsHeaders,
     );
   }
 
