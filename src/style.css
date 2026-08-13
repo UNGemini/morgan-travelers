@@ -8166,22 +8166,27 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   }
 
   /* Same top inset as mobile: content starts under the overlay title
-     and can scroll up into the fade. Nearby / Pinned sit a bit closer;
-     trip detail gets a little extra air. Route detail stays at chrome height. */
+     and can scroll up into the fade. Nearby / Pinned / Settings / About
+     get extra air so the first card sits below the title; trip detail
+     a little more; route detail stays at chrome height. */
   .detail-sidebar-body {
     padding-top: var(--sheet-chrome-h-px, var(--sheet-chrome-h));
   }
   #eta-route-list-sidebar,
-  .pinned-route-body {
-    padding-top: calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) - 12px);
+  .pinned-route-body,
+  .panel-page-scroll {
+    padding-top: calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) + 16px);
   }
-  .panel-page-scroll,
   #sidebar-page-eta-route {
     padding-top: var(--sheet-chrome-h-px, var(--sheet-chrome-h));
   }
   #sidebar-page-trip:not([hidden]) {
     padding-top: calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) + 10px);
   }
+  .app-shell[data-ui-mode="eta"] .detail-sidebar-body,
+  .app-shell:has(#sidebar-page-pinned:not([hidden])) .detail-sidebar-body,
+  .app-shell:has(#sidebar-page-settings:not([hidden])) .detail-sidebar-body,
+  .app-shell:has(#sidebar-page-about:not([hidden])) .detail-sidebar-body,
   .app-shell:has(#sidebar-page-trip:not([hidden])) .detail-sidebar-body,
   .app-shell:has(#sidebar-page-eta-route:not([hidden])) .detail-sidebar-body {
     padding-top: 0;
@@ -8371,12 +8376,10 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   .app-shell[data-ui-mode="route"] .detail-sidebar-body {
     padding-top: var(--sheet-chrome-h-px, var(--sheet-chrome-h));
   }
-  #eta-route-list-sidebar {
-    padding-top: calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) - 4px);
-  }
+  #eta-route-list-sidebar,
   .pinned-route-body,
   .panel-page-scroll {
-    padding-top: var(--sheet-chrome-h-px, var(--sheet-chrome-h));
+    padding-top: calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) + 16px);
   }
   /* Detail pages that fill the whole body sit behind the chrome; the
      route-detail and trip-detail pages keep their heads below the seam. */
