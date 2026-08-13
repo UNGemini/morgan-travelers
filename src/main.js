@@ -160,6 +160,7 @@ import {
   scheduledSlotFromPlanLeg,
   scheduledSlotsFromPlanLeg,
   etaOperator,
+  stripOperatorStopId,
   hasLiveEtaSlots,
   mergeLiveWithTimetable,
   headwayTimetableSlots,
@@ -921,195 +922,248 @@ async function openPinnedRoutePage() {
 }
 
 /**
- * Build one pinned route card HTML + attach data later via dataset key.
- * @param {EtaRouteEntry} route
- * @param {object} ctx
+ * Stop-aware key for a pinned route card (same route @ different stops both pin).
+ * @param {EtaRouteEntry & PinnedEtaEntry} r
  */
-function pinnedRouteCardHtml(route, ctx) {
-  const {
-    dest,
-    coLabel,
-    color,
-    boardName,
-    dirDots,
-    etaSlotsHtml,
-    updatedLabel,
-    fetchedAt,
-    key,
-  } = ctx;
-  // MTR: coloured pill badge (localized line name over English full name);
-  // bus / LRT keep the plain company-coloured route number.
-  const routeIdHtml =
-    route.kind === "mtr"
-      ? mtrLineBadgeHtml(
-          route.id,
-          color,
-          route.label,
-          "eta-card-route-mtr pinned-route-badge",
-        )
-      : `<span class="eta-card-route ${etaCompanyColorClass(route)}" style="color:${escapeHtml(color)};font-size:1.35rem">${escapeHtml(route.id)}</span>`;
-  return `
-    <article class="plan-card pinned-route-card active" role="listitem" data-pinned-key="${escapeHtml(key)}" aria-label="Pinned route ${escapeHtml(route.id)}">
-      <div class="plan-head">
-        <span class="duration">
-          ${routeIdHtml}
-          <span class="pinned-co">${escapeHtml(coLabel)}</span>
-        </span>
-        <span class="material-symbols-outlined pinned-badge-icon" aria-hidden="true">push_pin</span>
-      </div>
-      ${dirDots}
-      <div class="wheels-eta-card pinned-eta-card" style="--wheels-route-color:${escapeHtml(color)}">
-        <div class="wheels-eta-dest">
-          <span class="material-symbols-outlined wheels-eta-dest-icon" aria-hidden="true">arrow_forward</span>
-          <span class="wheels-eta-dest-text">${escapeHtml(dest)}</span>
-          <span class="wheels-eta-updated" data-eta-updated data-fetched-at="${Number.isFinite(Number(fetchedAt)) ? Number(fetchedAt) : ""}">${escapeHtml(updatedLabel)}</span>
-        </div>
-        ${boardName ? `<p class="wheels-eta-board">${escapeHtml(boardName)}</p>` : ""}
-        <div class="wheels-eta-slots" role="list" aria-label="Live arrivals">${etaSlotsHtml}</div>
-      </div>
-      <div class="pinned-actions">
-        <button type="button" class="btn eta-route-details-btn" data-pinned-details data-acrylic>
-          <span class="btn-row">
-            <span class="material-symbols-outlined" aria-hidden="true">route</span>
-            Show route details
-          </span>
-        </button>
-        <button type="button" class="btn eta-route-pin-btn is-pinned" data-pinned-unpin data-acrylic>
-          <span class="btn-row">
-            <span class="material-symbols-outlined" aria-hidden="true">keep_off</span>
-            Unpin
-          </span>
-        </button>
-      </div>
-    </article>`;
+function pinnedRouteKey(r) {
+  return `${etaRouteKey(r)}|${r.stopId || r.stopName || ""}`;
+}
+
+/** Resolved pinned entries backing the current Pinned Routes page. */
+let pinnedRouteResolved = [];
+
+/**
+ * One pinned-route card — same compact chrome as Nearby/search cards, plus an
+ * Unpin pill. Live ETA reuses the list-card pipeline (etaLiveByKey +
+ * refreshCardLiveEta) so pins and nearby cards stay in sync.
+ * @param {EtaRouteEntry & PinnedEtaEntry} r
+ * @param {number} i
+ */
+function pinnedEtaCardHtml(r, i) {
+  const live = etaLiveByKey.get(etaRouteKey(r));
+  // The pin names its own board stop; shared live meta is only a fallback
+  const boardLabel = etaBoardLabelClean(
+    r.stopName || live?.stopLabel || r.nearbyHint || "",
+  );
+  const isRail = r.kind === "mtr" || r.kind === "lrt";
+  // Rail only: drop “→ same station as board”. Buses keep operator OD as-is.
+  let dirs = etaRouteDirections(r, { full: true });
+  if (isRail) {
+    dirs = etaFilterSameStationDirs(dirs, boardLabel, r);
+    if (!dirs.length) dirs = etaRouteDirections(r, { full: true });
+  }
+  const di = resolveCardDirIndex(r, dirs);
+  const dir = dirs[di] || dirs[0] || { dest: r.label };
+  const wantB = String(dir.bound || "").toUpperCase();
+  const liveB = String(live?.bound || "").toUpperCase();
+  const liveForDir =
+    live &&
+    (dirs.length < 2 ||
+      !wantB ||
+      wantB === "LINE" ||
+      wantB === "LRT" ||
+      liveB === wantB ||
+      (!liveB && dirs.length < 2));
+  let useDir = dir;
+  if (liveForDir && live?.dest) {
+    // Rail: ignore live dest if it is the board terminus; buses always trust live
+    if (
+      !isRail ||
+      !boardLabel ||
+      !etaStationsMatch(live.destZh || live.dest, boardLabel)
+    ) {
+      useDir = {
+        dest: live.dest,
+        destZh: live.destZh || live.dest,
+        bound: live.bound || dir.bound,
+        branch: dir.branch,
+      };
+    }
+  }
+  if (
+    isRail &&
+    boardLabel &&
+    etaStationsMatch(useDir.destZh || useDir.dest, boardLabel)
+  ) {
+    const alt = dirs.find(
+      (d) => !etaStationsMatch(d.destZh || d.dest, boardLabel),
+    );
+    if (alt) useDir = alt;
+  }
+  return `<li role="option" class="eta-route-card pinned-route-card" data-pinned-key="${escapeHtml(pinnedRouteKey(r))}" data-route-key="${escapeHtml(etaRouteKey(r))}" style="--i:${i}" aria-selected="false">
+    <div class="eta-route-card-body">
+      ${etaRouteCardInnerHtml(
+        r,
+        useDir,
+        {
+          minutes: liveForDir ? live?.minutes : null,
+          stopLabel: liveForDir
+            ? r.stopName || live?.stopLabel || r.nearbyHint
+            : r.nearbyHint,
+          scheduled: liveForDir ? live?.scheduled : false,
+          clock: liveForDir ? live?.clock : "",
+          stopId: liveForDir ? live?.stopId || r.stopId : "",
+          outsideService: liveForDir ? !!live?.outsideService : false,
+          platforms: liveForDir ? live?.platforms : undefined,
+        },
+        { destLabel: etaDirectionDisplayLabel(dirs, useDir) },
+      )}
+    </div>
+    <button type="button" class="btn eta-route-pin-btn is-pinned pinned-unpin-btn" data-pinned-unpin data-acrylic>
+      <span class="btn-row">
+        <span class="material-symbols-outlined" aria-hidden="true">keep_off</span>
+        ${escapeHtml(t("Unpin"))}
+      </span>
+    </button>
+  </li>`;
 }
 
 /**
- * Load ETA + stops for one pinned route/stop and return render context.
+ * Open route detail for a pinned card (pre-selects the pinned stop).
  * @param {EtaRouteEntry & PinnedEtaEntry} route
  */
-async function buildPinnedRouteCardContext(route) {
-  const co = String(route.co || "").toLowerCase();
-  if (co === "ctb") await ensureCtbRouteBound(route.id);
-  if (co === "nlb") await ensureNlbRouteBounds();
-  if (co === "gmb") await ensureGmbRouteDirections(route.id);
-  if (route.kind === "lrt") await ensureLrtRouteData();
-  if (route.kind === "mtr_bus" || co === "lrtfeeder" || co === "mtrbus") {
-    await ensureMtrBusData();
-  } else if (route.kind === "bus") {
-    await ensureKmbRouteBounds();
-  }
-
-  // Restore pinned direction when present
-  if (Number.isFinite(Number(route.dirIndex))) {
-    setCardDir(route, Number(route.dirIndex));
-  }
-  const dirs = etaRouteDirections(route, { full: true });
-  const di = Math.min(
-    Number.isFinite(Number(route.dirIndex))
-      ? Number(route.dirIndex)
-      : getCardDir(route),
-    Math.max(0, dirs.length - 1),
-  );
-  const dir = dirs[di] || dirs[0] || { dest: route.label };
-  if (route.bound) dir.bound = route.bound;
-  const dest = etaDirectionDisplayLabel(dirs, dir) || route.label;
-  const color = companyLineColor(route);
-  const coLabel =
-    route.kind === "mtr"
-      ? "MTR"
-      : route.kind === "lrt"
-        ? "LRT"
-        : route.kind === "mtr_bus"
-          ? "MTR Bus"
-          : String(route.co || "bus").toUpperCase();
-
-  let stops = [];
-  try {
-    stops = await loadEtaRouteStops(route);
-  } catch (e) {
-    console.warn("[pinned] stops", e);
-  }
-
-  // Prefer the specifically pinned stop (seq/index for circular multi-visits)
-  const named = stops.filter((s) => s.name && !s._polylineOnly);
-  const boardIdx = resolveCircularBoardIndex(named, route);
-  let boardStop =
-    named[boardIdx] ||
-    named.find((s) => s.stopId && !s._polylineOnly) ||
-    named[0] ||
-    stops[0] ||
-    null;
-  if (boardStop) {
-    boardStop = {
-      ...boardStop,
-      stopIndex: boardIdx,
-      seq: boardStop.seq,
-    };
-  }
-  const opt = etaRouteAsOption(route, stops, dir, boardStop);
-  let etaResult = null;
-  if (boardStop && Number.isFinite(boardStop.lon)) {
-    try {
-      etaResult = await fetchBoardEta(opt);
-    } catch (e) {
-      console.warn("[pinned] eta", e);
-    }
-  }
-  etaResult = resolveBrowseEta(etaResult, opt, {
-    dest,
-    route: route.id,
+function openPinnedRouteDetails(route) {
+  if (!route) return;
+  etaSelectedForDetails = route;
+  etaSelectedStops = [];
+  ++etaShapeGen;
+  clearRouteGeometry();
+  const live = etaLiveByKey.get(etaRouteKey(route)) || {};
+  etaLiveByKey.set(etaRouteKey(route), {
+    ...live,
+    stopId: route.stopId || live.stopId,
+    stopLabel: route.stopName || live.stopLabel,
   });
-
-  const slots = (etaResult.etas || []).slice(0, 3);
-  const hasLive = slots.some((s) => !s.scheduled);
-  let boardName =
-    boardStop?.name ||
-    route.stopName ||
-    etaLiveByKey.get(etaRouteKey(route))?.stopLabel ||
-    dir.orig ||
-    "";
-  // Board line: station name + platform for rail (MTR / LRT)
-  const plats = etaOperatorShowsPlatform(etaResult.operator)
-    ? etaResult?.servingPlatforms || []
-    : [];
-  if (boardName && plats.length) {
-    boardName = stationNameWithPlatforms(stationBaseName(boardName), plats);
-  }
-  const { html: etaSlotsHtml } = wheelsEtaSlotsHtml(etaResult, {
-    kind: route.kind,
-  });
-
-  const dirDots = etaHasRealOpposite(dirs)
-    ? `<div class="eta-card-dots pinned-dir-dots" role="tablist" aria-label="Direction">
-          ${dirs
-            .map(
-              (_, i) =>
-                `<button type="button" class="eta-dir-dot ${di === i ? "is-active" : ""}" data-pinned-dir="${i}" data-pinned-key="${escapeHtml(etaRouteKey(route))}" aria-label="Direction ${i + 1}"></button>`,
-            )
-            .join("")}
-        </div>`
-    : "";
-
-  // Unique key includes stop so same route @ different stops can both pin
-  const key = `${etaRouteKey(route)}|${route.stopId || route.stopName || ""}`;
-
-  return {
-    route,
-    stops,
-    dest,
-    coLabel,
-    color,
-    boardName,
-    dirDots,
-    etaSlotsHtml,
-    updatedLabel: hasLive
-      ? formatUpdatedAgo(etaResult.fetchedAt)
-      : "Timetable",
-    fetchedAt: etaResult?.fetchedAt || null,
-    key,
-  };
+  setDetailOpen(true);
+  syncEtaActive();
+  if (els.etaRouteActions) els.etaRouteActions.hidden = true;
+  syncPinnedRouteToolbar();
+  const oldPanel = document.getElementById("eta-route-details-panel");
+  if (oldPanel) oldPanel.remove();
+  void showEtaRouteDetailsPanel();
 }
+
+/**
+ * Bind one pinned card: tap → route detail; Unpin → remove + re-render.
+ * @param {HTMLElement} li
+ */
+function bindPinnedRouteCardEvents(li) {
+  const key = li.getAttribute("data-pinned-key");
+  const findEntry = () =>
+    pinnedRouteResolved.find((x) => pinnedRouteKey(x) === key);
+  li.addEventListener("click", (e) => {
+    if (e.target.closest("button")) return;
+    openPinnedRouteDetails(findEntry());
+  });
+  li.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    if (e.target.closest("button")) return;
+    e.preventDefault();
+    openPinnedRouteDetails(findEntry());
+  });
+  li.querySelector("[data-pinned-unpin]")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const entry = findEntry();
+    if (!entry) return;
+    togglePinnedEtaRoute(entry);
+    syncPinnedRouteToolbar();
+    showToast(t("Unpinned {id}", { id: entry.id }), 1600);
+    void renderPinnedRoutePage();
+  });
+}
+
+/** @type {IntersectionObserver | null} */
+let pinnedCardLiveObserver = null;
+
+function teardownPinnedCardLiveObserver() {
+  if (pinnedCardLiveObserver) {
+    pinnedCardLiveObserver.disconnect();
+    pinnedCardLiveObserver = null;
+  }
+}
+
+/**
+ * Live-refresh only pinned cards currently visible (same cadence/pattern as
+ * the nearby list, reusing etaCardLiveLastAt / etaCardLiveInflight).
+ */
+function setupPinnedCardLiveObserver() {
+  teardownPinnedCardLiveObserver();
+  const list = els.pinnedRouteBody?.querySelector(".pinned-route-list");
+  if (!list || typeof IntersectionObserver === "undefined") return;
+  pinnedCardLiveObserver = new IntersectionObserver(
+    (entries) => {
+      for (const ent of entries) {
+        if (!ent.isIntersecting) continue;
+        const li = /** @type {HTMLElement} */ (ent.target);
+        const r = pinnedRouteResolved.find(
+          (x) => pinnedRouteKey(x) === li.getAttribute("data-pinned-key"),
+        );
+        if (r) void maybeRefreshPinnedCardLive(r, li);
+      }
+    },
+    {
+      root: list,
+      rootMargin: "48px 0px",
+      threshold: 0.12,
+    },
+  );
+  list.querySelectorAll("li[data-pinned-key]").forEach((li) => {
+    pinnedCardLiveObserver?.observe(li);
+  });
+}
+
+/**
+ * @param {EtaRouteEntry & PinnedEtaEntry} r
+ * @param {HTMLElement} li
+ */
+async function maybeRefreshPinnedCardLive(r, li) {
+  if (!r || !li?.isConnected) return;
+  const key = etaRouteKey(r);
+  const now = Date.now();
+  const last = etaCardLiveLastAt.get(key) || 0;
+  if (now - last < ETA_CARD_LIVE_MIN_MS) return;
+  if (etaCardLiveInflight.has(key)) return;
+
+  etaCardLiveInflight.add(key);
+  etaCardLiveLastAt.set(key, now);
+  try {
+    const prev = etaLiveByKey.get(key);
+    const prevSnap = prev
+      ? `${prev.minutes}|${prev.dest || ""}|${prev.bound || ""}|${prev.scheduled ? 1 : 0}|${prev.stopLabel || ""}`
+      : "";
+    const ok = await refreshCardLiveEta(r, { silent: true });
+    if (!ok) return;
+    const next = etaLiveByKey.get(key);
+    const nextSnap = next
+      ? `${next.minutes}|${next.dest || ""}|${next.bound || ""}|${next.scheduled ? 1 : 0}|${next.stopLabel || ""}`
+      : "";
+    if (prevSnap === nextSnap) return;
+    patchPinnedRouteCard(li);
+  } finally {
+    etaCardLiveInflight.delete(key);
+  }
+}
+
+/**
+ * Update one pinned card in-place (no full list wipe / no scroll jump).
+ * @param {HTMLElement} li
+ */
+function patchPinnedRouteCard(li) {
+  if (!li?.isConnected) return;
+  const idx = pinnedRouteResolved.findIndex(
+    (x) => pinnedRouteKey(x) === li.getAttribute("data-pinned-key"),
+  );
+  if (idx < 0) return;
+  const tmp = document.createElement("ul");
+  tmp.innerHTML = pinnedEtaCardHtml(pinnedRouteResolved[idx], idx);
+  const next = tmp.firstElementChild;
+  if (!next) return;
+  li.replaceWith(next);
+  bindPinnedRouteCardEvents(next);
+  pinnedCardLiveObserver?.observe(next);
+}
+
+
 
 /**
  * Render all pinned routes as plan-style cards.
@@ -1201,88 +1255,87 @@ async function renderPinnedRoutePage() {
   });
 
   if (!list.length) {
+    teardownPinnedCardLiveObserver();
     clearRouteGeometry();
     return;
   }
 
+  // Resolve pins against the catalog; ensure direction tables so cards render
+  // real destinations (all cached after first load, so this is fast on re-entry)
   const resolved = list.map((p) => resolvePinnedRouteEntry(p)).filter(Boolean);
-  /** @type {Array<Awaited<ReturnType<typeof buildPinnedRouteCardContext>>>} */
-  const contexts = [];
-  for (const route of resolved) {
-    // Sequential so we don't stampede operator APIs
-    // eslint-disable-next-line no-await-in-loop
-    contexts.push(await buildPinnedRouteCardContext(route));
+  const needCtb = [];
+  const needGmb = [];
+  let needNlb = false;
+  let needLrt = false;
+  let needMtrBus = false;
+  let needKmb = false;
+  let needMtr = false;
+  for (const r of resolved) {
+    const co = String(r.co || "").toLowerCase();
+    if (co === "ctb") needCtb.push(r.id);
+    else if (co === "nlb") needNlb = true;
+    else if (co === "gmb") needGmb.push(r.id);
+    if (r.kind === "lrt") needLrt = true;
+    if (r.kind === "mtr_bus" || co === "lrtfeeder" || co === "mtrbus") {
+      needMtrBus = true;
+    }
+    if (r.kind === "mtr") needMtr = true;
+    if (r.kind === "bus") needKmb = true;
+  }
+  try {
+    // Shared datasets in parallel; per-route fetches (CTB/GMB) sequential
+    await Promise.all([
+      ...(needNlb ? [ensureNlbRouteBounds()] : []),
+      ...(needLrt ? [ensureLrtRouteData()] : []),
+      ...(needMtrBus ? [ensureMtrBusData()] : []),
+      ...(needMtr ? [ensureMtrStationLinesMap()] : []),
+      ...(needKmb ? [ensureKmbRouteBounds()] : []),
+    ]);
+    for (const id of needCtb) await ensureCtbRouteBound(id);
+    for (const id of needGmb) await ensureGmbRouteDirections(id);
+  } catch (e) {
+    console.warn("[pinned] dirs", e);
   }
 
   // No route shape on pinned / stop pages
   clearRouteGeometry();
-  if (contexts[0]) {
-    etaSelectedForDetails = contexts[0].route;
-    etaSelectedStops = contexts[0].stops || [];
-    etaSelectedStops.forEach((s) => localizeStopName(s));
+  pinnedRouteResolved = resolved;
+  resolved.forEach((r) => {
+    if (Number.isFinite(Number(r.dirIndex))) {
+      setCardDir(r, Number(r.dirIndex));
+    }
+    // Seed live meta so cards show the pinned stop + bound immediately
+    const key = etaRouteKey(r);
+    const prev = etaLiveByKey.get(key) || {};
+    const stopLabel = etaBoardLabelClean(r.stopName || "");
+    etaLiveByKey.set(key, {
+      ...prev,
+      stopId: r.stopId || prev.stopId,
+      stopLabel: stopLabel || prev.stopLabel,
+      bound: r.bound || prev.bound,
+    });
+    if (!r.nearbyHint && stopLabel) r.nearbyHint = stopLabel;
+  });
+  if (resolved[0]) {
+    etaSelectedForDetails = resolved[0];
+    etaSelectedStops = [];
   }
 
   const etaHtml =
-    contexts.map((ctx) => pinnedRouteCardHtml(ctx.route, ctx)).join("") +
-    `<p class="hint pinned-foot">${escapeHtml(t("{n} pinned route{s}", { n: contexts.length, s: contexts.length > 1 ? "s" : "" }))}</p>`;
+    `<ul class="eta-route-list-sidebar pinned-route-list" role="listbox" aria-label="${escapeHtml(t("Pinned routes"))}">` +
+    resolved.map((r, i) => pinnedEtaCardHtml(r, i)).join("") +
+    `</ul>` +
+    `<p class="hint pinned-foot">${escapeHtml(t("{n} pinned route{s}", { n: resolved.length, s: resolved.length > 1 ? "s" : "" }))}</p>`;
   const loadingEl = body.querySelector("#pinned-eta-loading");
   if (loadingEl) loadingEl.outerHTML = etaHtml;
   else body.innerHTML += etaHtml;
 
-  body.querySelectorAll("[data-pinned-details]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const card = btn.closest("[data-pinned-key]");
-      const key = card?.getAttribute("data-pinned-key");
-      const ctx = contexts.find((c) => c.key === key);
-      if (!ctx) return;
-      etaSelectedForDetails = ctx.route;
-      etaSelectedStops = ctx.stops || [];
-      etaSelectedStops.forEach((s) => localizeStopName(s));
-      void showEtaRouteDetailsPanel();
+  body
+    .querySelectorAll(".pinned-route-list li[data-pinned-key]")
+    .forEach((li) => {
+      bindPinnedRouteCardEvents(li);
     });
-  });
-  body.querySelectorAll("[data-pinned-unpin]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const card = btn.closest("[data-pinned-key]");
-      const key = card?.getAttribute("data-pinned-key");
-      const ctx = contexts.find((c) => c.key === key);
-      if (!ctx) return;
-      togglePinnedEtaRoute(ctx.route);
-      syncPinnedRouteToolbar();
-      showToast(t("Unpinned {id}", { id: ctx.route.id }), 1600);
-      void renderPinnedRoutePage();
-    });
-  });
-  body.querySelectorAll("[data-pinned-dir]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const key = btn.getAttribute("data-pinned-key");
-      const ctx = contexts.find((c) => c.key === key);
-      if (!ctx) return;
-      setCardDir(ctx.route, Number(btn.getAttribute("data-pinned-dir")) || 0);
-      void renderPinnedRoutePage();
-    });
-  });
-  // Tap card → open route detail for that pinned stop (no shape)
-  body.querySelectorAll(".pinned-route-card").forEach((card) => {
-    card.addEventListener("click", (e) => {
-      if (e.target.closest("button")) return;
-      const key = card.getAttribute("data-pinned-key");
-      const ctx = contexts.find((c) => c.key === key);
-      if (!ctx) return;
-      etaSelectedForDetails = ctx.route;
-      etaSelectedStops = ctx.stops || [];
-      // Restore pinned stop selection for detail
-      if (ctx.route.stopId || ctx.boardName) {
-        const live = etaLiveByKey.get(etaRouteKey(ctx.route)) || {};
-        etaLiveByKey.set(etaRouteKey(ctx.route), {
-          ...live,
-          stopId: ctx.route.stopId || live.stopId,
-          stopLabel: ctx.boardName || live.stopLabel,
-        });
-      }
-      void showEtaRouteDetailsPanel();
-    });
-  });
+  setupPinnedCardLiveObserver();
 }
 
 /**
@@ -1692,6 +1745,15 @@ async function refreshCardLiveEta(r, opts = {}) {
         lat: slot.stopLat,
       };
     }
+  }
+
+  // Pinned stops: the pin itself names the board stop — use it before geo.
+  // (Catalog entries never carry stopId/stopName, so only pins hit this.)
+  if (!board && (r.stopId || r.stopName)) {
+    board = {
+      stopId: r.stopId || "",
+      name: r.stopName || r.stopNameEn || "",
+    };
   }
 
   try {
@@ -6588,6 +6650,12 @@ function planRouteLineHtml(legsArr, opts = {}) {
                   <div class="wheels-eta-slots" data-eta-card-slots role="list" aria-label="Live arrivals">
                     <div class="wheels-eta-slot is-empty"><span class="wheels-eta-wait">…</span></div>
                   </div>
+                  <button type="button" class="trip-eta-route-details-btn" data-eta-route-details="${origIndex}" data-acrylic>
+                    <span class="btn-row">
+                      <span class="material-symbols-outlined" aria-hidden="true">route</span>
+                      ${escapeHtml(t("Show route details"))}
+                    </span>
+                  </button>
                 </div>`
               : "";
           const nameAttrs =
@@ -7049,6 +7117,9 @@ function setSidebarPage(page) {
   else if (page === "about") sidebarPage = "about";
   else sidebarPage = "search";
 
+  // Pinned cards' live observer only runs while that page is open
+  if (page !== "pinned") teardownPinnedCardLiveObserver();
+
   if (els.sidebarPageSearch) {
     els.sidebarPageSearch.hidden = sidebarPage !== "search";
   }
@@ -7291,14 +7362,14 @@ function applyTripDetailEtaDom(plan, etaMap) {
     let liveSlots = raw.filter((s) => !s?.scheduled);
     let schedSlots = raw.filter((s) => s?.scheduled);
 
-    // Ensure timetable pool has up to 3 (plan headway expand)
-    if (schedSlots.length < 3) {
-      const planSched = scheduledSlotsFromPlanLeg(opt, plan, legIdx, 3);
+    // Ensure timetable pool has up to 2 (plan headway expand)
+    if (schedSlots.length < 2) {
+      const planSched = scheduledSlotsFromPlanLeg(opt, plan, legIdx, 2);
       if (planSched.length) {
-        schedSlots = mergeLiveWithTimetable(schedSlots, planSched, 3);
+        schedSlots = mergeLiveWithTimetable(schedSlots, planSched, 2);
       }
     }
-    if (!schedSlots.length && liveSlots.length && liveSlots.length < 3) {
+    if (!schedSlots.length && liveSlots.length && liveSlots.length < 2) {
       const hw = defaultHeadwayMins(opt, operator);
       const last = liveSlots[liveSlots.length - 1];
       schedSlots = expandTimetableSlots(
@@ -7307,11 +7378,11 @@ function applyTripDetailEtaDom(plan, etaMap) {
           dest: last.dest || "",
           scheduled: true,
         },
-        { count: 3, headwayMins: hw, dest: last.dest || "" },
+        { count: 2, headwayMins: hw, dest: last.dest || "" },
       );
     }
 
-    const slots = mergeLiveWithTimetable(liveSlots, schedSlots, 3);
+    const slots = mergeLiveWithTimetable(liveSlots, schedSlots, 2);
     const { html } = wheelsEtaSlotsHtml(
       {
         ...(eta || {}),
@@ -7469,8 +7540,182 @@ function openTripDetailPage(idxOrPlan, planOverride) {
       hideDestWalk: true,
     });
   }
+  // “Show route details” per leg → Route Detail pre-selected at the leg's
+  // board stop (bound here, after the timeline HTML is (re)built)
+  els.tripDetailTimeline
+    ?.querySelectorAll("[data-eta-route-details]")
+    .forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const legIdx = Number(btn.getAttribute("data-eta-route-details"));
+        void openRouteDetailsFromTripLeg(legIdx);
+      });
+    });
   setSidebarPage("trip");
   startTripEtaPolling();
+}
+
+/**
+ * Bound for a plan leg's first route option (KMB trip_id like
+ * KMB-E31-I-1-287 → "I"); empty when the planner didn't encode one.
+ * @param {object} opt
+ * @returns {string}
+ */
+function planLegBoundDir(opt) {
+  const m = /-(I|O)-\d+(?:-|$)/i.exec(String(opt?.trip_id || ""));
+  return m ? m[1].toUpperCase() : "";
+}
+
+/**
+ * Plan leg → ETA route entry for the trip-detail “Show route details” button.
+ * Synchronous on purpose: direction tables (KMB/CTB bounds…) load async in
+ * the open handler; the board stop is carried as pinned-stop fields so the
+ * detail page pre-selects it (stopId/stopName, never stopIndex — plan stop
+ * indexes don't match operator stop lists).
+ * @param {object} plan
+ * @param {number} legIdx
+ * @returns {EtaRouteEntry | null} null when the leg has no route-details page
+ */
+function etaRouteEntryFromPlanLeg(plan, legIdx) {
+  const opt = plan?.legs?.[legIdx]?.route_options?.[0];
+  if (!opt) return null;
+  const op = etaOperator(opt);
+  let kind = "bus";
+  let co = "";
+  if (op === "mtr") {
+    kind = "mtr";
+  } else if (op === "lrt") {
+    kind = "lrt";
+  } else if (op === "mtr_bus") {
+    kind = "mtr_bus";
+    co = "lrtfeeder";
+  } else if (op === "kmb" || op === "ctb" || op === "nlb" || op === "gmb") {
+    kind = "bus";
+    co = op;
+  } else {
+    return null; // ferry / unknown — no route detail page
+  }
+  // MTR legs: line code (TCL/TWL/…) so catalog + stop sequence resolve
+  let id = "";
+  if (kind === "mtr") {
+    id = detectMtrLineCode(opt) || "";
+  }
+  if (!id) {
+    id = String(
+      opt.route_short_name || opt.route_name || opt.route_id || "",
+    )
+      .trim()
+      .toUpperCase();
+  }
+  if (!id) return null;
+  // Board stop id formats per operator so resolveCircularBoardIndex matches
+  const boardStop = opt.stops?.[0] || opt.from || null;
+  let stopId = String(boardStop?.stop_id || boardStop?.id || "");
+  if (stopId) {
+    if (kind === "mtr") {
+      // MTR-PLATFORM-TUC-1 / MTR-TUC → MTR-TUC (named stops use MTR-<CODE>)
+      const m = /MTR-(?:PLATFORM-)?([A-Z]{3})(?:-|$)/i.exec(stopId);
+      if (m) stopId = `MTR-${m[1]}`;
+    } else if (co !== "ctb") {
+      // KMB/NLB/GMB/LRT plan ids are operator-prefixed; CTB ids are raw sids
+      stopId = stripOperatorStopId(stopId);
+    }
+  }
+  return {
+    id,
+    label:
+      String(opt.route_long_name || opt.route_name || id || "").trim() || id,
+    kind,
+    co,
+    stopId,
+    stopName: String(boardStop?.stop_name || boardStop?.name || "").trim(),
+    bound: planLegBoundDir(opt),
+  };
+}
+
+/**
+ * “Show route details” from a trip-detail ETA panel → Route Detail page with
+ * the leg's board stop pre-selected (same restore path as pinned stops).
+ * @param {number} legIdx
+ */
+async function openRouteDetailsFromTripLeg(legIdx) {
+  const plan = tripDetailPlan();
+  const route = etaRouteEntryFromPlanLeg(plan, legIdx);
+  if (!route) {
+    showToast(t("No route details for this leg"), 1800);
+    return;
+  }
+  const op = etaOperator(plan?.legs?.[legIdx]?.route_options?.[0]);
+  // Adopt catalog co so LWB routes resolve under their own operator
+  if (!etaRouteCatalog.length) buildEtaRouteCatalog();
+  const coCandidates = [route.co, ...(op === "kmb" ? ["lwb"] : [])].filter(
+    Boolean,
+  );
+  const cat =
+    etaRouteCatalog.find(
+      (r) =>
+        r.id === route.id &&
+        r.kind === route.kind &&
+        coCandidates.includes(String(r.co || "").toLowerCase()),
+    ) || null;
+  if (cat) route.co = cat.co || route.co;
+
+  try {
+    const co = String(route.co || "").toLowerCase();
+    if (co === "ctb") await ensureCtbRouteBound(route.id);
+    if (co === "nlb") await ensureNlbRouteBounds();
+    if (co === "gmb") await ensureGmbRouteDirections(route.id);
+    if (route.kind === "bus") await ensureKmbRouteBounds();
+    if (route.kind === "mtr_bus" || co === "lrtfeeder" || co === "mtrbus") {
+      await ensureMtrBusData();
+    }
+    if (route.kind === "lrt") await ensureLrtRouteData();
+    if (route.kind === "mtr") await ensureMtrStationLinesMap();
+  } catch (e) {
+    console.warn("[eta] trip leg dirs", e);
+  }
+
+  const dirs = etaRouteDirections(route, { full: true });
+  if (!dirs.length) {
+    showToast(t("No route details for this leg"), 1800);
+    return;
+  }
+  // Prefer the planner's bound (trip_id), else the stored card dir, else first
+  let di = getCardDir(route);
+  if (route.bound) {
+    const byBound = dirs.findIndex(
+      (d) =>
+        String(d.bound || "").toUpperCase() ===
+        String(route.bound).toUpperCase(),
+    );
+    if (byBound >= 0) di = byBound;
+  }
+  di = Math.min(Math.max(0, di), Math.max(0, dirs.length - 1));
+  setCardDir(route, di);
+  const dir = dirs[di] || dirs[0];
+
+  // Seed live meta with the trip's board stop — showEtaRouteDetailsPanel
+  // pre-selects it via resolveCircularBoardIndex (stopId → stopName chain)
+  const key = etaRouteKey(route);
+  const prev = etaLiveByKey.get(key) || {};
+  etaLiveByKey.set(key, {
+    ...prev,
+    stopId: route.stopId || prev.stopId,
+    stopLabel: route.stopName || prev.stopLabel,
+    bound: route.bound || dir.bound || prev.bound,
+  });
+  etaDetailStopIndex = 0;
+
+  etaSelectedForDetails = route;
+  etaSelectedStops = [];
+  ++etaShapeGen;
+  clearRouteGeometry();
+  setDetailOpen(true);
+  syncEtaActive();
+  if (els.etaRouteActions) els.etaRouteActions.hidden = true;
+  syncPinnedRouteToolbar();
+  const oldPanel = document.getElementById("eta-route-details-panel");
+  if (oldPanel) oldPanel.remove();
+  void showEtaRouteDetailsPanel();
 }
 
 function closeTripDetailPage() {
