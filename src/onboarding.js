@@ -51,6 +51,17 @@ export function markOnboarded() {
 }
 
 const STEP_COUNT = 5;
+/** "forward" | "back" — drives enter animation direction */
+let stepDir = "forward";
+
+const STEP_ICONS = [
+  "translate",
+  "verified_user",
+  "payments",
+  "cloud_download",
+  "experiment",
+  "celebration",
+];
 
 const STEP_TITLES = [
   "Welcome!",
@@ -127,8 +138,14 @@ export function startOnboarding(opts = {}) {
   overlay.className = `onboarding-overlay${opts.firstRun ? " onboarding-overlay--first" : ""}`;
   overlay.innerHTML = `
     <div class="onboarding-scrim"></div>
+    <div class="onboarding-orbs" aria-hidden="true">
+      <span class="onboarding-orb onboarding-orb--1"></span>
+      <span class="onboarding-orb onboarding-orb--2"></span>
+      <span class="onboarding-orb onboarding-orb--3"></span>
+    </div>
     <div class="onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="onb-title">
       <div class="onboarding-head">
+        <p class="onboarding-kicker" id="onb-kicker"></p>
         <h2 id="onb-title" class="onboarding-title"></h2>
       </div>
       <div id="onb-body" class="onboarding-body"></div>
@@ -181,14 +198,31 @@ function render() {
   if (!overlay) return;
   const isSuccess = stepIndex >= STEP_COUNT;
   const titleEl = document.getElementById("onb-title");
+  const kickerEl = document.getElementById("onb-kicker");
   const bodyEl = document.getElementById("onb-body");
   const backBtn = document.getElementById("onb-back");
   const skipBtn = document.getElementById("onb-skip");
   const nextBtn = document.getElementById("onb-next");
   const foot = overlay.querySelector(".onboarding-foot");
-  if (titleEl) titleEl.textContent = t(STEP_TITLES[Math.min(stepIndex, STEP_TITLES.length - 1)]);
+  const idx = Math.min(stepIndex, STEP_TITLES.length - 1);
+  if (titleEl) {
+    titleEl.textContent = t(STEP_TITLES[idx]);
+    // Retrigger title fade
+    titleEl.style.animation = "none";
+    void titleEl.offsetWidth;
+    titleEl.style.animation = "";
+  }
+  if (kickerEl) {
+    kickerEl.textContent = isSuccess
+      ? t("You're ready")
+      : t("Step {n} of {m}", { n: stepIndex + 1, m: STEP_COUNT });
+  }
   renderDots(isSuccess);
-  if (bodyEl) bodyEl.innerHTML = stepBodyHtml(stepIndex);
+  if (bodyEl) {
+    bodyEl.innerHTML = stepBodyHtml(stepIndex);
+    const step = bodyEl.querySelector(".onb-step");
+    if (step && stepDir === "back") step.classList.add("onb-step--back");
+  }
   if (backBtn) {
     backBtn.textContent = t("Back");
     backBtn.hidden = isSuccess || stepIndex === 0;
@@ -240,6 +274,10 @@ function fareTypeOptionsHtml(current) {
   }).join("");
 }
 
+function stepHero(icon) {
+  return `<div class="onb-hero-icon" aria-hidden="true"><span class="material-symbols-outlined">${icon}</span></div>`;
+}
+
 function stepBodyHtml(idx) {
   if (idx >= STEP_COUNT) {
     return `
@@ -252,7 +290,9 @@ function stepBodyHtml(idx) {
   if (idx === 0) {
     return `
       <div class="onb-step onb-welcome">
+        ${stepHero(STEP_ICONS[0])}
         <p class="onb-desc">${esc(t("Choose your preferred language"))}</p>
+        <div class="onb-glass">
         <div class="onb-field">
           <label class="onb-field-label" for="onb-lang-select">${esc(t("Language"))}</label>
           <select id="onb-lang-select" class="onb-select" aria-label="${esc(t("Language"))}">
@@ -264,11 +304,13 @@ function stepBodyHtml(idx) {
               .join("")}
           </select>
         </div>
+        </div>
       </div>`;
   }
   if (idx === 1) {
     return `
       <div class="onb-step onb-terms">
+        ${stepHero(STEP_ICONS[1])}
         <p class="onb-desc">${esc(t("Please review and accept all terms and policies to continue."))}</p>
         <div class="onb-terms-list">
           <a class="onb-term-row onb-term-row--primary" href="${TERMS_URL}" target="_blank" rel="noopener noreferrer">
@@ -295,12 +337,15 @@ function stepBodyHtml(idx) {
     const current = loadFareType();
     return `
       <div class="onb-step onb-ticket">
+        ${stepHero(STEP_ICONS[2])}
         <p class="onb-desc">${esc(t("Choose your default fare ticket type for trip plans."))}</p>
+        <div class="onb-glass">
         <div class="onb-field">
           <label class="onb-field-label" for="onb-ticket-select">${esc(t("Ticket type"))}</label>
           <select id="onb-ticket-select" class="onb-select" aria-label="${esc(t("Ticket type"))}">
             ${fareTypeOptionsHtml(current)}
           </select>
+        </div>
         </div>
       </div>`;
   }
@@ -309,6 +354,7 @@ function stepBodyHtml(idx) {
     const source = loadDataSourcePref();
     return `
       <div class="onb-step onb-cache">
+        ${stepHero(STEP_ICONS[3])}
         <p class="onb-desc">${esc(t("Cache transit data on this device for offline use and mobile data savings."))}</p>
         <div class="onb-toggle-row">
           <span class="onb-toggle-label">${esc(t("Cache all data"))}</span>
@@ -339,6 +385,7 @@ function stepBodyHtml(idx) {
   // idx === 4 — beta features
   return `
     <div class="onb-step onb-beta">
+      ${stepHero(STEP_ICONS[4])}
       <p class="onb-desc">${esc(t("Optional experimental features. You can change these anytime in Settings."))}</p>
       ${BETA_SECTIONS.map(betaSectionHtml).join("")}
     </div>`;
@@ -479,12 +526,14 @@ function wireStep(idx) {
 
 function goBack() {
   if (stepIndex <= 0) return;
+  stepDir = "back";
   stepIndex -= 1;
   render();
 }
 
 /** Persist the selections of the current step, then advance. */
 function goNext() {
+  stepDir = "forward";
   if (stepIndex === 1) {
     try {
       localStorage.setItem(TERMS_AGREED_STORAGE_KEY, "1");
