@@ -99,6 +99,8 @@ const BETA_SECTIONS = [
 let overlay = null;
 let stepIndex = 0;
 let onCompleteCb = () => {};
+/** Injected by main.js — reuses the Settings offline-download pipeline. */
+let downloadOfflineCb = null;
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
@@ -112,7 +114,11 @@ function esc(s) {
 
 /**
  * Launch the onboarding flow. Resolves once the user finishes or skips it.
- * @param {{ firstRun?: boolean, onComplete?: () => void }} [opts]
+ * @param {{
+ *   firstRun?: boolean,
+ *   onComplete?: () => void,
+ *   downloadOffline?: () => Promise<boolean>,
+ * }} [opts]
  * @returns {Promise<void>}
  */
 export function startOnboarding(opts = {}) {
@@ -141,6 +147,7 @@ export function startOnboarding(opts = {}) {
   document.getElementById("onb-next")?.addEventListener("click", goNext);
   stepIndex = 0;
   onCompleteCb = opts.onComplete || (() => {});
+  downloadOfflineCb = opts.downloadOffline || null;
   render();
   return new Promise((resolve) => {
     const prev = onCompleteCb;
@@ -319,6 +326,13 @@ function stepBodyHtml(idx) {
             </select>
           </div>
           <p class="onb-sub-note">${esc(t("Cloud: live data first, downloaded copy as the offline fallback. Local: serve the downloaded copy directly to save mobile data."))}</p>
+          <div class="onb-download-block" id="onb-download-block">
+            <button type="button" id="onb-download" class="btn btn-accent onb-download-btn">
+              <span class="material-symbols-outlined" aria-hidden="true">download</span>
+              <span id="onb-download-label">${esc(t("Download offline data"))}</span>
+            </button>
+            <p class="onb-sub-note">${esc(t("Fetch the full dataset for offline use. This will be the main data source if preferred in the “Prefer data source” setting above."))}</p>
+          </div>
         </div>
       </div>`;
   }
@@ -421,6 +435,32 @@ function wireStep(idx) {
     if (tgl && subs) {
       tgl.addEventListener("change", () => {
         subs.hidden = !tgl.checked;
+      });
+    }
+    // “Download Offline Data” — same pipeline as Settings, injected by main.js.
+    const dlBlock = bodyEl.querySelector("#onb-download-block");
+    if (dlBlock && !downloadOfflineCb) dlBlock.hidden = true;
+    const dl = bodyEl.querySelector("#onb-download");
+    if (dl && downloadOfflineCb) {
+      dl.addEventListener("click", async () => {
+        if (dl.disabled) return;
+        dl.disabled = true;
+        const label = dl.querySelector("#onb-download-label");
+        const icon = dl.querySelector(".material-symbols-outlined");
+        const note = dlBlock?.querySelector(".onb-sub-note");
+        try {
+          const ok = await downloadOfflineCb();
+          if (ok) {
+            if (label) label.textContent = t("Offline data ready");
+            if (icon) icon.textContent = "check_circle";
+          } else if (note) {
+            note.textContent = t("Reload once so the service worker is active");
+          }
+        } catch (e) {
+          console.warn("[onboarding] offline download failed", e);
+        } finally {
+          dl.disabled = false;
+        }
       });
     }
   } else if (idx === 4) {

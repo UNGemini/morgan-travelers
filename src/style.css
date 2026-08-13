@@ -6535,6 +6535,29 @@ html.pwa .offline-banner.gl-error-banner {
   line-height: 1.5;
   color: var(--text-secondary, rgba(245, 245, 247, 0.78));
 }
+/* Full-width “Download Offline Data” action inside the cache sub-options. */
+.onb-download-block {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.onb-download-block .onb-sub-note {
+  text-align: center;
+}
+.onb-download-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.onb-download-btn .material-symbols-outlined {
+  font-size: 1.15rem;
+}
+.onb-download-btn:disabled {
+  opacity: 0.65;
+}
 @keyframes onb-sub-in {
   from {
     opacity: 0;

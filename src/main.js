@@ -227,10 +227,45 @@ const bootSplashDonePromise = new Promise((resolve) => {
 // boot splash (z-index 9990 < 9999), so the opening animation plays on top of
 // it and the flow is already in view the moment the splash leaves. The app
 // keeps initializing underneath; the geolocation prompt below waits for both
-// the splash and this gate.
+// the splash and this gate. Finishing bounces the page once (fresh prefs and
+// any downloaded dataset only take effect on a new session), and the wizard's
+// “Download Offline Data” button reuses the Settings download pipeline.
 const onboardingGate = isOnboarded()
   ? Promise.resolve()
-  : startOnboarding({ firstRun: true });
+  : startOnboarding({
+      firstRun: true,
+      onComplete: () => {
+        try {
+          window.location.reload();
+        } catch {
+          /* ignore */
+        }
+      },
+      downloadOffline: async () => {
+        let sw = navigator.serviceWorker?.controller;
+        if (!sw) {
+          // First visit: the SW registers at window load and claims the page
+          // on activation — wait briefly, then fall back to the active worker.
+          try {
+            const reg = await Promise.race([
+              navigator.serviceWorker.ready,
+              new Promise((_, reject) =>
+                window.setTimeout(() => reject(new Error("sw timeout")), 5000),
+              ),
+            ]);
+            sw = reg.active || null;
+          } catch {
+            sw = null;
+          }
+        }
+        if (!sw) return false; // wizard shows the inline “reload once” hint
+        // Downloading implies caching stays on — mirror the Settings button.
+        saveDataCachePref(true);
+        notifyDataCachePref();
+        await startOfflineDownload(sw);
+        return true;
+      },
+    });
 
 // Hand-maintained static overrides (public/overrides/*) — never from collect pipeline
 loadStaticOverrides()
