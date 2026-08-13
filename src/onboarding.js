@@ -1,8 +1,8 @@
 /**
  * First-run onboarding: 5 steps + success screen, localStorage-backed
- * completion state, fully localized via t(). The app keeps initializing
- * underneath (opaque cover on first run, blurred modal sheet on re-run from
- * Settings), so the map/router are ready the moment the flow ends.
+ * completion state, fully localized via t(). Full-screen iOS-style setup
+ * wizard; on first run the app keeps initializing underneath the opaque
+ * cover, so the map/router are ready the moment the flow ends.
  */
 import { getLang, LANG_META, setLang, t } from "./lang.js";
 import {
@@ -44,11 +44,11 @@ export function markOnboarded() {
 const STEP_COUNT = 5;
 
 const STEP_TITLES = [
-  "Welcome to MORGAN Travelers",
-  "Terms & Privacy",
-  "Ticket type",
-  "Offline data",
-  "Beta features",
+  "Welcome!",
+  "Terms",
+  "Tickets",
+  "Offline Data",
+  "Beta Features",
   "All done!",
 ];
 
@@ -127,12 +127,11 @@ export function startOnboarding(opts = {}) {
     <div class="onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="onb-title">
       <div class="onboarding-head">
         <h2 id="onb-title" class="onboarding-title"></h2>
-        <span id="onb-progress" class="onboarding-progress"></span>
       </div>
       <div id="onb-body" class="onboarding-body"></div>
       <div class="onboarding-foot">
         <button type="button" id="onb-back" class="btn btn-ghost"></button>
-        <span class="onboarding-foot-spacer"></span>
+        <div class="onb-dots" id="onb-dots" role="group"></div>
         <button type="button" id="onb-skip" class="btn btn-ghost"></button>
         <button type="button" id="onb-next" class="btn btn-accent"></button>
       </div>
@@ -178,27 +177,22 @@ function render() {
   if (!overlay) return;
   const isSuccess = stepIndex >= STEP_COUNT;
   const titleEl = document.getElementById("onb-title");
-  const progressEl = document.getElementById("onb-progress");
   const bodyEl = document.getElementById("onb-body");
   const backBtn = document.getElementById("onb-back");
   const skipBtn = document.getElementById("onb-skip");
   const nextBtn = document.getElementById("onb-next");
   const foot = overlay.querySelector(".onboarding-foot");
   if (titleEl) titleEl.textContent = t(STEP_TITLES[Math.min(stepIndex, STEP_TITLES.length - 1)]);
-  if (progressEl) {
-    progressEl.textContent = isSuccess
-      ? ""
-      : t("Step {n} of {m}", { n: stepIndex + 1, m: STEP_COUNT });
-    progressEl.hidden = isSuccess;
-  }
+  renderDots(isSuccess);
   if (bodyEl) bodyEl.innerHTML = stepBodyHtml(stepIndex);
   if (backBtn) {
     backBtn.textContent = t("Back");
     backBtn.hidden = isSuccess || stepIndex === 0;
   }
+  // Steps 1–4 are mandatory (no Skip); only Beta Features is skippable.
   if (skipBtn) {
     skipBtn.textContent = t("Skip");
-    skipBtn.hidden = isSuccess;
+    skipBtn.hidden = isSuccess || stepIndex !== STEP_COUNT - 1;
   }
   if (nextBtn) {
     nextBtn.textContent = t("Next");
@@ -209,6 +203,26 @@ function render() {
   wireStep(stepIndex);
   const first = bodyEl?.querySelector("input, select, button, a[href], summary");
   first?.focus();
+}
+
+/** Bottom-of-screen progress: 5 dots, active pill highlighted. */
+function renderDots(isSuccess) {
+  const dotsEl = document.getElementById("onb-dots");
+  if (!dotsEl) return;
+  dotsEl.innerHTML = "";
+  if (isSuccess) return;
+  for (let i = 0; i < STEP_COUNT; i++) {
+    const dot = document.createElement("span");
+    dot.className =
+      "onb-dot" +
+      (i < stepIndex ? " onb-dot--done" : i === stepIndex ? " onb-dot--active" : "");
+    dot.setAttribute("aria-hidden", "true");
+    dotsEl.appendChild(dot);
+  }
+  dotsEl.setAttribute(
+    "aria-label",
+    t("Step {n} of {m}", { n: stepIndex + 1, m: STEP_COUNT }),
+  );
 }
 
 function stepBodyHtml(idx) {
@@ -224,16 +238,16 @@ function stepBodyHtml(idx) {
     return `
       <div class="onb-step onb-welcome">
         <p class="onb-desc">${esc(t("Choose your preferred language"))}</p>
-        <div class="onb-lang-grid" role="radiogroup" aria-label="${esc(t("Language"))}">
-          ${Object.entries(LANG_META)
-            .map(
-              ([code, meta]) => `
-            <label class="onb-opt">
-              <input type="radio" name="onb-lang" value="${code}" ${code === getLang() ? "checked" : ""} />
-              <span class="onb-opt-card">${esc(meta.label)}</span>
-            </label>`,
-            )
-            .join("")}
+        <div class="onb-field">
+          <label class="onb-field-label" for="onb-lang-select">${esc(t("Language"))}</label>
+          <select id="onb-lang-select" class="onb-select" aria-label="${esc(t("Language"))}">
+            ${Object.entries(LANG_META)
+              .map(
+                ([code, meta]) =>
+                  `<option value="${code}" ${code === getLang() ? "selected" : ""}>${esc(meta.label)}</option>`,
+              )
+              .join("")}
+          </select>
         </div>
       </div>`;
   }
@@ -282,14 +296,11 @@ function stepBodyHtml(idx) {
     return `
       <div class="onb-step onb-cache">
         <p class="onb-desc">${esc(t("Cache transit data on this device for offline use and mobile data savings."))}</p>
-        <div class="onb-opt-list">
-          <label class="onb-opt">
-            <input type="radio" name="onb-cache" value="yes" ${cacheOn ? "checked" : ""} />
-            <span class="onb-opt-card">${esc(t("Yes, cache all data"))}</span>
-          </label>
-          <label class="onb-opt">
-            <input type="radio" name="onb-cache" value="no" ${!cacheOn ? "checked" : ""} />
-            <span class="onb-opt-card">${esc(t("No, use cloud only"))}</span>
+        <div class="onb-toggle-row">
+          <span class="onb-toggle-label">${esc(t("Cache all data"))}</span>
+          <label class="onb-toggle">
+            <input type="checkbox" id="onb-cache-toggle" ${cacheOn ? "checked" : ""} />
+            <span class="onb-toggle-track"></span>
           </label>
         </div>
       </div>`;
@@ -334,18 +345,17 @@ function betaSectionHtml(section) {
       </summary>
       <div class="onb-details-body">
         <p class="onb-desc">${esc(t(section.descKey))}</p>
-        <div class="onb-sub-row">
-          <span class="onb-sub-label">${esc(t("Enable"))}</span>
-          <div class="pref-segment pref-segment-2" role="group" aria-label="${esc(t("Enable"))}">
-            <label class="pref-opt">
-              <input type="radio" name="onb-${section.id}-enable" value="on" ${enabled ? "checked" : ""} />
-              <span>${esc(t("On"))}</span>
-            </label>
-            <label class="pref-opt">
-              <input type="radio" name="onb-${section.id}-enable" value="off" ${!enabled ? "checked" : ""} />
-              <span>${esc(t("Off"))}</span>
-            </label>
-          </div>
+        <div class="onb-toggle-row">
+          <span class="onb-toggle-label">${esc(t("Enable"))}</span>
+          <label class="onb-toggle">
+            <input
+              type="checkbox"
+              class="onb-beta-enable"
+              data-section="${section.id}"
+              ${enabled ? "checked" : ""}
+            />
+            <span class="onb-toggle-track"></span>
+          </label>
         </div>
         ${subs}
       </div>
@@ -358,12 +368,10 @@ function wireStep(idx) {
   const nextBtn = document.getElementById("onb-next");
   if (!bodyEl || !nextBtn) return;
   if (idx === 0) {
-    bodyEl.querySelectorAll('input[name="onb-lang"]').forEach((el) => {
-      el.addEventListener("change", () => {
-        if (!el.checked) return;
-        setLang(el.value); // persists; t() now resolves in the new language
-        render();
-      });
+    const select = bodyEl.querySelector("#onb-lang-select");
+    select?.addEventListener("change", () => {
+      setLang(select.value); // persists; t() now resolves in the new language
+      render();
     });
   } else if (idx === 1) {
     const agree = bodyEl.querySelector("#onb-terms-agree");
@@ -396,12 +404,12 @@ function goNext() {
     const sel = document.querySelector('input[name="onb-ticket"]:checked');
     if (sel) saveFareType(sel.value);
   } else if (stepIndex === 3) {
-    const sel = document.querySelector('input[name="onb-cache"]:checked');
-    if (sel) saveDataCachePref(sel.value === "yes");
+    const tgl = document.querySelector("#onb-cache-toggle");
+    if (tgl) saveDataCachePref(tgl.checked);
   } else if (stepIndex === 4) {
     for (const section of BETA_SECTIONS) {
-      const on = document.querySelector(`input[name="onb-${section.id}-enable"]:checked`);
-      if (on) section.saveEnabled(on.value === "on");
+      const on = document.querySelector(`input.onb-beta-enable[data-section="${section.id}"]`);
+      if (on) section.saveEnabled(on.checked);
       for (const sub of section.subs) {
         const sel = document.querySelector(`select[data-sub="${sub.id}"]`);
         if (sel) {
