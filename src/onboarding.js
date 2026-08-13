@@ -6,19 +6,19 @@
  */
 import { getLang, LANG_META, setLang, t } from "./lang.js";
 import {
+  BETA_BANNER_STORAGE_KEY,
+  LIVE_BUS_MORE_STORAGE_KEY,
+  loadBetaBannerPref,
   loadDataCachePref,
   loadLiveBusMorePref,
   loadLiveBusPref,
   saveDataCachePref,
-  saveLiveBusMorePref,
   saveLiveBusPref,
 } from "./preferences.js";
 import { FARE_TYPE_LABELS, loadFareType, saveFareType } from "./fares.js";
 
 export const ONBOARDED_STORAGE_KEY = "morgan.onboarded.v1";
 const TERMS_AGREED_STORAGE_KEY = "morgan.termsAgreed.v1";
-/** Prediction-accuracy slot for the live-position engine (balanced|high). */
-const LIVE_BUS_ACCURACY_STORAGE_KEY = "morgan.liveBusAccuracy";
 
 const TERMS_URL = "https://www.morgandev.cc/terms";
 const PRIVACY_URL = "https://www.morgandev.cc/privacy-policy";
@@ -65,7 +65,8 @@ const TICKET_OPTIONS = [
 
 /**
  * Beta-feature sections — extend this array to add new options; each renders
- * as an expandable <details> with an Enable toggle plus sub-option selects.
+ * as an expandable <details> with an Enable toggle plus sub-options, which are
+ * either iOS toggles (type: "toggle") or dropdowns (type omitted).
  */
 const BETA_SECTIONS = [
   {
@@ -76,26 +77,21 @@ const BETA_SECTIONS = [
     saveEnabled: saveLiveBusPref,
     subs: [
       {
-        id: "accuracy",
-        labelKey: "Prediction accuracy",
-        storageKey: LIVE_BUS_ACCURACY_STORAGE_KEY,
-        defaultValue: "balanced",
-        options: [
-          ["balanced", "Balanced"],
-          ["high", "High accuracy"],
-        ],
+        // Same pref as Settings → Live position → “Fetch more live data”:
+        // extra ETA fetches for tighter position stitching.
+        id: "fetch-more",
+        labelKey: "Fetch more live data",
+        storageKey: LIVE_BUS_MORE_STORAGE_KEY,
+        type: "toggle",
+        defaultValue: loadLiveBusMorePref() ? "1" : "0",
       },
       {
-        // Maps straight onto the existing "Fetch more live data" pref:
-        // High = extra ETA fetches for tighter position stitching.
-        id: "frequency",
-        labelKey: "Update frequency",
-        storageKey: "morgan.liveBusPositionsMore",
-        defaultValue: loadLiveBusMorePref() ? "1" : "0",
-        options: [
-          ["0", "Standard"],
-          ["1", "High (more data)"],
-        ],
+        // Same pref as Settings → Live position → “Beta warning banner”.
+        id: "beta-banner",
+        labelKey: "Beta warning banner",
+        storageKey: BETA_BANNER_STORAGE_KEY,
+        type: "toggle",
+        defaultValue: loadBetaBannerPref() ? "1" : "0",
       },
     ],
   },
@@ -341,6 +337,21 @@ function betaSectionHtml(section) {
       } catch {
         /* ignore */
       }
+      if (sub.type === "toggle") {
+        return `
+        <div class="onb-toggle-row">
+          <span class="onb-toggle-label">${esc(t(sub.labelKey))}</span>
+          <label class="onb-toggle">
+            <input
+              type="checkbox"
+              class="onb-sub-toggle"
+              data-sub="${sub.id}"
+              ${current === "1" ? "checked" : ""}
+            />
+            <span class="onb-toggle-track"></span>
+          </label>
+        </div>`;
+      }
       return `
         <div class="onb-sub-row">
           <span class="onb-sub-label">${esc(t(sub.labelKey))}</span>
@@ -429,6 +440,17 @@ function goNext() {
       const on = document.querySelector(`input.onb-beta-enable[data-section="${section.id}"]`);
       if (on) section.saveEnabled(on.checked);
       for (const sub of section.subs) {
+        if (sub.type === "toggle") {
+          const tgl = document.querySelector(`input.onb-sub-toggle[data-sub="${sub.id}"]`);
+          if (tgl) {
+            try {
+              localStorage.setItem(sub.storageKey, tgl.checked ? "1" : "0");
+            } catch {
+              /* ignore */
+            }
+          }
+          continue;
+        }
         const sel = document.querySelector(`select[data-sub="${sub.id}"]`);
         if (sel) {
           try {
