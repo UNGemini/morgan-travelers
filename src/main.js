@@ -426,13 +426,20 @@ const TOP_FADE_SCROLLERS = [
 function syncTopFade() {
   let on = false;
   const root = els.mainToolbar;
+  const tripOpen = !!els.sidebarPageTrip && !els.sidebarPageTrip.hidden;
+  const routeOpen =
+    !!els.sidebarPageEtaRoute && !els.sidebarPageEtaRoute.hidden;
   if (root) {
     for (const el of root.querySelectorAll(TOP_FADE_SCROLLERS.join(","))) {
-      // Ignore hidden pages — their scrollers keep stale offsets
-      const host = el.closest(
-        ".sidebar-page, .eta-sidebar-panel, .trip-plan-sidebar-panel",
-      );
-      if (host && host.hidden) continue;
+      if (!(el instanceof HTMLElement)) continue;
+      if (el.closest("[hidden]")) continue;
+      // Inner pages own the scroll — ignore the outer body offset
+      if (
+        el.classList.contains("detail-sidebar-body") &&
+        (tripOpen || routeOpen)
+      ) {
+        continue;
+      }
       if (el.scrollTop > 4) {
         on = true;
         break;

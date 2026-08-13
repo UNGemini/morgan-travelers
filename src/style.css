@@ -7402,16 +7402,22 @@ html.pwa .offline-banner.gl-error-banner {
  * perceived fade.
  */
 @media (min-width: 641px) {
-  .app-shell.is-scrolled .detail-sidebar-body:not(
-      :has(#sidebar-page-eta-route:not([hidden])),
-      :has(#sidebar-page-trip:not([hidden]))
-    ) {
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 28px);
-    mask-image: linear-gradient(to bottom, transparent 0%, #000 28px);
+  .sheet-chrome {
+    overflow: visible;
   }
+  .app-shell.is-scrolled .sheet-chrome::after {
+    /* Desktop chrome is shorter (no grabber) — keep a visible dissolve */
+    opacity: 1;
+  }
+  .app-shell.is-scrolled .detail-sidebar-body:not(
+      :has(#sidebar-page-eta-route:not([hidden]))
+    ),
+  .app-shell.is-scrolled #eta-route-list-sidebar,
+  .app-shell.is-scrolled .pinned-route-body,
+  .app-shell.is-scrolled .panel-page-scroll,
   .app-shell.is-scrolled #sidebar-page-trip:not([hidden]) {
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 28px);
-    mask-image: linear-gradient(to bottom, transparent 0%, #000 28px);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 36px);
+    mask-image: linear-gradient(to bottom, transparent 0%, #000 36px);
   }
 }
 /* Desktop overrides in min-width:641px (no grabber / tighter top) */
