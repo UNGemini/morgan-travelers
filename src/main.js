@@ -4684,6 +4684,9 @@ function setMapRouteBadge(coLabel, routeId, color = "#fff", label = "", kind = "
     coEl.textContent = coLabel || "";
     coEl.style.color = color || "";
     coEl.hidden = !coLabel;
+    // Breathing room above the pill is MTR-only: bus/LRT render a plain
+    // route number that already sits well against the basemap.
+    coEl.classList.toggle("map-route-badge-co-mtr", kind === "mtr");
   }
   if (kind === "mtr") {
     // Coloured pill: localized line name over the English full name

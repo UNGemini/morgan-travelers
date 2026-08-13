@@ -536,8 +536,6 @@ body.mobile-ui [data-acrylic]::before {
   }
 }
 .map-route-badge-co {
-  /* Compact company label with breathing room above the route pill */
-  padding: 2px 6px 8px;
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -546,6 +544,11 @@ body.mobile-ui [data-acrylic]::before {
     0 0 3px rgba(0, 0, 0, 0.95),
     0 1px 4px rgba(0, 0, 0, 0.85),
     0 0 12px rgba(0, 0, 0, 0.5);
+}
+/* MTR badge is a two-line pill — the company label needs breathing room
+   above it; bus/LRT show a plain route number, no extra padding. */
+.map-route-badge-co-mtr {
+  padding: 2px 6px 8px;
 }
 .map-route-badge-id {
   font-size: clamp(2.6rem, 12vw, 3.6rem);
