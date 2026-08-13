@@ -8166,18 +8166,21 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   }
 
   /* Same top inset as mobile: content starts under the overlay title
-     and can scroll up into the fade. */
+     and can scroll up into the fade. Nearby / Pinned sit a bit closer;
+     trip detail gets a little extra air. Route detail stays at chrome height. */
   .detail-sidebar-body {
     padding-top: var(--sheet-chrome-h-px, var(--sheet-chrome-h));
   }
-  #eta-route-list-sidebar {
-    padding-top: calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) - 4px);
+  #eta-route-list-sidebar,
+  .pinned-route-body {
+    padding-top: calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) - 12px);
   }
-  .pinned-route-body,
   .panel-page-scroll,
-  #sidebar-page-eta-route,
-  #sidebar-page-trip:not([hidden]) {
+  #sidebar-page-eta-route {
     padding-top: var(--sheet-chrome-h-px, var(--sheet-chrome-h));
+  }
+  #sidebar-page-trip:not([hidden]) {
+    padding-top: calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) + 10px);
   }
   .app-shell:has(#sidebar-page-trip:not([hidden])) .detail-sidebar-body,
   .app-shell:has(#sidebar-page-eta-route:not([hidden])) .detail-sidebar-body {
