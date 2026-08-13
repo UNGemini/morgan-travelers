@@ -160,6 +160,15 @@
       </span>
     </div>
 
+    <!-- Shown when the device cannot create a WebGL2 context for the map -->
+    <div id="gl-error-banner" class="offline-banner gl-error-banner" hidden role="alert">
+      <span class="material-symbols-outlined" aria-hidden="true">report</span>
+      <span class="beta-banner-text">
+        <strong>Map unavailable</strong>
+        <span>This browser can't render the map — it needs WebGL2 graphics. Update Chrome or Android System WebView and reload.</span>
+      </span>
+    </div>
+
     <div id="app" class="app-shell" data-ui-mode="eta" data-toolbar="open" data-detail="open" data-sheet="open">
       <!-- Full-bleed map -->
       <div id="map-stage" class="map-stage">

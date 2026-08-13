@@ -2282,6 +2282,54 @@ function triggerDownload(url, filename) {
 const protocol = new Protocol({ metadata: true });
 addProtocol("pmtiles", protocol.tile);
 
+// ── WebGL2 support & map recovery ────────────────────────────────────────────
+/** Probe WebGL2 on a throwaway canvas — MapLibre v6 needs it and fails silently. */
+function probeWebGL2() {
+  try {
+    return document.createElement("canvas").getContext("webgl2")
+      ? "ok"
+      : "unavailable";
+  } catch (err) {
+    return `error: ${err?.message || err}`;
+  }
+}
+
+/** Diagnostics to attach to a [map] failure report. */
+function mapDiagnostics() {
+  let canvasSize = "none";
+  try {
+    const c = map.getCanvas();
+    canvasSize = `${c.width}x${c.height}`;
+  } catch {
+    /* map not created yet */
+  }
+  return {
+    webgl2: probeWebGL2(),
+    canvas: canvasSize,
+    isolated: Boolean(window.crossOriginIsolated),
+    worker: getWorkerUrl(),
+    ua: navigator.userAgent,
+  };
+}
+
+/** Persistent card — this device cannot render the map at all. */
+function showGlFallback(message) {
+  const banner = document.getElementById("gl-error-banner");
+  if (!banner) return;
+  if (message) {
+    const text = banner.querySelector(".beta-banner-text span:last-child");
+    if (text) text.textContent = message;
+  }
+  banner.hidden = false;
+  console.error("[map] cannot render — WebGL2 unavailable", mapDiagnostics());
+}
+
+// MapLibre v6 requires WebGL2; its constructor fires the GPU error before any
+// `map.on("error")` listener can exist, so probe first and surface it now.
+if (probeWebGL2() !== "ok") {
+  showGlFallback(null);
+}
+
 // ── Map ──────────────────────────────────────────────────────────────────────
 const map = new MapLibreMap({
   container: "map",
@@ -2651,10 +2699,70 @@ map.on("error", (e) => {
   const msg =
     err?.message ||
     (typeof err === "string" ? err : "Map failed to load tiles");
+  // Devices without WebGL2 (older Android WebView/Chrome) never render — the
+  // persistent card beats a silent black canvas.
+  if (err?.name === "GPUInitializationError" || String(msg).includes("WebGL2")) {
+    showGlFallback(null);
+    return;
+  }
   // COEP noise is common for glyph/sprite hosts without CORP — don't spam toast
   if (String(msg).includes("Failed to fetch") && !map.isStyleLoaded()) {
     showToast(`Map error: ${msg}`, 6000);
   }
+});
+
+// Mobile GPUs can lose the WebGL context under memory pressure. MapLibre
+// restores it when the browser fires `webglcontextrestored`; when that never
+// comes (GPU process died) the canvas stays black — recover via guarded reload.
+const GL_RECOVERY_KEY = "mt.gl-recovery-count";
+const GL_RECOVERY_WINDOW_MS = 60000;
+const GL_RECOVERY_MAX = 2;
+let glRestoreTimer = null;
+
+function glRecoveryCount() {
+  try {
+    const raw = sessionStorage.getItem(GL_RECOVERY_KEY);
+    if (!raw) return 0;
+    const [ts, n] = raw.split(":");
+    return Date.now() - Number(ts) < GL_RECOVERY_WINDOW_MS ? Number(n) || 0 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function reloadForGlRecovery() {
+  const count = glRecoveryCount() + 1;
+  try {
+    sessionStorage.setItem(GL_RECOVERY_KEY, `${Date.now()}:${count}`);
+  } catch {
+    /* private mode */
+  }
+  if (count > GL_RECOVERY_MAX) {
+    console.error(
+      "[map] repeated context loss — giving up on auto-reload",
+      mapDiagnostics(),
+    );
+    showGlFallback("The map's graphics engine keeps failing. Reload the page to try again.");
+    return;
+  }
+  showToast("Map didn't recover — reloading…", 2500);
+  setTimeout(() => location.reload(), 900);
+}
+
+map.on("webglcontextlost", () => {
+  console.warn("[map] WebGL context lost — waiting for restore");
+  showToast("Map rendering paused — recovering…", 4000);
+  clearTimeout(glRestoreTimer);
+  glRestoreTimer = setTimeout(() => {
+    console.warn("[map] WebGL context not restored — reloading", mapDiagnostics());
+    reloadForGlRecovery();
+  }, 6000);
+});
+
+map.on("webglcontextrestored", () => {
+  clearTimeout(glRestoreTimer);
+  console.info("[map] WebGL context restored");
+  showToast("Map resumed", 2000);
 });
 
 map.once("idle", () => {

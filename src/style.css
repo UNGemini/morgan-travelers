@@ -5974,6 +5974,31 @@ html.pwa .offline-banner.beta-banner {
   top: calc(12px + env(safe-area-inset-top, 0px) + 52px);
 }
 
+/* ── GL error card — device cannot create a WebGL2 context for the map ── */
+.gl-error-banner .material-symbols-outlined {
+  font-size: 18px;
+  color: #ff8a8a;
+  flex-shrink: 0;
+}
+/* Full-width card like the beta banner; the message span already inherits
+   the stacked strong + text layout from .beta-banner-text */
+.offline-banner.gl-error-banner,
+html.pwa .offline-banner.gl-error-banner {
+  left: 16px;
+  right: 16px;
+  width: auto;
+  max-width: none;
+  transform: none;
+  justify-content: flex-start;
+}
+/* Sits below the offline/beta cards whenever they are visible */
+@media (max-width: 640px) {
+  .offline-banner.gl-error-banner,
+  html.pwa .offline-banner.gl-error-banner {
+    top: calc(12px + env(safe-area-inset-top, 0px) + 104px);
+  }
+}
+
 /* ── Banner entrance — both floating cards drop in when they appear ── */
 @keyframes banner-enter {
   from {
