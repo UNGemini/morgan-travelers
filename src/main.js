@@ -2294,6 +2294,20 @@ function probeWebGL2() {
   }
 }
 
+/** GPU/ANGLE backend string — “ANGLE (…, Vulkan …)” reveals translation bugs. */
+function glRendererString() {
+  try {
+    const gl = map.getCanvas().getContext("webgl2");
+    if (!gl) return "no-webgl2";
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    return ext
+      ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL))
+      : String(gl.getParameter(gl.RENDERER));
+  } catch {
+    return "unknown";
+  }
+}
+
 /** Diagnostics to attach to a [map] failure report. */
 function mapDiagnostics() {
   let canvasSize = "none";
@@ -2305,6 +2319,7 @@ function mapDiagnostics() {
   }
   return {
     webgl2: probeWebGL2(),
+    renderer: glRendererString(),
     canvas: canvasSize,
     isolated: Boolean(window.crossOriginIsolated),
     worker: getWorkerUrl(),
@@ -2321,7 +2336,7 @@ function showGlFallback(message) {
     if (text) text.textContent = message;
   }
   banner.hidden = false;
-  console.error("[map] cannot render — WebGL2 unavailable", mapDiagnostics());
+  console.error("[map] map render failure", mapDiagnostics());
 }
 
 // MapLibre v6 requires WebGL2; its constructor fires the GPU error before any
@@ -2354,6 +2369,8 @@ const map = new MapLibreMap({
   // Attribution is separate from nav tools so expand never resizes the tools stack
   attributionControl: false,
 });
+
+console.info("[map] renderer →", glRendererString());
 
 // Map tools BR — desktop: nav + geolocate; mobile: geolocate only (gestures zoom)
 const isMobileUi =
@@ -2763,6 +2780,74 @@ map.on("webglcontextrestored", () => {
   clearTimeout(glRestoreTimer);
   console.info("[map] WebGL context restored");
   showToast("Map resumed", 2000);
+});
+
+// ── Black-canvas detector — ANGLE/Vulkan translation failures on Android ─────
+// Some Android GPU drivers accept the WebGL2 context but present nothing (a
+// known class of ANGLE→Vulkan translation bugs): MapLibre's render loop runs
+// and tiles load, yet the canvas stays black with no error event. Sample the
+// framebuffer while a frame is being drawn; if the style has fully loaded but
+// the canvas is uniformly black, force one repaint, then surface a card.
+const BLACK_GRID = [0.25, 0.5, 0.75]; // sampling fractions per axis
+const BLACK_MAX_RGBA = 24; // sum of RGBA below which a pixel counts as black
+const BLACK_SAMPLES_REQUIRED = 2; // consecutive black frames before acting
+let blackFrameCount = 0;
+let blackVerdict = null; // null | "retry" | "broken"
+
+function sampleCanvasAllBlack() {
+  try {
+    const canvas = map.getCanvas();
+    const gl = canvas.getContext("webgl2");
+    if (!gl || canvas.width < 8 || canvas.height < 8) return false;
+    const px = new Uint8Array(4);
+    for (const fx of BLACK_GRID) {
+      for (const fy of BLACK_GRID) {
+        gl.readPixels(
+          Math.floor(canvas.width * fx),
+          Math.floor(canvas.height * fy),
+          1,
+          1,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          px,
+        );
+        if (px[0] + px[1] + px[2] + px[3] > BLACK_MAX_RGBA) return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+map.on("render", () => {
+  if (blackVerdict || !map.loaded() || document.visibilityState !== "visible") {
+    return;
+  }
+  if (!sampleCanvasAllBlack()) {
+    blackFrameCount = 0;
+    return;
+  }
+  if (++blackFrameCount < BLACK_SAMPLES_REQUIRED) return;
+  blackVerdict = "retry";
+  // One cheap self-heal before declaring the device broken.
+  map.resize();
+  map.triggerRepaint();
+  setTimeout(() => {
+    if (map.loaded() && sampleCanvasAllBlack()) {
+      blackVerdict = "broken";
+      console.error(
+        "[map] canvas stayed black after forced repaint — likely an ANGLE/Vulkan translation bug",
+        mapDiagnostics(),
+      );
+      showGlFallback(
+        "The map isn't drawing — this device's GPU translation (ANGLE/Vulkan) is failing. Update Chrome or Android System WebView; if it persists, open chrome://flags, set “Choose ANGLE graphics backend” to OpenGL, and relaunch.",
+      );
+    } else {
+      console.info("[map] canvas recovered after forced repaint");
+      blackVerdict = null;
+    }
+  }, 1000);
 });
 
 map.once("idle", () => {
