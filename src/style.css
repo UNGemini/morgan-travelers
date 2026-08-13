@@ -8165,6 +8165,25 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     font-size: 1.1rem;
   }
 
+  /* Same top inset as mobile: content starts under the overlay title
+     and can scroll up into the fade. */
+  .detail-sidebar-body {
+    padding-top: var(--sheet-chrome-h-px, var(--sheet-chrome-h));
+  }
+  #eta-route-list-sidebar {
+    padding-top: calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) - 4px);
+  }
+  .pinned-route-body,
+  .panel-page-scroll,
+  #sidebar-page-eta-route,
+  #sidebar-page-trip:not([hidden]) {
+    padding-top: var(--sheet-chrome-h-px, var(--sheet-chrome-h));
+  }
+  .app-shell:has(#sidebar-page-trip:not([hidden])) .detail-sidebar-body,
+  .app-shell:has(#sidebar-page-eta-route:not([hidden])) .detail-sidebar-body {
+    padding-top: 0;
+  }
+
   .maplibregl-ctrl-bottom-right {
     right: 12px !important;
     bottom: calc(14px + var(--safe-bottom)) !important;
