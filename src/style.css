@@ -5920,13 +5920,21 @@ body.contrib-submitting .bg-orb {
   display: none !important;
 }
 
-/* Desktop browser: notification card top-right */
+/* Desktop browser: notification card top-right, capped at 35% width */
 @media (min-width: 900px) {
   .offline-banner {
     left: auto;
     right: 16px;
     top: 16px;
     transform: none;
+    width: 35%;
+    max-width: none;
+  }
+  /* Scope the beta banner's full-width override back down on desktop */
+  .offline-banner.beta-banner {
+    left: auto;
+    right: 16px;
+    width: 35%;
   }
 }
 
