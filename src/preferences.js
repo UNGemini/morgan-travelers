@@ -2,6 +2,7 @@
  * User routing preferences (persisted in localStorage).
  * Multi-select: ranking goals, bus companies, traffic methods.
  */
+import { t } from "./lang.js";
 
 export const PREF_STORAGE_KEY = "morgan.routePreferences";
 /** @deprecated single-value key — migrated on load */
@@ -137,7 +138,7 @@ export function saveServiceDay(day) {
  * @param {ServiceDayId} [day]
  */
 export function formatServiceDayLabel(day = "usual") {
-  return SERVICE_DAY_LABELS[day] || SERVICE_DAY_LABELS.usual;
+  return t(SERVICE_DAY_LABELS[day] || SERVICE_DAY_LABELS.usual);
 }
 
 /**
@@ -603,14 +604,42 @@ export function saveBetaBannerPref(v) {
   return next;
 }
 
+export const LANGUAGE_STORAGE_KEY = "morgan.language";
+
+/**
+ * Persisted UI language code (see src/lang.js LANG_META).
+ * @returns {"en"|"zh-hk"|"zh-tw"|"zh-cn"|"ja"|"ko"}
+ */
+export function loadLanguagePref() {
+  try {
+    const v = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    if (v === "en" || v === "zh-hk" || v === "zh-tw" || v === "zh-cn" || v === "ja" || v === "ko") {
+      return v;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "en";
+}
+
+export function saveLanguagePref(code) {
+  const v = code === "en" || code === "zh-hk" || code === "zh-tw" || code === "zh-cn" || code === "ja" || code === "ko" ? code : "en";
+  try {
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, v);
+  } catch {
+    /* ignore */
+  }
+  return v;
+}
+
 /**
  * Short label for result meta, e.g. "Fastest + Simplest"
  * @param {RoutePreference[]} prefs
  */
 export function formatPreferencesLabel(prefs) {
   const list = (prefs || []).filter(isPref);
-  if (!list.length) return PREF_LABELS.fastest;
-  return list.map((p) => PREF_LABELS[p]).join(" + ");
+  if (!list.length) return t(PREF_LABELS.fastest);
+  return list.map((p) => t(PREF_LABELS[p])).join(" + ");
 }
 
 /**
@@ -619,8 +648,8 @@ export function formatPreferencesLabel(prefs) {
 export function formatBusCompaniesLabel(cos) {
   const all = BUS_COMPANIES.map((c) => c.id);
   const list = (cos || []).filter(isBusCompany);
-  if (!list.length || list.length === all.length) return "All operators";
-  return list.map((id) => BUS_COMPANY_LABELS[id] || id).join(", ");
+  if (!list.length || list.length === all.length) return t("All operators");
+  return list.map((id) => t(BUS_COMPANY_LABELS[id] || id)).join(", ");
 }
 
 /**
@@ -629,8 +658,8 @@ export function formatBusCompaniesLabel(cos) {
 export function formatTrafficMethodsLabel(methods) {
   const all = TRAFFIC_METHODS.map((m) => m.id);
   const list = (methods || []).filter(isTrafficMethod);
-  if (!list.length || list.length === all.length) return "All modes";
-  return list.map((id) => TRAFFIC_METHOD_LABELS[id] || id).join(", ");
+  if (!list.length || list.length === all.length) return t("All modes");
+  return list.map((id) => t(TRAFFIC_METHOD_LABELS[id] || id)).join(", ");
 }
 
 /**

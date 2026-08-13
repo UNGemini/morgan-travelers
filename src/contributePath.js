@@ -24,6 +24,7 @@ import {
 } from "./routeSnapper.js";
 import { mergeStopSequence } from "./stopMerge.js";
 import { LRT_STOPS } from "./lrtStops.js";
+import { t } from "./lang.js";
 
 const ETA = "/eta";
 
@@ -82,11 +83,13 @@ async function fetchJson(url, ttlMs = 300_000) {
 export async function loadCalculatedRoutePath(agency, route, direction, opts = {}) {
   const ag = String(agency || "").toUpperCase();
   const r = String(route || "").trim().toUpperCase();
-  if (!ag || !r) throw new Error("Operator and route required");
+  if (!ag || !r) throw new Error(t("Operator and route required"));
 
   const raw = await fetchRouteStops(ag, r, direction);
   if (raw.length < 2) {
-    throw new Error(`No stops found for ${ag} ${r} (${direction || "default"})`);
+    throw new Error(
+      t("No stops found for {ag} {r} ({dir})", { ag, r, dir: direction || t("default") }),
+    );
   }
 
   // Fixed official stops — merge duplicates (public code / name+proximity)
@@ -105,13 +108,13 @@ export async function loadCalculatedRoutePath(agency, route, direction, opts = {
   /** @type {Array<{ stopId: string, name: string, lon: number, lat: number }>} */
   const official = merged.map((s, i) => ({
     stopId: String(s.stop_id || s.id || `seq-${i}`),
-    name: String(s.stop_name || s.name || s.stopId || `Stop ${i + 1}`),
+    name: String(s.stop_name || s.name || s.stopId || t("Stop {n}", { n: i + 1 })),
     lon: Number(s.lon),
     lat: Number(s.lat),
   })).filter((s) => Number.isFinite(s.lon) && Number.isFinite(s.lat));
 
   if (official.length < 2) {
-    throw new Error(`No usable stops after merge for ${ag} ${r}`);
+    throw new Error(t("No usable stops after merge for {ag} {r}", { ag, r }));
   }
 
   const fromName = official[0]?.name || "";
@@ -348,7 +351,7 @@ async function fetchRouteStops(ag, route, direction) {
     return fetchLrtRouteStops(route, direction);
   }
   throw new Error(
-    `Load path not supported for operator ${ag} yet — use From plan or draw`,
+    t("Load path not supported for operator {ag} yet — use From plan or draw", { ag }),
   );
 }
 
@@ -397,12 +400,12 @@ async function fetchMtrLineStops(lineCode, direction) {
   // Allow "Airport Express" / full names
   if (/AIRPORT|AEL/.test(line)) line = "AEL";
   if (line === "MTR") {
-    throw new Error("Enter an MTR line code: TWL, ISL, KTL, TML, EAL, TCL, TKL, SIL, DRL, AEL");
+    throw new Error(t("Enter an MTR line code: TWL, ISL, KTL, TML, EAL, TCL, TKL, SIL, DRL, AEL"));
   }
   const order = MTR_LINE_ORDER[line];
   if (!order?.length) {
     throw new Error(
-      `Unknown MTR line “${lineCode}”. Try TWL, ISL, KTL, TML, EAL, TCL, TKL, SIL, DRL, or AEL.`,
+      t("Unknown MTR line “{line}”. Try TWL, ISL, KTL, TML, EAL, TCL, TKL, SIL, DRL, or AEL.", { line: lineCode }),
     );
   }
   const base =
@@ -448,7 +451,7 @@ async function fetchMtrLineStops(lineCode, direction) {
     });
   }
   if (out.length < 2) {
-    throw new Error(`No station coords found for MTR ${line}`);
+    throw new Error(t("No station coords found for MTR {line}", { line }));
   }
   return out;
 }
@@ -460,7 +463,7 @@ async function fetchMtrLineStops(lineCode, direction) {
  */
 async function fetchLrtRouteStops(route, direction) {
   const r = String(route || "").trim();
-  if (!r) throw new Error("LRT route number required (e.g. 505, 507, 610)");
+  if (!r) throw new Error(t("LRT route number required (e.g. 505, 507, 610)"));
   const dirRaw = String(direction || "O").toLowerCase();
   const dir =
     dirRaw === "i" || dirRaw === "inbound" || dirRaw === "2" || dirRaw.includes("down")
@@ -473,7 +476,7 @@ async function fetchLrtRouteStops(route, direction) {
   );
   // CSV may have BOM
   const lines = csvText.replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) throw new Error("LRT route CSV empty");
+  if (lines.length < 2) throw new Error(t("LRT route CSV empty"));
 
   /** @type {Map<string, { lat: number, lon: number, name_en: string, code?: string, stop_id?: string }>} */
   const byCode = new Map();
@@ -503,7 +506,7 @@ async function fetchLrtRouteStops(route, direction) {
   rows.sort((a, b) => a.seq - b.seq);
   if (!rows.length) {
     throw new Error(
-      `No LRT stops for route ${r} direction ${dir}. Check route no. (e.g. 505).`,
+      t("No LRT stops for route {r} direction {dir}. Check route no. (e.g. 505).", { r, dir }),
     );
   }
 
@@ -526,7 +529,7 @@ async function fetchLrtRouteStops(route, direction) {
     });
   }
   if (out.length < 2) {
-    throw new Error(`Could not resolve LRT coords for route ${r}`);
+    throw new Error(t("Could not resolve LRT coords for route {r}", { r }));
   }
   return out;
 }
@@ -538,7 +541,7 @@ async function fetchLrtRouteStops(route, direction) {
  */
 async function fetchGmbStops(route, direction) {
   const code = String(route || "").trim().toUpperCase();
-  if (!code) throw new Error("GMB route code required");
+  if (!code) throw new Error(t("GMB route code required"));
   const dirRaw = String(direction || "O").toLowerCase();
   const routeSeq =
     dirRaw === "i" || dirRaw === "inbound" || dirRaw === "2" ? 2 : 1;
@@ -572,7 +575,7 @@ async function fetchGmbStops(route, direction) {
 
   if (!found?.route_id) {
     throw new Error(
-      `GMB route ${code} not found. Try the public code (e.g. 1, 44A).`,
+      t("GMB route {code} not found. Try the public code (e.g. 1, 44A).", { code }),
     );
   }
 
@@ -582,7 +585,7 @@ async function fetchGmbStops(route, direction) {
   );
   const stops = stopData?.data?.route_stops || stopData?.data || [];
   if (!Array.isArray(stops) || !stops.length) {
-    throw new Error(`No GMB stops for ${code} seq ${routeSeq}`);
+    throw new Error(t("No GMB stops for {code} seq {seq}", { code, seq: routeSeq }));
   }
 
   // Parallel stop coordinate lookups
@@ -970,7 +973,7 @@ export function createPathContributor(ctx) {
       oauth_configured: ghSession.oauth_configured,
     };
     updateAuthUi();
-    showToast("Logged out of GitHub", 1600);
+    showToast(t("Logged out of GitHub"), 1600);
   }
 
   /** Path undo stack (deep copies of coordinates) */
@@ -1121,12 +1124,12 @@ export function createPathContributor(ctx) {
     }
     setStatus(
       editMode === "path"
-        ? "Path mode: drag hollow green handles · click path to insert · Alt+click delete · B for select"
+        ? t("Path mode: drag hollow green handles · click path to insert · Alt+click delete · B for select")
         : editMode === "stops"
           ? stopMarkers.length
-            ? `Visual stops: ${stopMarkers.length} orange pins · grey ghost only if moved from official · drag to adjust`
-            : "Visual stops: no stops loaded — Load calculated path first"
-          : `Select mode: drag a box on the map · amber = offset >${OFFSET_SELECT_M}m · Delete/Backspace removes selected`,
+            ? t("Visual stops: {n} orange pins · grey ghost only if moved from official · drag to adjust", { n: stopMarkers.length })
+            : t("Visual stops: no stops loaded — Load calculated path first")
+          : t("Select mode: drag a box on the map · amber = offset >{n}m · Delete/Backspace removes selected", { n: OFFSET_SELECT_M }),
     );
   }
 
@@ -1539,7 +1542,7 @@ export function createPathContributor(ctx) {
     const n = selectedIdx.size;
     if (els.btnDeleteSelected) {
       els.btnDeleteSelected.disabled = n === 0;
-      els.btnDeleteSelected.textContent = n ? `Delete (${n})` : "Delete selected";
+      els.btnDeleteSelected.textContent = n ? t("Delete ({n})", { n }) : t("Delete selected");
     }
     if (els.btnClearSelection) els.btnClearSelection.disabled = n === 0;
   }
@@ -1615,11 +1618,11 @@ export function createPathContributor(ctx) {
     paintDraft();
     setStatus(
       selectedIdx.size
-        ? `${selectedIdx.size} points selected · Delete/Backspace to remove · Shift+drag to add`
-        : "No points in box (endpoints are protected)",
+        ? t("{n} points selected · Delete/Backspace to remove · Shift+drag to add", { n: selectedIdx.size })
+        : t("No points in box (endpoints are protected)"),
     );
     showToast(
-      selectedIdx.size ? `${selectedIdx.size} points selected` : "Nothing in box",
+      selectedIdx.size ? t("{n} points selected", { n: selectedIdx.size }) : t("Nothing in box"),
       1200,
     );
   }
@@ -1667,11 +1670,11 @@ export function createPathContributor(ctx) {
     const n = selectedIdx.size;
     setStatus(
       n
-        ? `Selected ${n} offset points (>${OFFSET_SELECT_M}m from route backbone). Delete to clean, or box-select more.`
-        : `No offset points over ${OFFSET_SELECT_M}m — path is clean enough`,
+        ? t("Selected {n} offset points (>{m}m from route backbone). Delete to clean, or box-select more.", { n, m: OFFSET_SELECT_M })
+        : t("No offset points over {m}m — path is clean enough", { m: OFFSET_SELECT_M }),
     );
     showToast(
-      n ? `${n} offset points selected` : "No large offsets found",
+      n ? t("{n} offset points selected", { n }) : t("No large offsets found"),
       2000,
     );
   }
@@ -1679,12 +1682,12 @@ export function createPathContributor(ctx) {
   function clearSelection() {
     selectedIdx.clear();
     paintDraft();
-    setStatus("Selection cleared");
+    setStatus(t("Selection cleared"));
   }
 
   function deleteSelectedPoints() {
     if (!selectedIdx.size) {
-      showToast("No points selected", 1200);
+      showToast(t("No points selected"), 1200);
       return;
     }
     // Keep endpoints
@@ -1692,11 +1695,11 @@ export function createPathContributor(ctx) {
       (i) => i > 0 && i < points.length - 1,
     );
     if (!kill.length) {
-      showToast("Cannot delete path endpoints", 1600);
+      showToast(t("Cannot delete path endpoints"), 1600);
       return;
     }
     if (points.length - kill.length < 2) {
-      showToast("Need at least 2 path points", 1600);
+      showToast(t("Need at least 2 path points"), 1600);
       return;
     }
     pushPathHistory();
@@ -1706,9 +1709,9 @@ export function createPathContributor(ctx) {
     recomputeOffsetFlags();
     paintDraft();
     setStatus(
-      `Deleted ${kill.length} points · ${points.length} remain · Undo available`,
+      t("Deleted {n} points · {m} remain · Undo available", { n: kill.length, m: points.length }),
     );
-    showToast(`Deleted ${kill.length} points`, 1600);
+    showToast(t("Deleted {n} points", { n: kill.length }), 1600);
   }
 
   /** Haversine meters */
@@ -1845,7 +1848,7 @@ export function createPathContributor(ctx) {
    */
   function confirmFollowRoads() {
     if (!followPending) {
-      showToast("Nothing to confirm", 1200);
+      showToast(t("Nothing to confirm"), 1200);
       return;
     }
     // Path already applied; just commit (history already has pre-follow snapshot)
@@ -1853,9 +1856,9 @@ export function createPathContributor(ctx) {
     setFollowPendingUi(false);
     // Keep debug overlay until user hides it
     setStatus(
-      `Follow roads confirmed · ${points.length} path pts · Undo still available · Hide overlay when done`,
+      t("Follow roads confirmed · {n} path pts · Undo still available · Hide overlay when done", { n: points.length }),
     );
-    showToast("Follow roads confirmed", 1600);
+    showToast(t("Follow roads confirmed"), 1600);
   }
 
   /**
@@ -1863,7 +1866,7 @@ export function createPathContributor(ctx) {
    */
   function revertFollowRoads() {
     if (!followPending) {
-      showToast("Nothing to revert", 1200);
+      showToast(t("Nothing to revert"), 1200);
       return;
     }
     const prev = followPending;
@@ -1877,18 +1880,18 @@ export function createPathContributor(ctx) {
     selectedIdx.clear();
     paintDraft();
     setStatus(
-      `Follow roads reverted · ${points.length} path pts restored`,
+      t("Follow roads reverted · {n} path pts restored", { n: points.length }),
     );
-    showToast("Follow roads reverted", 1600);
+    showToast(t("Follow roads reverted"), 1600);
   }
 
   async function runFollowRoadsAssist() {
     if (followPending) {
-      showToast("Confirm or Revert the current Follow roads result first", 2400);
+      showToast(t("Confirm or Revert the current Follow roads result first"), 2400);
       return;
     }
     if (points.length < 2) {
-      showToast("Draw or load a path first (need ≥ 2 points)", 2200);
+      showToast(t("Draw or load a path first (need ≥ 2 points)"), 2200);
       return;
     }
     if (loadAbort) loadAbort.abort();
@@ -1900,7 +1903,7 @@ export function createPathContributor(ctx) {
     }
     clearFollowRoadsDebug();
     setStatus(
-      "Road assistant: snapping vertices onto streets (keeps all your points)…",
+      t("Road assistant: snapping vertices onto streets (keeps all your points)…"),
     );
     const beforeN = points.length;
     const beforePath = points.map((c) => [c[0], c[1]]);
@@ -1910,7 +1913,7 @@ export function createPathContributor(ctx) {
       const result = await followRoadsPath(beforePath, {
         signal: loadAbort.signal,
         onProgress: (ev) => {
-          if (ev?.msg) setStatus(`Road assistant: ${ev.msg}`);
+          if (ev?.msg) setStatus(t("Road assistant: {msg}", { msg: ev.msg }));
         },
       });
 
@@ -1920,9 +1923,9 @@ export function createPathContributor(ctx) {
       if (result.method === "unchanged" || result.path.length < 2) {
         pathHistory.pop(); // nothing changed
         setStatus(
-          "Road assistant: nothing changed — see map legend (grey=original, amber=kept raw).",
+          t("Road assistant: nothing changed — see map legend (grey=original, amber=kept raw)."),
         );
-        showToast("Path unchanged — debug overlay shows why", 2800);
+        showToast(t("Path unchanged — debug overlay shows why"), 2800);
         return;
       }
 
@@ -1962,10 +1965,17 @@ export function createPathContributor(ctx) {
       setFollowPendingUi(true);
 
       setStatus(
-        `Preview: ${snapN} snapped · ${rawN} raw · ${densN} densified · ${failN} kept · ${beforeN}→${points.length} pts — Confirm or Revert`,
+        t("Preview: {snap} snapped · {raw} raw · {dens} densified · {fail} kept · {before}→{after} pts — Confirm or Revert", {
+          snap: snapN,
+          raw: rawN,
+          dens: densN,
+          fail: failN,
+          before: beforeN,
+          after: points.length,
+        }),
       );
       showToast(
-        "Review the map · Confirm to keep · Revert to undo",
+        t("Review the map · Confirm to keep · Revert to undo"),
         3600,
       );
     } catch (e) {
@@ -1974,8 +1984,8 @@ export function createPathContributor(ctx) {
       pathHistory.pop();
       followPending = null;
       setFollowPendingUi(false);
-      setStatus(e?.message || "Road assistant failed");
-      showToast(e?.message || "Road assistant failed", 2800);
+      setStatus(e?.message || t("Road assistant failed"));
+      showToast(e?.message || t("Road assistant failed"), 2800);
     } finally {
       if (btn && !followPending) {
         btn.disabled = false;
@@ -2001,12 +2011,12 @@ export function createPathContributor(ctx) {
       }
       const draft = JSON.parse(text);
       if (!draft || typeof draft !== "object") {
-        throw new Error("Invalid JSON object");
+        throw new Error(t("Invalid JSON object"));
       }
 
       const coords = draft.coordinates;
       if (!Array.isArray(coords) || coords.length < 2) {
-        throw new Error("JSON needs coordinates with at least 2 [lon,lat] points");
+        throw new Error(t("JSON needs coordinates with at least 2 [lon,lat] points"));
       }
 
       /** @type {number[][]} */
@@ -2019,7 +2029,7 @@ export function createPathContributor(ctx) {
         path.push([lon, lat]);
       }
       if (path.length < 2) {
-        throw new Error("No valid coordinates in JSON");
+        throw new Error(t("No valid coordinates in JSON"));
       }
 
       clearPathHistoryStacks();
@@ -2100,13 +2110,13 @@ export function createPathContributor(ctx) {
       setEditMode("path");
       const id = draft.id ? String(draft.id) : "draft";
       setStatus(
-        `Imported ${id} · ${points.length} path pts · ${stopMarkers.length} visual stops · continue editing`,
+        t("Imported {id} · {n} path pts · {m} visual stops · continue editing", { id, n: points.length, m: stopMarkers.length }),
       );
-      showToast(`Imported JSON · ${points.length} points`, 2400);
+      showToast(t("Imported JSON · {n} points", { n: points.length }), 2400);
     } catch (e) {
       console.warn("[contribute] import", e);
-      showToast(e?.message || "Could not import JSON", 3200);
-      setStatus(e?.message || "Import failed");
+      showToast(e?.message || t("Could not import JSON"), 3200);
+      setStatus(e?.message || t("Import failed"));
     }
   }
 
@@ -2483,22 +2493,22 @@ export function createPathContributor(ctx) {
     if (k === "v" || k === "p") {
       e.preventDefault();
       setEditMode("path");
-      showToast("Path turns mode (V)", 1200);
+      showToast(t("Path turns mode (V)"), 1200);
     } else if (k === "s") {
       e.preventDefault();
       setEditMode("stops");
-      showToast("Visual stops mode (S)", 1200);
+      showToast(t("Visual stops mode (S)"), 1200);
     } else if (k === "b" && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       setEditMode("select");
-      showToast("Select mode (B) — box-select · O for offsets", 1600);
+      showToast(t("Select mode (B) — box-select · O for offsets"), 1600);
     } else if (k === "o" && !e.ctrlKey && !e.metaKey && editMode === "select") {
       e.preventDefault();
       selectOffsetPoints();
     } else if (k === "r" && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       if (followPending) {
-        showToast("Confirm (Enter) or Revert (Esc) Follow roads first", 2200);
+        showToast(t("Confirm (Enter) or Revert (Esc) Follow roads first"), 2200);
       } else {
         void runFollowRoadsAssist();
       }
@@ -2542,10 +2552,10 @@ export function createPathContributor(ctx) {
       setEditMode(next);
       showToast(
         next === "path"
-          ? "Path turns mode (V)"
+          ? t("Path turns mode (V)")
           : next === "stops"
-            ? "Visual stops mode (S)"
-            : "Select mode (B)",
+            ? t("Visual stops mode (S)")
+            : t("Select mode (B)"),
         1200,
       );
     }
@@ -2553,7 +2563,7 @@ export function createPathContributor(ctx) {
 
   function undoPathEdit() {
     if (followPending) {
-      showToast("Confirm or Revert Follow roads first", 2000);
+      showToast(t("Confirm or Revert Follow roads first"), 2000);
       return;
     }
     if (pathHistory.length) {
@@ -2565,13 +2575,13 @@ export function createPathContributor(ctx) {
       paintDraft();
       updateUndoRedoButtons();
       setStatus(
-        `Undo · ${points.length} path pts · ${pathHistory.length} undo · ${pathFuture.length} redo`,
+        t("Undo · {n} path pts · {u} undo · {r} redo", { n: points.length, u: pathHistory.length, r: pathFuture.length }),
       );
-      showToast("Path undone", 1000);
+      showToast(t("Path undone"), 1000);
       return;
     }
     if (points.length <= 2) {
-      showToast("Nothing to undo", 1400);
+      showToast(t("Nothing to undo"), 1400);
       updateUndoRedoButtons();
       return;
     }
@@ -2581,16 +2591,16 @@ export function createPathContributor(ctx) {
     selectedIdx.clear();
     paintDraft();
     updateUndoRedoButtons();
-    showToast("Last point removed", 1000);
+    showToast(t("Last point removed"), 1000);
   }
 
   function redoPathEdit() {
     if (followPending) {
-      showToast("Confirm or Revert Follow roads first", 2000);
+      showToast(t("Confirm or Revert Follow roads first"), 2000);
       return;
     }
     if (!pathFuture.length) {
-      showToast("Nothing to redo", 1200);
+      showToast(t("Nothing to redo"), 1200);
       return;
     }
     pathHistory.push(snapshotPath());
@@ -2601,9 +2611,9 @@ export function createPathContributor(ctx) {
     paintDraft();
     updateUndoRedoButtons();
     setStatus(
-      `Redo · ${points.length} path pts · ${pathHistory.length} undo · ${pathFuture.length} redo`,
+      t("Redo · {n} path pts · {u} undo · {r} redo", { n: points.length, u: pathHistory.length, r: pathFuture.length }),
     );
-    showToast("Path redone", 1000);
+    showToast(t("Path redone"), 1000);
   }
 
   function clearPathHistoryStacks() {
@@ -2639,15 +2649,15 @@ export function createPathContributor(ctx) {
   }
 
   function validate(fields) {
-    if (!fields.route_short_name) return "Enter a route number (e.g. 38, S1, E11).";
+    if (!fields.route_short_name) return t("Enter a route number (e.g. 38, S1, E11).");
     if (!fields.agency) {
-      return "Select an operator / mode (KMB, GMB, MTR, AEL, LRT, …).";
+      return t("Select an operator / mode (KMB, GMB, MTR, AEL, LRT, …).");
     }
     if (fields.coordinates.length < 2) {
-      return "Load a calculated path or draw at least 2 points.";
+      return t("Load a calculated path or draw at least 2 points.");
     }
     if (!fields.from_match.length || !fields.to_match.length) {
-      return "Board/alight name fragments required (auto-filled after Load path).";
+      return t("Board/alight name fragments required (auto-filled after Load path).");
     }
     return null;
   }
@@ -2739,7 +2749,7 @@ export function createPathContributor(ctx) {
     }
     if (els.submitTitle) {
       els.submitTitle.textContent =
-        opts.title || (opts.ok ? "Submit successful" : "Submit failed");
+        opts.title || (opts.ok ? t("Submit successful") : t("Submit failed"));
     }
     if (els.submitMsg) els.submitMsg.textContent = opts.message || "";
     if (els.submitMeta) els.submitMeta.textContent = opts.meta || "";
@@ -2797,12 +2807,12 @@ export function createPathContributor(ctx) {
     const route = String(els.route?.value || "").trim();
     const direction = String(els.direction?.value || "").trim();
     if (!agency || !route) {
-      showToast("Select operator and enter route number first", 2200);
+      showToast(t("Select operator and enter route number first"), 2200);
       return;
     }
     if (loadAbort) loadAbort.abort();
     loadAbort = new AbortController();
-    setStatus("Loading stops + checking published overrides…");
+    setStatus(t("Loading stops + checking published overrides…"));
     if (els.btnLoad) els.btnLoad.disabled = true;
     try {
       const result = await loadCalculatedRoutePath(agency, route, direction, {
@@ -2829,37 +2839,37 @@ export function createPathContributor(ctx) {
       if (result.pathSource === "override") {
         const idLabel = result.overrideId ? ` (${result.overrideId})` : "";
         setStatus(
-          `Published override loaded${idLabel} · ${points.length} path pts · ${result.stops.length} stops. Edit & re-submit to improve, or Follow roads (R).`,
+          t("Published override loaded{id} · {n} path pts · {stops} stops. Edit & re-submit to improve, or Follow roads (R).", { id: idLabel, n: points.length, stops: result.stops.length }),
         );
         showToast(
-          `Override path loaded${idLabel} · ${points.length} pts`,
+          t("Override path loaded{id} · {n} pts", { id: idLabel, n: points.length }),
           2800,
         );
       } else if (result.pathSource === "similar") {
         const fromR = result.similarFromRoute
-          ? `route ${result.similarFromRoute}`
-          : result.overrideId || "another route";
+          ? t("route {r}", { r: result.similarFromRoute })
+          : result.overrideId || t("another route");
         setStatus(
-          `No override for this route — using similar published path from ${fromR} (shared corridor) · ${points.length} pts. Edit & submit your own.`,
+          t("No override for this route — using similar published path from {from} (shared corridor) · {n} pts. Edit & submit your own.", { from: fromR, n: points.length }),
         );
         showToast(
-          `Similar override (${fromR}) · ${points.length} pts`,
+          t("Similar override ({from}) · {n} pts", { from: fromR, n: points.length }),
           3000,
         );
       } else {
         setStatus(
-          `Live OSRM path · ${result.stops.length} stops · ${points.length} pts (no matching published path). Press R to follow roads.`,
+          t("Live OSRM path · {stops} stops · {n} pts (no matching published path). Press R to follow roads.", { stops: result.stops.length, n: points.length }),
         );
         showToast(
-          `Path loaded · ${result.stops.length} stops · ${points.length} pts (live densify)`,
+          t("Path loaded · {stops} stops · {n} pts (live densify)", { stops: result.stops.length, n: points.length }),
           2400,
         );
       }
     } catch (e) {
       if (e?.name === "AbortError") return;
       console.warn("[contribute] load path", e);
-      setStatus(e?.message || "Load failed");
-      showToast(e?.message || "Could not load route path", 3200);
+      setStatus(e?.message || t("Load failed"));
+      showToast(e?.message || t("Could not load route path"), 3200);
     } finally {
       if (els.btnLoad) els.btnLoad.disabled = false;
     }
@@ -2869,7 +2879,7 @@ export function createPathContributor(ctx) {
     const r =
       typeof getSelectedPlanRoute === "function" ? getSelectedPlanRoute() : null;
     if (!r) {
-      showToast("No plan selected — search a route instead", 2000);
+      showToast(t("No plan selected — search a route instead"), 2000);
       return;
     }
     if (els.agency && r.agency) {
@@ -2895,9 +2905,9 @@ export function createPathContributor(ctx) {
       paintDraft();
       fitToPath();
       setStatus(
-        `Loaded calculated path from plan (${points.length} pts). Follow roads (R) to hug streets, then edit.`,
+        t("Loaded calculated path from plan ({n} pts). Follow roads (R) to hug streets, then edit.", { n: points.length }),
       );
-      showToast("Loaded path from current plan", 1800);
+      showToast(t("Loaded path from current plan"), 1800);
       return;
     }
     // Otherwise load from open-data + OSRM
@@ -3017,7 +3027,7 @@ export function createPathContributor(ctx) {
     // Auto-close if viewport shrinks while open
     if (active && !desktop) {
       close();
-      showToast("Contribute closed — desktop only", 2200);
+      showToast(t("Contribute closed — desktop only"), 2200);
     }
   }
 
@@ -3037,15 +3047,15 @@ export function createPathContributor(ctx) {
 
   els.btnModePath?.addEventListener("click", () => {
     setEditMode("path");
-    showToast("Path turns mode (V)", 1000);
+    showToast(t("Path turns mode (V)"), 1000);
   });
   els.btnModeStops?.addEventListener("click", () => {
     setEditMode("stops");
-    showToast("Visual stops mode (S) — drag orange pins", 1400);
+    showToast(t("Visual stops mode (S) — drag orange pins"), 1400);
   });
   els.btnModeSelect?.addEventListener("click", () => {
     setEditMode("select");
-    showToast("Select mode (B) — box-select offset points", 1600);
+    showToast(t("Select mode (B) — box-select offset points"), 1600);
   });
   els.btnSelectOffsets?.addEventListener("click", () => {
     if (editMode !== "select") setEditMode("select");
@@ -3060,12 +3070,12 @@ export function createPathContributor(ctx) {
 
   document.getElementById("contrib-snap-stops")?.addEventListener("click", () => {
     if (!stopMarkers.length || points.length < 2) {
-      showToast("Load a path first", 1600);
+      showToast(t("Load a path first"), 1600);
       return;
     }
     reprojectVisualStops();
-    showToast("Visual stops snapped to path (official unchanged)", 2000);
-    setStatus("Visual stops re-projected onto path · official coords still fixed");
+    showToast(t("Visual stops snapped to path (official unchanged)"), 2000);
+    setStatus(t("Visual stops re-projected onto path · official coords still fixed"));
   });
 
   els.btnFollowRoads?.addEventListener("click", () => {
@@ -3083,11 +3093,11 @@ export function createPathContributor(ctx) {
     "click",
     () => {
       if (followPending) {
-        showToast("Confirm or Revert the path first", 2000);
+        showToast(t("Confirm or Revert the path first"), 2000);
         return;
       }
       clearFollowRoadsDebug();
-      showToast("Follow-roads overlay hidden", 1200);
+      showToast(t("Follow-roads overlay hidden"), 1200);
     },
   );
 
@@ -3117,7 +3127,7 @@ export function createPathContributor(ctx) {
     if (!f) return;
     const name = String(f.name || "").toLowerCase();
     if (!name.endsWith(".json") && f.type && !f.type.includes("json")) {
-      showToast("Drop a .json contribution file", 2000);
+      showToast(t("Drop a .json contribution file"), 2000);
       return;
     }
     void importContributionJson(f);
@@ -3176,7 +3186,7 @@ export function createPathContributor(ctx) {
     offsetIdx.clear();
     paintDraft();
     updateUndoRedoButtons();
-    setStatus("Path cleared");
+    setStatus(t("Path cleared"));
   });
   els.btnFromPlan?.addEventListener("click", () => fillFromPlan());
   els.btnLoad?.addEventListener("click", () => void loadPathFromSearch());
@@ -3185,7 +3195,7 @@ export function createPathContributor(ctx) {
     const draft = buildDraft();
     if (!draft) return;
     downloadDraft(draft);
-    showToast("JSON downloaded", 2000);
+    showToast(t("JSON downloaded"), 2000);
   });
 
   document.querySelectorAll('input[name="contrib-submit-mode"]').forEach((el) => {
@@ -3200,7 +3210,7 @@ export function createPathContributor(ctx) {
     const submit_mode = getSubmitMode();
 
     if (submit_mode === "oauth" && !ghSession.logged_in) {
-      showToast("Log in with GitHub first (or switch to Bot account)", 2800);
+      showToast(t("Log in with GitHub first (or switch to Bot account)"), 2800);
       els.ghLoginBtn?.focus();
       return;
     }
@@ -3238,26 +3248,26 @@ export function createPathContributor(ctx) {
       const meta = [
         draft.agency,
         draft.route_short_name,
-        `${pts} pts`,
+        t("{pts} pts", { pts }),
         res.submit_mode || submit_mode,
-        res.github_author ? `as ${res.github_author}` : "",
-        draft.id ? `id ${draft.id}` : "",
+        res.github_author ? t("as {author}", { author: res.github_author }) : "",
+        draft.id ? t("id {id}", { id: draft.id }) : "",
       ]
         .filter(Boolean)
         .join(" · ");
 
       if (res.accepted) {
-        let msg = res.message || "Your path was submitted for review.";
+        let msg = res.message || t("Your path was submitted for review.");
         if (res.github_pr && prUrl) {
           msg =
             submit_mode === "oauth"
-              ? "Your path was submitted and a pull request was opened from your GitHub account."
-              : "Your path was submitted and a review pull request was opened by the site bot.";
+              ? t("Your path was submitted and a pull request was opened from your GitHub account.")
+              : t("Your path was submitted and a review pull request was opened by the site bot.");
         } else if (res.local_pending) {
           msg =
-            "Saved locally to the overrides pending folder. Open the review page or merge via npm run overrides:merge.";
+            t("Saved locally to the overrides pending folder. Open the review page or merge via npm run overrides:merge.");
         } else if (res.stored) {
-          msg = "Your path was saved to the review queue.";
+          msg = t("Your path was saved to the review queue.");
         }
         showSubmitOverlayResult({
           ok: true,
@@ -3290,10 +3300,10 @@ export function createPathContributor(ctx) {
         void refreshGithubAuth();
         showSubmitOverlayResult({
           ok: false,
-          title: "GitHub login required",
+          title: t("GitHub login required"),
           message:
-            "Log in with GitHub to submit with your account, or switch to Bot account.",
-          meta: draft.id ? `id ${draft.id}` : "",
+            t("Log in with GitHub to submit with your account, or switch to Bot account."),
+          meta: draft.id ? t("id {id}", { id: draft.id }) : "",
           prUrl: null,
           draft,
         });
@@ -3301,12 +3311,12 @@ export function createPathContributor(ctx) {
         const errMsg =
           err?.message ||
           err?.data?.error ||
-          "Could not reach the submit API.";
+          t("Could not reach the submit API.");
         showSubmitOverlayResult({
           ok: false,
-          title: "Submit failed",
-          message: `${errMsg} Download or copy the JSON and share it with moderators if needed.`,
-          meta: draft.id ? `id ${draft.id}` : "",
+          title: t("Submit failed"),
+          message: `${errMsg} ${t("Download or copy the JSON and share it with moderators if needed.")}`,
+          meta: draft.id ? t("id {id}", { id: draft.id }) : "",
           prUrl: null,
           draft,
         });
@@ -3332,23 +3342,23 @@ export function createPathContributor(ctx) {
   els.submitDownload?.addEventListener("click", () => {
     const d = lastSubmitDraft || buildDraft();
     if (!d) {
-      showToast("No draft to download", 1600);
+      showToast(t("No draft to download"), 1600);
       return;
     }
     downloadDraft(d);
-    showToast("JSON downloaded", 1600);
+    showToast(t("JSON downloaded"), 1600);
   });
   els.submitCopy?.addEventListener("click", async () => {
     const d = lastSubmitDraft || buildDraft();
     if (!d) {
-      showToast("No draft to copy", 1600);
+      showToast(t("No draft to copy"), 1600);
       return;
     }
     try {
       await navigator.clipboard.writeText(JSON.stringify(d, null, 2));
-      showToast("JSON copied", 1600);
+      showToast(t("JSON copied"), 1600);
     } catch {
-      showToast("Could not copy — use Download instead", 2200);
+      showToast(t("Could not copy — use Download instead"), 2200);
     }
   });
 
@@ -3357,9 +3367,9 @@ export function createPathContributor(ctx) {
     if (!draft) return;
     try {
       await navigator.clipboard.writeText(JSON.stringify(draft, null, 2));
-      showToast("JSON copied to clipboard", 1800);
+      showToast(t("JSON copied to clipboard"), 1800);
     } catch {
-      showToast("Could not copy — use Download instead", 2200);
+      showToast(t("Could not copy — use Download instead"), 2200);
     }
   });
 

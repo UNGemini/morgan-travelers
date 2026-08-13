@@ -41,7 +41,7 @@
   --radius-md: 12px;
   --radius-lg: 20px;
   --radius-xl: 28px;
-  --font: "Montserrat", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font: "Montserrat", "Noto Sans TC", "Noto Sans SC", "Noto Sans JP", "Noto Sans KR", -apple-system, BlinkMacSystemFont, sans-serif;
   --mouse-x: 50%;
   --mouse-y: 50%;
   --top-h: 56px;

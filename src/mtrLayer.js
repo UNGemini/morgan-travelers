@@ -160,6 +160,23 @@ export function addMtrLayers(map) {
   });
 }
 
+/**
+ * Switch the MTR exit-label language (letter refs stay; the name fallback
+ * follows the station mode: name_zh for zh modes, name_en otherwise).
+ * Called on language change; no-op until the layers exist.
+ * @param {import('maplibre-gl').Map} map
+ * @param {"en"|"hant"|"hans"} stationMode
+ */
+export function relocalizeMapLabels(map, stationMode) {
+  if (!map?.getLayer?.("mtr-exits-label")) return;
+  const nameField = stationMode === "hant" || stationMode === "hans" ? "name_zh" : "name_en";
+  map.setLayoutProperty("mtr-exits-label", "text-field", [
+    "coalesce",
+    ["get", "ref"],
+    ["get", nameField],
+  ]);
+}
+
 /** Match nothing (hide layer until a plan sets codes). */
 function neverFilter() {
   return ["==", ["get", "station_code"], "__none__"];

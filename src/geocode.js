@@ -11,6 +11,7 @@
 
 import { searchMtrStationsLocal, MTR_STATIONS } from "./mtrStations.js";
 import { searchLrtStopsLocal, matchLrtStop, lrtStopToHit } from "./lrtStops.js";
+import { t } from "./lang.js";
 
 /**
  * Parse @MTR / @LRT / @Bus mode filters from a search query.
@@ -317,7 +318,7 @@ export async function searchPlaces(query, opts = {}) {
       const data = await res.json();
       return Array.isArray(data) ? data : [];
     } catch {
-      throw new Error("Place search returned invalid JSON — is /geocode proxy running?");
+      throw new Error(t("Place search returned invalid JSON — is /geocode proxy running?"));
     }
   }
 
@@ -379,7 +380,7 @@ export async function searchPlaces(query, opts = {}) {
         name:
           item.name ||
           item.display_name?.split(",")[0]?.trim() ||
-          "Place",
+          t("Place"),
         label: formatNominatimLabel(item),
         type: item.type || "",
         category,
@@ -581,12 +582,12 @@ export function getCurrentPosition(options = {}) {
       (err) => {
         const msg =
           err.code === 1
-            ? "Location permission denied"
+            ? t("Location permission denied")
             : err.code === 2
-              ? "Location unavailable"
+              ? t("Location unavailable")
               : err.code === 3
-                ? "Location request timed out"
-                : err.message || "Could not get location";
+                ? t("Location request timed out")
+                : err.message || t("Could not get location");
         reject(new Error(msg));
       },
       {

@@ -13,6 +13,7 @@
  */
 import { detectMtrLineCode, isLightRailOption } from "./mtrColors.js";
 import { LRT_STOPS, matchLrtStop } from "./lrtStops.js";
+import { t } from "./lang.js";
 import {
   getMtrInterchangeRules,
   excludeIxAfterAelFreeMtr,
@@ -156,7 +157,7 @@ export function setFareType(type) {
 }
 
 export function formatFareTypeLabel(type = activeFareType) {
-  return FARE_TYPE_LABELS[type] || FARE_TYPE_LABELS.octopus_adult;
+  return t(FARE_TYPE_LABELS[type] || FARE_TYPE_LABELS.octopus_adult);
 }
 
 /** @returns {boolean} */

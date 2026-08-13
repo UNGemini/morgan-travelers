@@ -12,6 +12,7 @@ import {
   parseServiceDayIso,
   getHongKongParts,
 } from "./preferences.js";
+import { t } from "./lang.js";
 
 /** Same-origin proxy prefix */
 const ETA_BASE = "/eta";
@@ -795,10 +796,10 @@ export function stationNameWithPlatforms(label, platforms) {
   const base = stationBaseName(label) || String(label || "").trim();
   const plats = collectServingPlatforms(platforms || []);
   if (!base) {
-    return plats.length ? `Platform ${plats.join(" / ")}` : "";
+    return plats.length ? t("Platform {p}", { p: plats.join(" / ") }) : "";
   }
   if (!plats.length) return base;
-  return `${base} - Platform ${plats.join(" / ")}`;
+  return t("{base} - Platform {p}", { base, p: plats.join(" / ") });
 }
 
 /**
@@ -810,9 +811,9 @@ export function formatPlatformLabel(raw) {
   if (raw == null || raw === "") return null;
   const s = String(raw).trim();
   if (!s) return null;
-  if (/^platform\s+/i.test(s)) return s.replace(/^platform\s+/i, "Platform ");
+  if (/^platform\s+/i.test(s)) return t("Platform {p}", { p: s.replace(/^platform\s+/i, "") });
   // Numeric / letter bay
-  if (/^[A-Za-z0-9]{1,4}$/.test(s)) return `Platform ${s}`;
+  if (/^[A-Za-z0-9]{1,4}$/.test(s)) return t("Platform {p}", { p: s });
   return s;
 }
 
@@ -2539,13 +2540,13 @@ export function formatLiveStatusHead(fetchedAt, nowMs = Date.now()) {
  */
 export function formatUpdatedAgo(fetchedAt, nowMs = Date.now()) {
   if (fetchedAt == null || !Number.isFinite(fetchedAt)) {
-    return "Updated —";
+    return t("Updated —");
   }
   const sec = Math.max(0, Math.floor((nowMs - fetchedAt) / 1000));
-  if (sec < 60) return `Updated ${sec}s ago`;
+  if (sec < 60) return t("Updated {n}s ago", { n: sec });
   const min = Math.floor(sec / 60);
-  if (min < 60) return `Updated ${min}m ago`;
-  return `Updated ${Math.floor(min / 60)}h ago`;
+  if (min < 60) return t("Updated {n}m ago", { n: min });
+  return t("Updated {n}h ago", { n: Math.floor(min / 60) });
 }
 
 /**

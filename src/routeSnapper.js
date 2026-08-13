@@ -9,6 +9,7 @@
  */
 
 import { detectMtrLineCode } from "./mtrColors.js";
+import { t } from "./lang.js";
 
 /**
  * @typedef {{ lon: number, lat: number }} LngLat
@@ -303,7 +304,7 @@ export async function followRoadsPath(coords, opts = {}) {
   const onProgress =
     typeof opts.onProgress === "function" ? opts.onProgress : () => {};
 
-  onProgress({ phase: "vertices", msg: "Snapping vertices to nearest road…" });
+  onProgress({ phase: "vertices", msg: t("Snapping vertices to nearest road…") });
 
   // ── 1) Per-vertex nearest snap — 1:1 with originals, never drop ──
   const vertexSnaps = await mapPool(
@@ -365,7 +366,7 @@ export async function followRoadsPath(coords, opts = {}) {
 
   onProgress({
     phase: "segments",
-    msg: "Densifying segments OSRM can handle…",
+    msg: t("Densifying segments OSRM can handle…"),
     n: pts.length - 1,
   });
 
@@ -404,7 +405,7 @@ export async function followRoadsPath(coords, opts = {}) {
         phase: "segments",
         i,
         n: vertexSnaps.length - 1,
-        msg: `Segment ${i + 1}/${vertexSnaps.length - 1}`,
+        msg: t("Segment {n}/{total}", { n: i + 1, total: vertexSnaps.length - 1 }),
       });
     }
 
@@ -486,7 +487,7 @@ export async function followRoadsPath(coords, opts = {}) {
     result: path.map((p) => ({ lon: p.lon, lat: p.lat })),
   };
 
-  onProgress({ phase: "done", msg: "Done" });
+  onProgress({ phase: "done", msg: t("Done") });
 
   return {
     path,

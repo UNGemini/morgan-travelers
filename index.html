@@ -21,7 +21,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&family=Noto+Sans+KR:wght@400;500;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap"
       rel="stylesheet"
       crossorigin="anonymous"
     />
@@ -1200,6 +1200,44 @@
             <!-- Page: Settings -->
             <div id="sidebar-page-settings" class="sidebar-page" hidden>
               <div class="panel-page-scroll" id="settings-page-body">
+            <section class="panel-section" id="settings-language-section">
+              <h3>Language</h3>
+              <div class="pref-field" id="language-field">
+                <div
+                  class="pref-segment pref-segment-6"
+                  role="group"
+                  aria-label="Language"
+                >
+                  <label class="pref-opt">
+                    <input type="radio" name="app-language" value="en" id="lang-en" />
+                    <span>English</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="radio" name="app-language" value="zh-hk" id="lang-zh-hk" />
+                    <span>廣東話</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="radio" name="app-language" value="zh-tw" id="lang-zh-tw" />
+                    <span>繁體中文</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="radio" name="app-language" value="zh-cn" id="lang-zh-cn" />
+                    <span>简体中文</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="radio" name="app-language" value="ja" id="lang-ja" />
+                    <span>日本語</span>
+                  </label>
+                  <label class="pref-opt">
+                    <input type="radio" name="app-language" value="ko" id="lang-ko" />
+                    <span>한국어</span>
+                  </label>
+                </div>
+                <p class="pref-field-note">
+                  Station names show in Chinese for 廣東話, 繁體中文 and 简体中文; English for others.
+                </p>
+              </div>
+            </section>
             <section class="panel-section" id="settings-fare-section">
               <h3>Fare</h3>
               <p class="hint">
