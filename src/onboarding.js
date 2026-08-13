@@ -10,12 +10,21 @@ import {
   LIVE_BUS_MORE_STORAGE_KEY,
   loadBetaBannerPref,
   loadDataCachePref,
+  loadDataSourcePref,
   loadLiveBusMorePref,
   loadLiveBusPref,
+  saveBetaBannerPref,
   saveDataCachePref,
+  saveDataSourcePref,
   saveLiveBusPref,
 } from "./preferences.js";
-import { FARE_TYPE_LABELS, loadFareType, saveFareType } from "./fares.js";
+import {
+  FARE_TYPE_HINTS,
+  FARE_TYPE_LABELS,
+  FARE_TYPES,
+  loadFareType,
+  saveFareType,
+} from "./fares.js";
 
 export const ONBOARDED_STORAGE_KEY = "morgan.onboarded.v1";
 const TERMS_AGREED_STORAGE_KEY = "morgan.termsAgreed.v1";
@@ -50,17 +59,6 @@ const STEP_TITLES = [
   "Offline Data",
   "Beta Features",
   "All done!",
-];
-
-/**
- * Fallback fare-type list, only used if the Settings dropdown (#select-fare-type)
- * is unavailable — normally Step 3 clones that dropdown's options verbatim.
- */
-const TICKET_OPTIONS = [
-  { id: "octopus_adult", labelKey: FARE_TYPE_LABELS.octopus_adult },
-  { id: "octopus_student", labelKey: FARE_TYPE_LABELS.octopus_student },
-  { id: "octopus_joyyou_65", labelKey: FARE_TYPE_LABELS.octopus_joyyou_65 },
-  { id: "octopus_child", labelKey: FARE_TYPE_LABELS.octopus_child },
 ];
 
 /**
@@ -225,21 +223,14 @@ function renderDots(isSuccess) {
 }
 
 /**
- * Step 3 options: cloned from the Settings fare-type dropdown so onboarding
- * always offers exactly the same menu (values, labels and tooltips).
+ * Step 3 options: the full fare-type taxonomy with localized labels/tooltips
+ * (FARE_TYPE_LABELS / FARE_TYPE_HINTS) — the same set as Settings.
  */
 function fareTypeOptionsHtml(current) {
-  const settingsSel = document.getElementById("select-fare-type");
-  const options =
-    settingsSel instanceof HTMLSelectElement && settingsSel.options.length
-      ? [...settingsSel.options]
-      : TICKET_OPTIONS.map((o) => ({ value: o.id, label: t(o.labelKey), title: "" }));
-  return options
-    .map(
-      (o) =>
-        `<option value="${esc(o.value)}"${String(o.value) === current ? " selected" : ""}${o.title ? ` title="${esc(o.title)}"` : ""}>${esc(o.label)}</option>`,
-    )
-    .join("");
+  return FARE_TYPES.map((id) => {
+    const hintKey = FARE_TYPE_HINTS[id];
+    return `<option value="${id}"${String(id) === current ? " selected" : ""}${hintKey ? ` title="${esc(t(hintKey))}"` : ""}>${esc(t(FARE_TYPE_LABELS[id] || FARE_TYPE_LABELS.octopus_adult))}</option>`;
+  }).join("");
 }
 
 function stepBodyHtml(idx) {
@@ -271,25 +262,31 @@ function stepBodyHtml(idx) {
   if (idx === 1) {
     return `
       <div class="onb-step onb-terms">
-        <p class="onb-desc">${esc(t("Please review and accept our Terms of Service and Privacy Policy to continue."))}</p>
-        <div class="onb-terms-links">
-          <a class="btn btn-ghost" href="${TERMS_URL}" target="_blank" rel="noopener noreferrer">
-            <span class="btn-row">
-              <span class="material-symbols-outlined" aria-hidden="true">description</span>
-              ${esc(t("Terms of Service"))}
-            </span>
+        <p class="onb-desc">${esc(t("Please review and accept all terms and policies to continue."))}</p>
+        <div class="onb-terms-list">
+          <a class="onb-term-row onb-term-row--primary" href="${TERMS_URL}" target="_blank" rel="noopener noreferrer">
+            <span class="material-symbols-outlined onb-term-icon" aria-hidden="true">verified</span>
+            <span class="onb-term-title">${esc(t("UNLOOP MORGAN Universal Terms of Use for Open-Source Software"))}</span>
+            <span class="material-symbols-outlined onb-term-open" aria-hidden="true">open_in_new</span>
           </a>
-          <a class="btn btn-ghost" href="${PRIVACY_URL}" target="_blank" rel="noopener noreferrer">
-            <span class="btn-row">
-              <span class="material-symbols-outlined" aria-hidden="true">privacy_tip</span>
-              ${esc(t("Privacy Policy"))}
-            </span>
+          <a class="onb-term-row" href="${TERMS_URL}" target="_blank" rel="noopener noreferrer">
+            <span class="material-symbols-outlined onb-term-icon" aria-hidden="true">description</span>
+            <span class="onb-term-title">${esc(t("Terms of Service"))}</span>
+            <span class="material-symbols-outlined onb-term-open" aria-hidden="true">open_in_new</span>
+          </a>
+          <a class="onb-term-row" href="${PRIVACY_URL}" target="_blank" rel="noopener noreferrer">
+            <span class="material-symbols-outlined onb-term-icon" aria-hidden="true">privacy_tip</span>
+            <span class="onb-term-title">${esc(t("Privacy Policy"))}</span>
+            <span class="material-symbols-outlined onb-term-open" aria-hidden="true">open_in_new</span>
           </a>
         </div>
-        <label class="onb-consent">
-          <input type="checkbox" id="onb-terms-agree" />
-          <span>${esc(t("I agree to the Terms of Service and Privacy Policy"))}</span>
-        </label>
+        <div class="onb-toggle-row onb-consent-row">
+          <span class="onb-toggle-label">${esc(t("I agree to all terms and policies"))}</span>
+          <label class="onb-toggle">
+            <input type="checkbox" id="onb-terms-agree" />
+            <span class="onb-toggle-track"></span>
+          </label>
+        </div>
       </div>`;
   }
   if (idx === 2) {
@@ -307,6 +304,7 @@ function stepBodyHtml(idx) {
   }
   if (idx === 3) {
     const cacheOn = loadDataCachePref();
+    const source = loadDataSourcePref();
     return `
       <div class="onb-step onb-cache">
         <p class="onb-desc">${esc(t("Cache transit data on this device for offline use and mobile data savings."))}</p>
@@ -316,6 +314,16 @@ function stepBodyHtml(idx) {
             <input type="checkbox" id="onb-cache-toggle" ${cacheOn ? "checked" : ""} />
             <span class="onb-toggle-track"></span>
           </label>
+        </div>
+        <div class="onb-sub-options" id="onb-cache-subs" ${cacheOn ? "" : "hidden"}>
+          <div class="onb-sub-row">
+            <span class="onb-sub-label">${esc(t("Prefer data source"))}</span>
+            <select class="onb-sub-select" id="onb-data-source-select" aria-label="${esc(t("Prefer data source"))}">
+              <option value="cloud" ${source === "cloud" ? "selected" : ""}>${esc(t("Cloud"))}</option>
+              <option value="local" ${source === "local" ? "selected" : ""}>${esc(t("Local"))}</option>
+            </select>
+          </div>
+          <p class="onb-sub-note">${esc(t("Cloud: live data first, downloaded copy as the offline fallback. Local: serve the downloaded copy directly to save mobile data."))}</p>
         </div>
       </div>`;
   }
@@ -386,7 +394,9 @@ function betaSectionHtml(section) {
             <span class="onb-toggle-track"></span>
           </label>
         </div>
-        ${subs}
+        <div class="onb-sub-options" ${enabled ? "" : "hidden"}>
+          ${subs}
+        </div>
       </div>
     </details>`;
 }
@@ -410,6 +420,23 @@ function wireStep(idx) {
         nextBtn.disabled = !agree.checked;
       });
     }
+  } else if (idx === 3) {
+    const tgl = bodyEl.querySelector("#onb-cache-toggle");
+    const subs = bodyEl.querySelector("#onb-cache-subs");
+    if (tgl && subs) {
+      tgl.addEventListener("change", () => {
+        subs.hidden = !tgl.checked;
+      });
+    }
+  } else if (idx === 4) {
+    // Sub-options are hidden while the section's Enable toggle is off.
+    bodyEl.querySelectorAll("input.onb-beta-enable").forEach((el) => {
+      const container = el.closest(".onb-details-body")?.querySelector(".onb-sub-options");
+      if (container) container.hidden = !el.checked;
+      el.addEventListener("change", () => {
+        if (container) container.hidden = !el.checked;
+      });
+    });
   } else if (idx === STEP_COUNT) {
     document.getElementById("onb-start")?.addEventListener("click", finish);
   }
@@ -435,6 +462,11 @@ function goNext() {
   } else if (stepIndex === 3) {
     const tgl = document.querySelector("#onb-cache-toggle");
     if (tgl) saveDataCachePref(tgl.checked);
+    const subs = document.getElementById("onb-cache-subs");
+    if (subs && !subs.hidden) {
+      const sel = document.querySelector("#onb-data-source-select");
+      if (sel) saveDataSourcePref(sel.value);
+    }
   } else if (stepIndex === 4) {
     for (const section of BETA_SECTIONS) {
       const on = document.querySelector(`input.onb-beta-enable[data-section="${section.id}"]`);

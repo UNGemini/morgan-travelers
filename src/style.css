@@ -6431,29 +6431,59 @@ html.pwa .offline-banner.gl-error-banner {
   outline: 2px solid var(--accent, #8ab4ff);
   outline-offset: 2px;
 }
-.onb-terms-links {
+.onb-terms-list {
   display: grid;
-  grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-bottom: 16px;
 }
-.onb-consent {
+.onb-term-row {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px 14px;
-  border-radius: 12px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.03);
-  font-size: 0.85rem;
-  line-height: 1.5;
-  cursor: pointer;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  text-decoration: none;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
 }
-.onb-consent input {
-  width: 18px;
-  height: 18px;
-  margin: 1px 0 0;
-  accent-color: var(--accent, #8ab4ff);
+.onb-term-row:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.07);
+}
+.onb-term-row:focus-visible {
+  outline: 2px solid var(--accent, #8ab4ff);
+  outline-offset: 2px;
+}
+.onb-term-row--primary {
+  border-color: rgba(124, 155, 255, 0.55);
+  background: rgba(124, 155, 255, 0.12);
+}
+.onb-term-row--primary:hover {
+  border-color: rgba(124, 155, 255, 0.8);
+  background: rgba(124, 155, 255, 0.18);
+}
+.onb-term-icon {
+  flex: none;
+  font-size: 1.25rem;
+  color: var(--accent, #8ab4ff);
+}
+.onb-term-title {
+  flex: 1;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.onb-term-open {
+  flex: none;
+  font-size: 1.05rem;
+  opacity: 0.55;
+}
+.onb-consent-row {
+  border-color: rgba(255, 255, 255, 0.14);
 }
 .onb-details {
   margin-bottom: 10px;
@@ -6499,6 +6529,32 @@ html.pwa .offline-banner.gl-error-banner {
 .onb-sub-label {
   font-size: 0.82rem;
   color: var(--text-secondary, rgba(245, 245, 247, 0.78));
+}
+.onb-sub-options {
+  margin-top: 10px;
+  animation: onb-sub-in 0.25s ease both;
+}
+.onb-sub-options[hidden] {
+  display: none;
+}
+.onb-sub-options .onb-sub-row {
+  margin-top: 0;
+}
+.onb-sub-note {
+  margin: 8px 4px 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-secondary, rgba(245, 245, 247, 0.78));
+}
+@keyframes onb-sub-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 .onb-sub-select {
   max-width: 55%;
@@ -6564,6 +6620,9 @@ html.pwa .offline-banner.gl-error-banner {
 }
 @media (prefers-reduced-motion: reduce) {
   .onb-step {
+    animation: none;
+  }
+  .onb-sub-options {
     animation: none;
   }
   .onb-toggle-track::after {

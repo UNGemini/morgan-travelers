@@ -69,17 +69,16 @@ export const FARE_TYPE_LABELS = {
   china_tunion: "China T-Union Cards",
 };
 
-/** Short hints for UI (optional title tooltips). */
+/** Tooltip keys for fare types with special terms — localized via t(). */
 export const FARE_TYPE_HINTS = {
   octopus_joyyou_65:
-    "Concessionary fare on domestic MTR (excl. AEL, EAL First Class, Lo Wu & Lok Ma Chau).",
+    "Concessionary fare on domestic routes; excl. AEL, EAL First Class, Lo Wu & Lok Ma Chau",
   octopus_joyyou_60:
-    "JoyYou $2 / 20% scheme; full adult for AEL, Lo Wu, Lok Ma Chau, and Racecourse.",
-  qr_adult: "Same rates as Octopus Adult/Elderly.",
-  qr_child: "Same rates as Octopus Child.",
-  contactless: "Same rates as Octopus Adult.",
-  china_tunion: "Treated as adult Octopus rates on MTR / bus estimates.",
-  single_ride: "Single-journey / cash ticket rates where published.",
+    "JoyYou $2/20% scheme; full adult for AEL, Lo Wu, Lok Ma Chau & Racecourse",
+  qr_adult: "Same rates as Octopus Adult/Elderly",
+  qr_child: "Same rates as Octopus Child",
+  contactless: "Same rates as Octopus Adult",
+  china_tunion: "Treated as adult Octopus rates",
 };
 
 /** Legacy ids → current FareType */

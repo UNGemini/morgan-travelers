@@ -89,6 +89,8 @@ import {
   estimatePlanFare,
   formatPlanFare,
   formatFarePartAmount,
+  FARE_TYPE_HINTS,
+  FARE_TYPE_LABELS,
   loadFareType,
   setFareType,
   getFareType,
@@ -3157,6 +3159,18 @@ function repricePlansForFareType() {
   return true;
 }
 
+/** Localize Settings fare-type dropdown labels + tooltips (dict keys). */
+function localizeFareTypeSelect() {
+  const sel = document.getElementById("select-fare-type");
+  if (!sel) return;
+  for (const opt of sel.options) {
+    const labelKey = FARE_TYPE_LABELS[opt.value];
+    if (labelKey) opt.textContent = t(labelKey);
+    const hintKey = FARE_TYPE_HINTS[opt.value];
+    if (hintKey) opt.title = t(hintKey);
+  }
+}
+
 function initFareTypeUi() {
   const sel = document.getElementById("select-fare-type");
   if (!(sel instanceof HTMLSelectElement)) return;
@@ -3167,6 +3181,7 @@ function initFareTypeUi() {
     fareType = setFareType("octopus_adult");
   }
   sel.value = fareType;
+  localizeFareTypeSelect();
   sel.addEventListener("change", () => {
     const v = sel.value;
     if (!isFareType(v)) return;
@@ -15890,6 +15905,7 @@ function initLanguageUi() {
  */
 function refreshLanguageViews() {
   applyLangToDom();
+  localizeFareTypeSelect();
   relocalizeMapLabels(map, LANG_META[getLang()].stationMode);
   if (sidebarPage === "eta-route" && etaSelectedForDetails) {
     void relocalizeEtaRouteDetail();
