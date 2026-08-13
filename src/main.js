@@ -211,6 +211,14 @@ const workerUrl = new URL(
 setWorkerUrl(workerUrl);
 console.info("[maplibre] worker →", getWorkerUrl());
 console.info("[coi] crossOriginIsolated =", window.crossOriginIsolated);
+console.info(
+  "[pwa] display-mode →",
+  matchMedia("(display-mode: fullscreen)").matches
+    ? "fullscreen (immersive)"
+    : matchMedia("(display-mode: standalone)").matches
+      ? "standalone"
+      : "browser",
+);
 
 /** Public edge origin — in dev under COEP require-corp use same-origin /edge proxy */
 const DATA_BASE = "https://hk-gtfsdata.morgandev.cc";
