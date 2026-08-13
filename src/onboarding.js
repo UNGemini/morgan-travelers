@@ -52,7 +52,10 @@ const STEP_TITLES = [
   "All done!",
 ];
 
-/** Fare types offered in onboarding (compact subset of FARE_TYPES). */
+/**
+ * Fallback fare-type list, only used if the Settings dropdown (#select-fare-type)
+ * is unavailable — normally Step 3 clones that dropdown's options verbatim.
+ */
 const TICKET_OPTIONS = [
   { id: "octopus_adult", labelKey: FARE_TYPE_LABELS.octopus_adult },
   { id: "octopus_student", labelKey: FARE_TYPE_LABELS.octopus_student },
@@ -225,6 +228,24 @@ function renderDots(isSuccess) {
   );
 }
 
+/**
+ * Step 3 options: cloned from the Settings fare-type dropdown so onboarding
+ * always offers exactly the same menu (values, labels and tooltips).
+ */
+function fareTypeOptionsHtml(current) {
+  const settingsSel = document.getElementById("select-fare-type");
+  const options =
+    settingsSel instanceof HTMLSelectElement && settingsSel.options.length
+      ? [...settingsSel.options]
+      : TICKET_OPTIONS.map((o) => ({ value: o.id, label: t(o.labelKey), title: "" }));
+  return options
+    .map(
+      (o) =>
+        `<option value="${esc(o.value)}"${String(o.value) === current ? " selected" : ""}${o.title ? ` title="${esc(o.title)}"` : ""}>${esc(o.label)}</option>`,
+    )
+    .join("");
+}
+
 function stepBodyHtml(idx) {
   if (idx >= STEP_COUNT) {
     return `
@@ -280,14 +301,11 @@ function stepBodyHtml(idx) {
     return `
       <div class="onb-step onb-ticket">
         <p class="onb-desc">${esc(t("Choose your default fare ticket type for trip plans."))}</p>
-        <div class="onb-ticket-grid">
-          ${TICKET_OPTIONS.map(
-            (o) => `
-            <label class="onb-opt">
-              <input type="radio" name="onb-ticket" value="${o.id}" ${o.id === current ? "checked" : ""} />
-              <span class="onb-opt-card">${esc(t(o.labelKey))}</span>
-            </label>`,
-          ).join("")}
+        <div class="onb-field">
+          <label class="onb-field-label" for="onb-ticket-select">${esc(t("Ticket type"))}</label>
+          <select id="onb-ticket-select" class="onb-select" aria-label="${esc(t("Ticket type"))}">
+            ${fareTypeOptionsHtml(current)}
+          </select>
         </div>
       </div>`;
   }
@@ -401,7 +419,7 @@ function goNext() {
       /* ignore */
     }
   } else if (stepIndex === 2) {
-    const sel = document.querySelector('input[name="onb-ticket"]:checked');
+    const sel = document.querySelector("#onb-ticket-select");
     if (sel) saveFareType(sel.value);
   } else if (stepIndex === 3) {
     const tgl = document.querySelector("#onb-cache-toggle");
