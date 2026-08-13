@@ -335,15 +335,12 @@ const els = {
   routerStatus: document.getElementById("router-status"),
   inputOrigin: document.getElementById("input-origin"),
   inputDest: document.getElementById("input-dest"),
-  inputVia: document.getElementById("input-via"),
   suggestOrigin: document.getElementById("suggest-origin"),
   suggestDest: document.getElementById("suggest-dest"),
-  suggestVia: document.getElementById("suggest-via"),
   btnUseLocation: document.getElementById("btn-use-location"),
   btnSwap: document.getElementById("btn-swap"),
   btnAddVia: document.getElementById("btn-add-via"),
-  btnClearVia: document.getElementById("btn-clear-via"),
-  viaField: document.getElementById("via-field"),
+  viaStack: document.getElementById("via-stack"),
   btnPickOrigin: document.getElementById("btn-pick-origin"),
   btnPickDest: document.getElementById("btn-pick-dest"),
   mapPickHint: document.getElementById("map-pick-hint"),
@@ -748,8 +745,13 @@ function togglePinPlan(p) {
   }
   if (!stored) return false;
   delete stored.fare; // re-estimated on render with the current ticket type
-  stored.fromLabel = origin?.label || origin?.name || "";
-  stored.toLabel = destination?.label || destination?.name || "";
+  const ends = snapshotFormEndpoints();
+  stored.origin = ends.origin;
+  stored.destination = ends.destination;
+  stored.vias = ends.vias;
+  stored.fromLabel = ends.origin?.label || origin?.label || origin?.name || "";
+  stored.toLabel =
+    ends.destination?.label || destination?.label || destination?.name || "";
   list.push({ key, fromLabel: stored.fromLabel, toLabel: stored.toLabel, plan: stored, pinnedAt: Date.now() });
   savePinnedPlans(list);
   syncPinnedRouteToolbar();
@@ -2358,6 +2360,8 @@ function sortSlotsGoingAway(slots) {
 let sidebarPage = "search";
 /** Plan on the trip detail page: index in `plans`, or the plan object itself (pinned). */
 let tripDetailIdx = null;
+/** Trip plan to restore when Back is pressed on route detail opened from trip. */
+let etaRouteReturnTrip = null;
 /** @type {Map<number, import("./eta.js").LegEtaResult> | null} */
 let tripDetailEtas = null;
 /** @type {ReturnType<typeof setInterval> | null} */
@@ -3022,24 +3026,63 @@ map.once("idle", () => {
 window.addEventListener("resize", () => map.resize());
 
 // ── Trip planning state ──────────────────────────────────────────────────────
-/** Secondary pick mode: map tap sets origin, destination, or via */
+/** Secondary pick mode: map tap sets origin, destination, or a via slot */
 let pickMode = "destination"; // origin | destination | via
 let mapPickArmed = false; // true while user chose "tap map" for a field
 let origin = null; // { lat, lon, label? }
 let destination = null;
-let via = null;
 let originMarker = null;
 let destMarker = null;
-let viaMarker = null;
+const MAX_VIAS = 5;
+let viaSeq = 0;
+/** Which via slot map-pick / setPoint("via") writes to */
+let activeViaId = null;
+/**
+ * Ordered meet-up waypoints between From and To.
+ * @type {Array<{
+ *   id: string,
+ *   point: { lat: number, lon: number, label: string, isMtr?: boolean, isLrt?: boolean } | null,
+ *   marker: import("maplibre-gl").Marker | null,
+ *   field: HTMLElement,
+ *   input: HTMLInputElement,
+ *   list: HTMLElement,
+ * }>}
+ */
+let vias = [];
 let plans = [];
-let searchTimers = { origin: null, destination: null, via: null };
-let searchAbort = { origin: null, destination: null, via: null };
+let searchTimers = { origin: null, destination: null };
+let searchAbort = { origin: null, destination: null };
 
 const PLAN_POINT_KINDS = ["origin", "destination", "via"];
 
-function setPickMode(mode, { armMap = true } = {}) {
+function isViaSlot(which) {
+  return which === "via" || String(which).startsWith("via:");
+}
+
+function viaIdFromSlot(which) {
+  if (which === "via") return activeViaId || vias[vias.length - 1]?.id || null;
+  if (String(which).startsWith("via:")) return which.slice(4);
+  return null;
+}
+
+function viaSlotKey(id) {
+  return `via:${id}`;
+}
+
+function getViaSlot(id) {
+  return vias.find((v) => v.id === id) || null;
+}
+
+function allSearchSlots() {
+  return ["origin", "destination", ...vias.map((v) => viaSlotKey(v.id))];
+}
+
+function setPickMode(mode, { armMap = true, viaId = null } = {}) {
   pickMode = mode;
   mapPickArmed = armMap;
+  if (mode === "via") {
+    activeViaId = viaId || viaIdFromSlot("via");
+  }
   els.btnPickOrigin?.classList.toggle("active", mode === "origin");
   els.btnPickDest?.classList.toggle("active", mode === "destination");
   els.mapPickHint?.classList.toggle("is-picking", mapPickArmed);
@@ -3054,25 +3097,111 @@ function setPickMode(mode, { armMap = true } = {}) {
   }
 }
 
-function isViaFieldOpen() {
-  return !!(els.viaField && !els.viaField.hidden);
+function syncViaUi() {
+  vias.forEach((slot, i) => {
+    const idxEl = slot.field.querySelector("[data-via-idx]");
+    if (idxEl) idxEl.textContent = vias.length > 1 ? ` ${i + 1}` : "";
+    if (slot.marker?.getElement) {
+      slot.marker.getElement().title =
+        vias.length > 1 ? t("Via {n}", { n: i + 1 }) : t("Via");
+    }
+  });
+  if (els.btnAddVia) els.btnAddVia.hidden = vias.length >= MAX_VIAS;
 }
 
-function setViaFieldOpen(open, { focus = true } = {}) {
-  if (els.viaField) els.viaField.hidden = !open;
-  if (els.btnAddVia) els.btnAddVia.hidden = !!open;
-  if (open && focus) {
-    requestAnimationFrame(() => els.inputVia?.focus());
+function addViaSlot({ focus = true } = {}) {
+  if (vias.length >= MAX_VIAS) {
+    showToast(t("You can add up to {n} vias", { n: MAX_VIAS }), 2200);
+    return null;
   }
+  const id = `v${++viaSeq}`;
+  const field = document.createElement("div");
+  field.className = "loc-field loc-field-via";
+  field.dataset.field = "via";
+  field.dataset.viaId = id;
+  const inputId = `input-via-${id}`;
+  const listId = `suggest-via-${id}`;
+  field.innerHTML = `
+    <label class="loc-label" for="${inputId}">
+      <span class="material-symbols-outlined" aria-hidden="true">group</span>
+      <span>Via</span><span data-via-idx></span>
+    </label>
+    <div class="loc-input-row">
+      <input
+        id="${inputId}"
+        class="loc-input"
+        type="search"
+        enterkeyhint="search"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="e.g. Times Square · meet here"
+        aria-autocomplete="list"
+        aria-controls="${listId}"
+      />
+      <button
+        type="button"
+        class="btn btn-icon"
+        data-via-clear
+        data-acrylic
+        title="Clear via"
+        aria-label="Clear via"
+      >
+        <span class="material-symbols-outlined" aria-hidden="true">close</span>
+      </button>
+    </div>
+    <ul
+      id="${listId}"
+      class="loc-suggest"
+      hidden
+      role="listbox"
+      aria-label="Via suggestions"
+    ></ul>`;
+  els.viaStack?.appendChild(field);
+  applyLangToDom(field);
+  const input = field.querySelector("input");
+  const list = field.querySelector("ul");
+  const slot = { id, point: null, marker: null, field, input, list };
+  vias.push(slot);
+  activeViaId = id;
+  wireSearchInput(input, viaSlotKey(id));
+  field.querySelector("[data-via-clear]")?.addEventListener("click", () => {
+    removeViaSlot(id);
+    showToast(t("Via cleared"), 1400);
+  });
+  syncViaUi();
+  if (focus) requestAnimationFrame(() => input?.focus());
+  return slot;
 }
 
-function clearViaPoint() {
-  viaMarker?.remove();
-  viaMarker = null;
-  via = null;
-  if (els.inputVia) els.inputVia.value = "";
-  hideSuggest("via");
+function removeViaSlot(id) {
+  const idx = vias.findIndex((v) => v.id === id);
+  if (idx < 0) return;
+  const slot = vias[idx];
+  const key = viaSlotKey(id);
+  hideSuggest(key);
+  clearTimeout(searchTimers[key]);
+  searchAbort[key]?.abort();
+  delete searchTimers[key];
+  delete searchAbort[key];
+  delete lastResults[key];
+  slot.marker?.remove();
+  slot.field.remove();
+  vias.splice(idx, 1);
+  if (activeViaId === id) activeViaId = vias[vias.length - 1]?.id || null;
+  syncViaUi();
   updatePlanButton();
+}
+
+function ensureViaSlot(viaId) {
+  if (viaId) {
+    const existing = getViaSlot(viaId);
+    if (existing) return existing;
+  }
+  if (activeViaId) {
+    const active = getViaSlot(activeViaId);
+    if (active) return active;
+  }
+  return vias[vias.length - 1] || addViaSlot({ focus: false });
 }
 
 function readPrefCheckboxes() {
@@ -3945,7 +4074,7 @@ function updatePlanButton() {
  * @param {number} lat
  * @param {number} lon
  * @param {string} [label]
- * @param {{ isMtr?: boolean, isLrt?: boolean, category?: string, type?: string }} [meta]
+ * @param {{ isMtr?: boolean, isLrt?: boolean, category?: string, type?: string, viaId?: string }} [meta]
  */
 function setPoint(kind, lat, lon, label, meta = {}) {
   const el = document.createElement("div");
@@ -3986,12 +4115,18 @@ function setPoint(kind, lat, lon, label, meta = {}) {
     if (els.inputOrigin) els.inputOrigin.value = text;
     hideSuggest("origin");
   } else if (kind === "via") {
-    viaMarker?.remove();
-    viaMarker = marker;
-    via = point;
-    if (els.inputVia) els.inputVia.value = text;
-    hideSuggest("via");
-    setViaFieldOpen(true, { focus: false });
+    const slot = ensureViaSlot(meta.viaId);
+    if (!slot) {
+      marker.remove();
+      return;
+    }
+    slot.marker?.remove();
+    slot.marker = marker;
+    slot.point = point;
+    if (slot.input) slot.input.value = text;
+    activeViaId = slot.id;
+    hideSuggest(viaSlotKey(slot.id));
+    syncViaUi();
   } else {
     destMarker?.remove();
     destMarker = marker;
@@ -4007,6 +4142,188 @@ function setPoint(kind, lat, lon, label, meta = {}) {
 /** @deprecated use setPoint — kept name for map click path */
 function placeMarker(kind, lat, lon, label, meta) {
   setPoint(kind, lat, lon, label, meta);
+}
+
+/** Extra via pins used when previewing a pinned trip (not form slots). */
+let previewViaMarkers = [];
+/** True while trip-detail pins came from a pinned/reopened plan, not the live form. */
+let tripDetailMarkersArePreview = false;
+
+function snapshotFormEndpoints() {
+  return {
+    origin: origin ? { ...origin } : null,
+    destination: destination ? { ...destination } : null,
+    vias: vias.map((v) => (v.point ? { ...v.point } : null)).filter(Boolean),
+  };
+}
+
+function placeEndpointMarker(kind, lat, lon, title) {
+  if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lon))) return null;
+  const el = document.createElement("div");
+  el.className = `map-pin map-pin-${kind}`;
+  el.title = title || "";
+  try {
+    return new Marker({ element: el, anchor: "bottom" })
+      .setLngLat([Number(lon), Number(lat)])
+      .addTo(map);
+  } catch {
+    return null;
+  }
+}
+
+function clearTripEndpointMarkers() {
+  originMarker?.remove();
+  originMarker = null;
+  destMarker?.remove();
+  destMarker = null;
+  for (const slot of vias) {
+    slot.marker?.remove();
+    slot.marker = null;
+  }
+  for (const m of previewViaMarkers) m?.remove();
+  previewViaMarkers = [];
+}
+
+function showFormEndpointMarkers() {
+  clearTripEndpointMarkers();
+  if (origin) {
+    originMarker = placeEndpointMarker(
+      "origin",
+      origin.lat,
+      origin.lon,
+      origin.label || t("Origin"),
+    );
+  }
+  vias.forEach((slot, i) => {
+    if (!slot.point) return;
+    slot.marker = placeEndpointMarker(
+      "via",
+      slot.point.lat,
+      slot.point.lon,
+      vias.length > 1
+        ? t("Via {n}", { n: i + 1 })
+        : slot.point.label || t("Via"),
+    );
+  });
+  if (destination) {
+    destMarker = placeEndpointMarker(
+      "destination",
+      destination.lat,
+      destination.lon,
+      destination.label || t("Destination"),
+    );
+  }
+}
+
+function pointFromStopLike(stop, fallbackLabel) {
+  const ll = extractStopLonLat(stop);
+  if (!ll) return null;
+  const label =
+    String(stop?.stop_name || stop?.name || stop?.label || fallbackLabel || "").trim();
+  return { lat: ll[1], lon: ll[0], label };
+}
+
+/** Origin / vias / destination for a stored or live plan. */
+function endpointsFromPlan(plan) {
+  if (!plan) return { origin: null, destination: null, vias: [] };
+  const storedVias = Array.isArray(plan.vias)
+    ? plan.vias
+    : Array.isArray(plan.via_points)
+      ? plan.via_points
+      : [];
+  if (
+    Number.isFinite(plan.origin?.lat) &&
+    Number.isFinite(plan.origin?.lon) &&
+    Number.isFinite(plan.destination?.lat) &&
+    Number.isFinite(plan.destination?.lon)
+  ) {
+    return {
+      origin: plan.origin,
+      destination: plan.destination,
+      vias: storedVias.filter((p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lon)),
+    };
+  }
+  const legs = plan.legs || [];
+  let originPt = null;
+  let destPt = null;
+  const viaPts = [];
+  for (const leg of legs) {
+    if (
+      leg.type === "meet" &&
+      Number.isFinite(leg.via_lat) &&
+      Number.isFinite(leg.via_lon)
+    ) {
+      viaPts.push({
+        lat: leg.via_lat,
+        lon: leg.via_lon,
+        label: leg.via_label || t("Via"),
+      });
+    }
+    if (leg.type === "transit") {
+      const opt = leg.route_options?.[0];
+      if (!originPt) {
+        originPt = pointFromStopLike(
+          opt?.from || opt?.stops?.[0],
+          plan.fromLabel,
+        );
+      }
+      destPt =
+        pointFromStopLike(
+          opt?.to || (opt?.stops?.length ? opt.stops[opt.stops.length - 1] : null),
+          plan.toLabel,
+        ) || destPt;
+    }
+    if (leg.type === "walk" && Array.isArray(leg.path) && leg.path.length) {
+      const a = leg.path[0];
+      const b = leg.path[leg.path.length - 1];
+      if (!originPt && Number.isFinite(a?.lat) && Number.isFinite(a?.lon)) {
+        originPt = { lat: a.lat, lon: a.lon, label: plan.fromLabel || "" };
+      }
+      if (Number.isFinite(b?.lat) && Number.isFinite(b?.lon)) {
+        destPt = { lat: b.lat, lon: b.lon, label: plan.toLabel || destPt?.label || "" };
+      }
+    }
+  }
+  if (originPt && plan.fromLabel && !originPt.label) originPt.label = plan.fromLabel;
+  if (destPt && plan.toLabel && !destPt.label) destPt.label = plan.toLabel;
+  return {
+    origin: originPt,
+    destination: destPt,
+    vias: viaPts.length
+      ? viaPts
+      : storedVias.filter((p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lon)),
+  };
+}
+
+function showPreviewEndpointMarkers(ends) {
+  clearTripEndpointMarkers();
+  if (ends?.origin) {
+    originMarker = placeEndpointMarker(
+      "origin",
+      ends.origin.lat,
+      ends.origin.lon,
+      ends.origin.label || t("Origin"),
+    );
+  }
+  (ends?.vias || []).forEach((pt, i) => {
+    if (!pt) return;
+    const m = placeEndpointMarker(
+      "via",
+      pt.lat,
+      pt.lon,
+      pt.label ||
+        ((ends.vias.length > 1 ? t("Via {n}", { n: i + 1 }) : t("Via"))),
+    );
+    if (m) previewViaMarkers.push(m);
+  });
+  if (ends?.destination) {
+    destMarker = placeEndpointMarker(
+      "destination",
+      ends.destination.lat,
+      ends.destination.lon,
+      ends.destination.label || t("Destination"),
+    );
+  }
 }
 
 /**
@@ -4104,12 +4421,19 @@ map.on("click", (e) => {
     }
   }
   const kind = pickMode === "via" ? "via" : pickMode === "origin" ? "origin" : "destination";
-  setPoint(kind, lat, lng, fmtCoord(lat, lng));
+  const viaId = kind === "via" ? activeViaId : null;
+  setPoint(kind, lat, lng, fmtCoord(lat, lng), viaId ? { viaId } : {});
   reverseGeocode(lat, lng).then((label) => {
-    const cur = kind === "origin" ? origin : kind === "via" ? via : destination;
+    const cur =
+      kind === "origin"
+        ? origin
+        : kind === "via"
+          ? getViaSlot(viaId || activeViaId)?.point
+          : destination;
     if (cur && Math.abs(cur.lat - lat) < 1e-8 && Math.abs(cur.lon - lng) < 1e-8) {
       setPoint(kind, lat, lng, label, {
         isMtr: looksLikeMtrStation(label),
+        ...(viaId ? { viaId } : {}),
       });
     }
   });
@@ -4129,17 +4453,20 @@ els.btnPickDest?.addEventListener("click", () =>
 );
 
 // ── Search suggest ───────────────────────────────────────────────────────────
-/** @type {{ origin: Array|null, destination: Array|null, via: Array|null }} */
-const lastResults = { origin: null, destination: null, via: null };
+/** @type {Record<string, Array|null>} */
+const lastResults = { origin: null, destination: null };
 
 function suggestList(which) {
   if (which === "origin") return els.suggestOrigin;
-  if (which === "via") return els.suggestVia;
+  if (isViaSlot(which)) {
+    const slot = getViaSlot(viaIdFromSlot(which));
+    return slot?.list || null;
+  }
   return els.suggestDest;
 }
 
 function hideSuggestExcept(keep) {
-  for (const k of PLAN_POINT_KINDS) {
+  for (const k of allSearchSlots()) {
     if (k !== keep) hideSuggest(k);
   }
 }
@@ -4165,7 +4492,11 @@ function showSuggestMessage(which, message, kind = "muted") {
 }
 
 function mapPickSuggestItemHtml(which) {
-  const field = PLAN_POINT_KINDS.includes(which) ? which : "destination";
+  const field = isViaSlot(which)
+    ? "via"
+    : PLAN_POINT_KINDS.includes(which)
+      ? which
+      : "destination";
   const fieldLabel =
     field === "origin" ? t("Origin") : field === "via" ? t("Via") : t("Destination");
   return `<li role="option">
@@ -4185,8 +4516,8 @@ function wireMapPickSuggest(list, which) {
     btn.addEventListener("click", () => {
       hideSuggest(which);
       setPickMode(
-        which === "origin" ? "origin" : which === "via" ? "via" : "destination",
-        { armMap: true },
+        which === "origin" ? "origin" : isViaSlot(which) ? "via" : "destination",
+        { armMap: true, viaId: isViaSlot(which) ? viaIdFromSlot(which) : null },
       );
     });
   });
@@ -4288,12 +4619,14 @@ function pickResult(which, r) {
     }
   }
 
-  setPoint(which === "via" ? "via" : which === "origin" ? "origin" : "destination", lat, lon, label, {
+  const viaId = isViaSlot(which) ? viaIdFromSlot(which) : null;
+  setPoint(isViaSlot(which) ? "via" : which === "origin" ? "origin" : "destination", lat, lon, label, {
     // Keep LRT distinct from heavy-rail MTR so runPlan does not snap to TML
     isMtr: isMtr && !isLrt,
     isLrt,
     category: isMtr || isLrt ? "railway" : r.category,
     type: isLrt ? "halt" : isMtr ? "station" : r.type,
+    ...(viaId ? { viaId } : {}),
   });
   map.flyTo({
     center: [lon, lat],
@@ -4302,7 +4635,7 @@ function pickResult(which, r) {
     padding: mapVisiblePadding(),
   });
   hideSuggest(which);
-  if ((which === "origin" || which === "via") && !destination) {
+  if ((which === "origin" || isViaSlot(which)) && !destination) {
     els.inputDest?.focus();
   }
 }
@@ -4449,8 +4782,10 @@ function wireSearchInput(input, which) {
 
   input.addEventListener("input", (e) => {
     if (which === "origin") origin = null;
-    else if (which === "via") via = null;
-    else destination = null;
+    else if (isViaSlot(which)) {
+      const slot = getViaSlot(viaIdFromSlot(which));
+      if (slot) slot.point = null;
+    } else destination = null;
     updatePlanButton();
     scheduleSearch(which, e.target.value);
   });
@@ -4459,8 +4794,8 @@ function wireSearchInput(input, which) {
     // Switching fields closes the other field’s suggest popup
     hideSuggestExcept(which);
     setPickMode(
-      which === "origin" ? "origin" : which === "via" ? "via" : "destination",
-      { armMap: false },
+      which === "origin" ? "origin" : isViaSlot(which) ? "via" : "destination",
+      { armMap: false, viaId: isViaSlot(which) ? viaIdFromSlot(which) : null },
     );
     const q = input.value.trim();
     if (q.length >= 1) {
@@ -4490,13 +4825,16 @@ function wireSearchInput(input, which) {
 
 wireSearchInput(els.inputOrigin, "origin");
 wireSearchInput(els.inputDest, "destination");
-wireSearchInput(els.inputVia, "via");
 
 // Hide suggestions when clicking outside the field — or when switching fields
 // (each .loc-field carries its own popup, so clicking the other field closes it)
 document.addEventListener("pointerdown", (e) => {
-  const field = e.target.closest?.(".loc-field")?.getAttribute("data-field");
-  if (field === "origin" || field === "destination" || field === "via") {
+  const loc = e.target.closest?.(".loc-field");
+  const field = loc?.getAttribute("data-field");
+  const viaId = loc?.getAttribute("data-via-id");
+  if (field === "via" && viaId) {
+    hideSuggestExcept(viaSlotKey(viaId));
+  } else if (field === "origin" || field === "destination") {
     hideSuggestExcept(field);
   } else {
     hideSuggestExcept(null);
@@ -4504,14 +4842,8 @@ document.addEventListener("pointerdown", (e) => {
 });
 
 els.btnAddVia?.addEventListener("click", () => {
-  setViaFieldOpen(true);
-  renderSuggest("via", lastResults.via || [], {});
-});
-
-els.btnClearVia?.addEventListener("click", () => {
-  clearViaPoint();
-  setViaFieldOpen(false);
-  showToast(t("Via cleared"), 1400);
+  const slot = addViaSlot({ focus: true });
+  if (slot) renderSuggest(viaSlotKey(slot.id), lastResults[viaSlotKey(slot.id)] || [], {});
 });
 
 // ETA panels: “Updated Ns ago” chips tick every second (route detail / trip / pinned)
@@ -4587,6 +4919,12 @@ els.btnSwap?.addEventListener("click", () => {
     setPoint("destination", o.lat, o.lon, o.label || oVal, { isMtr: o.isMtr });
   } else if (els.inputDest) {
     els.inputDest.value = oVal;
+  }
+
+  if (vias.length > 1) {
+    vias.reverse();
+    vias.forEach((slot) => els.viaStack?.appendChild(slot.field));
+    syncViaUi();
   }
 
   updatePlanButton();
@@ -5815,6 +6153,11 @@ function stitchViaPlans(first, second, viaPoint) {
     Number.isFinite(startMs) && Number.isFinite(endMs)
       ? Math.max(0, Math.round((endMs - startMs) / 1000))
       : (first.duration_seconds || 0) + (second.duration_seconds || 0);
+  const viaPoints = [
+    ...(first.via_points || (first.via_point ? [first.via_point] : [])),
+    viaPoint,
+  ];
+  const viaLabels = viaPoints.map((p) => p.label).filter(Boolean);
   return {
     duration_seconds: duration,
     start_time: first.start_time,
@@ -5835,7 +6178,9 @@ function stitchViaPlans(first, second, viaPoint) {
       (second.free_mtr_interchange_walks || 0),
     mtr_only: !!(first.mtr_only && second.mtr_only),
     via_point: viaPoint,
-    via_label: viaPoint.label,
+    via_points: viaPoints,
+    via_label: viaLabels.join(" · "),
+    via_labels: viaLabels,
     via_stitched: true,
     human_score: (first.human_score || 0) + (second.human_score || 0),
   };
@@ -5869,32 +6214,72 @@ function rankStitchedViaPlans(list) {
   }));
 }
 
-function planThroughVia(from, viaPt, to, departAtIso, viaLabelPoint) {
-  const firstHop = planHop(from, viaPt, departAtIso, { compact: true });
-  const firstPlans = (firstHop.result.plans || []).slice(0, 3);
-  const stitched = [];
-  const seen = new Set();
-  for (const a of firstPlans) {
-    const arrive = addSecondsIso(a.start_time, a.duration_seconds || 0);
-    const secondHop = planHop(viaPt, to, arrive, { compact: true });
-    for (const b of (secondHop.result.plans || []).slice(0, 3)) {
-      const combined = stitchViaPlans(a, b, viaLabelPoint);
-      const key = planPinKey(combined);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      stitched.push(combined);
+function planThroughVias(stops, viaUsers, departAtIso) {
+  const hopKeep = viaUsers.length > 1 ? 2 : 3;
+  const beamKeep = 3;
+  /** @type {Array<{ plan: object | null, arrive: string }>} */
+  let beam = [{ plan: null, arrive: departAtIso }];
+  for (let h = 0; h < stops.length - 1; h++) {
+    const nextBeam = [];
+    const seen = new Set();
+    for (const partial of beam) {
+      const hop = planHop(stops[h], stops[h + 1], partial.arrive, {
+        compact: true,
+      });
+      for (const p of (hop.result.plans || []).slice(0, hopKeep)) {
+        const combined = partial.plan
+          ? stitchViaPlans(partial.plan, p, viaUsers[h - 1])
+          : p;
+        const key = planPinKey(combined);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        nextBeam.push({
+          plan: combined,
+          arrive: addSecondsIso(p.start_time, p.duration_seconds || 0),
+        });
+      }
     }
+    if (!nextBeam.length) {
+      return { plans: [], firstEmpty: h === 0 };
+    }
+    const ranked = rankStitchedViaPlans(nextBeam.map((x) => x.plan)).slice(
+      0,
+      beamKeep,
+    );
+    beam = ranked.map((plan) => ({
+      plan,
+      arrive: addSecondsIso(plan.start_time, plan.duration_seconds || 0),
+    }));
   }
+  const from = stops[0];
+  const to = stops[stops.length - 1];
   return {
-    plans: stitched.slice(0, 5),
+    plans: beam.map((b) => b.plan).slice(0, 5),
     bothMtr: !!(from.isMtr && to.isMtr && !from.isLrt && !to.isLrt),
-    firstEmpty: !firstPlans.length,
+    firstEmpty: false,
   };
 }
 
-function activeViaPoint() {
-  if (!isViaFieldOpen() || !via) return null;
-  return via;
+function collectViaWaypoints(from, to) {
+  const users = [];
+  const snaps = [];
+  let prev = from;
+  for (const slot of vias) {
+    const typed = String(slot.input?.value || "").trim();
+    if (!slot.point) {
+      if (typed) return { error: "unpicked" };
+      continue;
+    }
+    const snap = snapPlanEndpoint(slot.point);
+    if (placesTooClose(prev, snap) || placesTooClose(snap, to)) {
+      showToast(t("Skipped a via that is too close to another point"), 2200);
+      continue;
+    }
+    users.push(slot.point);
+    snaps.push(snap);
+    prev = snap;
+  }
+  return { users, snaps };
 }
 
 function runPlan() {
@@ -5906,8 +6291,10 @@ function runPlan() {
   setMapRouteLoading(true, t("Planning…"));
   const t0 = performance.now();
   try {
-    const viaTyped = String(els.inputVia?.value || "").trim();
-    if (isViaFieldOpen() && viaTyped && !via) {
+    const from = snapPlanEndpoint(origin);
+    const to = snapPlanEndpoint(destination);
+    const viaPack = collectViaWaypoints(from, to);
+    if (viaPack.error === "unpicked") {
       setMapRouteLoading(false);
       els.planResults.innerHTML = `<p class="hint">${escapeHtml(
         t("Pick a via place from the list, or clear Via"),
@@ -5915,21 +6302,8 @@ function runPlan() {
       showToast(t("Pick a via place from the list, or clear Via"), 2800);
       return;
     }
-
-    const from = snapPlanEndpoint(origin);
-    const to = snapPlanEndpoint(destination);
-    let viaUser = activeViaPoint();
-    let viaSnap = viaUser ? snapPlanEndpoint(viaUser) : null;
-    if (viaSnap && placesTooClose(from, viaSnap)) {
-      showToast(t("Via is the same as the origin"), 2200);
-      viaSnap = null;
-      viaUser = null;
-    }
-    if (viaSnap && placesTooClose(viaSnap, to)) {
-      showToast(t("Via is the same as the destination"), 2200);
-      viaSnap = null;
-      viaUser = null;
-    }
+    const viaUsers = viaPack.users || [];
+    const viaSnaps = viaPack.snaps || [];
 
     const departTimeResolved = resolveDepartTimeForPlan();
     const departAtIso = departAtForServiceDay(
@@ -5937,22 +6311,27 @@ function runPlan() {
       new Date(),
       departTimeResolved,
     );
+    const viaNames = viaUsers.map((v) => v.label).filter(Boolean);
     console.info(
       "[plan] depart",
       departTimeResolved,
       serviceDay,
       departAtIso,
-      viaSnap ? `via ${viaUser?.label || viaSnap.label}` : "direct",
+      viaNames.length ? `via ${viaNames.join(" · ")}` : "direct",
     );
 
     let resultPlans;
     let bothMtr;
-    if (viaSnap && viaUser) {
+    if (viaSnaps.length) {
       setMapRouteLoading(
         true,
-        t("Planning via {place}…", { place: viaUser.label || viaSnap.label }),
+        t("Planning via {place}…", { place: viaNames.join(" · ") }),
       );
-      const viaResult = planThroughVia(from, viaSnap, to, departAtIso, viaUser);
+      const viaResult = planThroughVias(
+        [from, ...viaSnaps, to],
+        viaUsers,
+        departAtIso,
+      );
       bothMtr = viaResult.bothMtr;
       resultPlans = viaResult.plans;
     } else {
@@ -5968,12 +6347,16 @@ function runPlan() {
       const fare = estimatePlanFare(p, ticket);
       return { ...p, fare };
     });
-    if (viaSnap && plans.length > 1) {
+    if (viaSnaps.length && plans.length > 1) {
       plans = rankStitchedViaPlans(plans);
     } else if (leastFareOn && plans.length > 1) {
       plans = prioritizeCompleteFares(plans);
     }
-    renderPlans(plans, ms, { bothMtr, leastFareOn, viaLabel: viaUser?.label });
+    renderPlans(plans, ms, {
+      bothMtr,
+      leastFareOn,
+      viaLabel: viaNames.join(" · "),
+    });
     if (plans.length) {
       // selectPlan keeps the veil until densified path is painted
       setMapRouteLoading(true, "Drawing route…");
@@ -5994,13 +6377,13 @@ function runPlan() {
         ? " · " + t("MTR preferred")
         : " · " + t("MTR ends")
       : "";
-    const emptyMsg = viaSnap
+    const emptyMsg = viaSnaps.length
       ? t("No routes found through via — try another meeting point")
       : t("No routes found — try other points");
-    const okMsg = viaUser
+    const okMsg = viaNames.length
       ? t("{n} plan(s) via {place} · {ms} ms", {
           n: plans.length,
-          place: viaUser.label,
+          place: viaNames.join(" · "),
           ms,
         })
       : t("{n} plan(s) · {ms} ms", { n: plans.length, ms });
@@ -7230,10 +7613,15 @@ function planCardHtml(p, idx, opts = {}) {
   if (p.mtr_only) {
     badges.push(`<span class="plan-badge plan-badge-mtr">${t("MTR")}</span>`);
   }
-  if (p.via_label) {
+  const viaLabels = p.via_labels?.length
+    ? p.via_labels
+    : p.via_label
+      ? [p.via_label]
+      : [];
+  for (const place of viaLabels) {
     badges.push(
       `<span class="plan-badge plan-badge-via">${escapeHtml(
-        t("Meet at {place}", { place: p.via_label }),
+        t("Meet at {place}", { place }),
       )}</span>`,
     );
   }
@@ -7407,6 +7795,7 @@ function setSidebarPage(page) {
   if (detailChrome) {
     detailChrome.hidden = !onRouteDetail;
   }
+  if (onRouteDetail) syncEtaRouteBackChrome();
   const subpageChrome = els.subpageDetailChrome;
   const onSubPage =
     sidebarPage === "trip" ||
@@ -7472,11 +7861,11 @@ function tripDetailHeadHtml(plan, live = {}) {
     destination?.label ||
     destination?.name ||
     (destination ? fmtCoord(destination.lat, destination.lon) : "Destination");
-  const viaLabel =
-    plan.via_label ||
-    plan.via_point?.label ||
-    via?.label ||
-    "";
+  const viaLabels = plan.via_labels?.length
+    ? plan.via_labels
+    : plan.via_label
+      ? [plan.via_label]
+      : vias.map((v) => v.point?.label).filter(Boolean);
   const fare = plan.fare || estimatePlanFare(plan, getFareType());
   const fareText = formatPlanFare(fare);
   const aelPromo = aelPromoForPlan(plan, origin, destination);
@@ -7506,12 +7895,12 @@ function tripDetailHeadHtml(plan, live = {}) {
       <div class="trip-detail-od">
         <span class="trip-od-from">${escapeHtml(from)}</span>
         <span class="material-symbols-outlined trip-od-arrow" aria-hidden="true">arrow_downward</span>
-        ${
-          viaLabel
-            ? `<span class="trip-od-via">${escapeHtml(t("Meet at {place}", { place: viaLabel }))}</span>
-        <span class="material-symbols-outlined trip-od-arrow" aria-hidden="true">arrow_downward</span>`
-            : ""
-        }
+        ${viaLabels
+          .map(
+            (place) => `<span class="trip-od-via">${escapeHtml(t("Meet at {place}", { place }))}</span>
+        <span class="material-symbols-outlined trip-od-arrow" aria-hidden="true">arrow_downward</span>`,
+          )
+          .join("")}
         <span class="trip-od-to">${escapeHtml(to)}</span>
       </div>
       <div class="trip-detail-meta">
@@ -7769,9 +8158,13 @@ function openTripDetailPage(idxOrPlan, planOverride) {
   tripDetailIdx = plan;
   tripDetailEtas = null;
   if (typeof idxOrPlan === "number" && !planOverride) {
+    tripDetailMarkersArePreview = false;
     selectPlan(idxOrPlan);
+    if (getUiMode() === "route") showFormEndpointMarkers();
   } else {
+    tripDetailMarkersArePreview = true;
     selectPlan(plan, plan);
+    showPreviewEndpointMarkers(endpointsFromPlan(plan));
   }
 
   if (els.tripDetailHead) {
@@ -7959,16 +8352,32 @@ async function openRouteDetailsFromTripLeg(legIdx) {
   syncPinnedRouteToolbar();
   const oldPanel = document.getElementById("eta-route-details-panel");
   if (oldPanel) oldPanel.remove();
-  void showEtaRouteDetailsPanel();
+  etaRouteReturnTrip = plan;
+  void showEtaRouteDetailsPanel({ fromTrip: true });
+}
+
+function syncEtaRouteBackChrome() {
+  const btn = els.btnEtaRouteBack;
+  if (!btn) return;
+  const label = etaRouteReturnTrip ? t("Back to trip") : t("Back to search");
+  btn.title = label;
+  btn.setAttribute("aria-label", label);
 }
 
 function closeTripDetailPage() {
   const refreshCards = typeof tripDetailIdx === "number" && plans.length > 0;
+  const wasPreview = tripDetailMarkersArePreview;
   stopTripEtaPolling();
   tripDetailIdx = null;
   tripDetailEtas = null;
   tripEtaGen += 1;
+  tripDetailMarkersArePreview = false;
+  etaRouteReturnTrip = null;
   setSidebarPage("search");
+  if (wasPreview) {
+    clearTripEndpointMarkers();
+    if (getUiMode() === "route") showFormEndpointMarkers();
+  }
   // Pin state may have changed on the trip detail page — refresh live cards
   if (refreshCards) renderPlans(plans, 0);
 }
@@ -8712,6 +9121,7 @@ function wireSheet(sheetEl) {
  * @param {"eta"|"route"} mode
  */
 function setUiMode(mode) {
+  const prev = getUiMode();
   const next = mode === "route" ? "route" : "eta";
   if (els.app) els.app.dataset.uiMode = next;
   els.modeButtons().forEach((btn) => {
@@ -8744,6 +9154,11 @@ function setUiMode(mode) {
   }
   if (els.tripPlanSidebarPanel) {
     els.tripPlanSidebarPanel.hidden = next === "eta";
+  }
+  if (next !== "route") {
+    clearTripEndpointMarkers();
+  } else if (prev !== "route") {
+    showFormEndpointMarkers();
   }
   syncDetailTitle();
 
@@ -14500,7 +14915,9 @@ setInterval(() => {
 /**
  * Open ETA route detail page — Wheels-style hero + ETA card + stop timeline.
  */
-async function showEtaRouteDetailsPanel() {
+async function showEtaRouteDetailsPanel(opts = {}) {
+  if (!opts.fromTrip) etaRouteReturnTrip = null;
+  syncEtaRouteBackChrome();
   const route = etaSelectedForDetails;
   if (!route) {
     showToast(t("Select a route first"), 1800);
@@ -14847,6 +15264,12 @@ function initEtaRouteSearchUi() {
     void showEtaRouteDetailsPanel();
   });
   els.btnEtaRouteBack?.addEventListener("click", () => {
+    const trip = etaRouteReturnTrip;
+    etaRouteReturnTrip = null;
+    if (trip) {
+      openTripDetailPage(trip, trip);
+      return;
+    }
     setSidebarPage("search");
   });
 
@@ -15754,7 +16177,8 @@ if (typeof window !== "undefined") {
     promoteRouteStopLayers,
     setPoint,
     getPlans: () => plans,
-    getVia: () => via,
+    getVia: () => vias[0]?.point || null,
+    getVias: () => vias.map((v) => v.point).filter(Boolean),
     selectPlan,
     runPlan,
   };

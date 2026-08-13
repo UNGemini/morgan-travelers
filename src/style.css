@@ -4389,6 +4389,15 @@ body.contrib-submitting .bg-orb {
   background: rgba(48, 50, 58, 0.55);
 }
 
+.via-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.via-stack:empty {
+  display: none;
+}
+
 .btn-add-via {
   display: inline-flex;
   align-items: center;
@@ -5339,6 +5348,7 @@ body.contrib-submitting .bg-orb {
   background: rgba(255, 255, 255, 0.08);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.92);
+  font-family: inherit;
   font-size: 0.82rem;
   font-weight: 650;
 }

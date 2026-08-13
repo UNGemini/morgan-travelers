@@ -305,6 +305,11 @@ export function formatServiceClock(iso) {
  * that calendar date. So we emit the HKT clock face as the ISO time portion
  * (with a decorative `Z`), NOT a true UTC conversion (which was 8h early).
  *
+ * Calendar day must never be in the past. MTR (and some LRT) services are
+ * encoded as a rolling `calendar_dates` window starting “today”. Snapping
+ * Usual back to this week’s Wednesday (or Holiday back to last Sunday)
+ * drops every rail trip after last train — even if you set a 10:00 depart.
+ *
  * @param {ServiceDayId} day
  * @param {Date} [now]
  * @param {DepartTimeValue} [time] "now" or "HH:MM" Hong Kong local
@@ -320,11 +325,20 @@ export function departAtForServiceDay(day, now = new Date(), time = "now") {
     hour = hh;
     minute = mm;
   }
-  // 0 = Sunday (holiday-like), 3 = Wednesday (typical weekday)
-  const targetDow = day === "holiday" ? 0 : 3;
-  const delta = targetDow - hk.weekday;
-  // Shift calendar day in civil arithmetic (Date.UTC handles month roll)
-  const shifted = new Date(Date.UTC(hk.year, hk.month - 1, hk.day + delta, 12, 0, 0));
+  // Usual = weekday timetable: today if Mon–Fri, otherwise next Monday.
+  // Holiday = Sunday timetable: today if Sunday, otherwise next Sunday.
+  // Always snap forward so the date stays inside rolling GTFS calendars.
+  let dayOffset = 0;
+  if (day === "holiday") {
+    dayOffset = (7 - hk.weekday) % 7;
+  } else if (hk.weekday === 0) {
+    dayOffset = 1;
+  } else if (hk.weekday === 6) {
+    dayOffset = 2;
+  }
+  const shifted = new Date(
+    Date.UTC(hk.year, hk.month - 1, hk.day + dayOffset, 12, 0, 0),
+  );
   const y = shifted.getUTCFullYear();
   const mo = pad2(shifted.getUTCMonth() + 1);
   const da = pad2(shifted.getUTCDate());
