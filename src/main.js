@@ -83,7 +83,7 @@ import {
   localizeDirLabel,
   simplifyZh,
 } from "./lang.js";
-import { resolveRouteColor } from "./mtrColors.js";
+import { resolveRouteColor, detectMtrLineCode } from "./mtrColors.js";
 import {
   initFares,
   estimatePlanFare,
@@ -178,6 +178,7 @@ import {
 } from "./mtrBusData.js";
 import {
   MTR_LINE_ORDER,
+  MTR_LINE_NAMES,
   mtrLineDirections,
   mtrLineCodesInOrder,
   mtrResolveBranch,
@@ -914,11 +915,22 @@ function pinnedRouteCardHtml(route, ctx) {
     fetchedAt,
     key,
   } = ctx;
+  // MTR: coloured pill badge (localized line name over English full name);
+  // bus / LRT keep the plain company-coloured route number.
+  const routeIdHtml =
+    route.kind === "mtr"
+      ? mtrLineBadgeHtml(
+          route.id,
+          color,
+          route.label,
+          "eta-card-route-mtr pinned-route-badge",
+        )
+      : `<span class="eta-card-route ${etaCompanyColorClass(route)}" style="color:${escapeHtml(color)};font-size:1.35rem">${escapeHtml(route.id)}</span>`;
   return `
     <article class="plan-card pinned-route-card active" role="listitem" data-pinned-key="${escapeHtml(key)}" aria-label="Pinned route ${escapeHtml(route.id)}">
       <div class="plan-head">
         <span class="duration">
-          <span class="eta-card-route ${etaCompanyColorClass(route)}" style="color:${escapeHtml(color)};font-size:1.35rem">${escapeHtml(route.id)}</span>
+          ${routeIdHtml}
           <span class="pinned-co">${escapeHtml(coLabel)}</span>
         </span>
         <span class="material-symbols-outlined pinned-badge-icon" aria-hidden="true">push_pin</span>
@@ -4642,12 +4654,28 @@ function extractStopLonLat(stop) {
 }
 
 /**
+ * Board stop label for an MTR station in the current language: English-only
+ * for en / ja / ko; combined “中文 English” for zh modes (Simplified via the
+ * zhMap for zh-cn) — matches stopDisplayName's MTR/LRT combined style.
+ * @param {{ name_en?: string, name_zh?: string, name_tc?: string } | null | undefined} st
+ */
+function mtrBoardStopLabel(st) {
+  const mode = LANG_META[getLang()].stationMode;
+  const en = String(st?.name_en || "").trim();
+  const zh = String(st?.name_zh || st?.name_tc || "").trim();
+  if (mode === "en") return en || zh;
+  const zhOut = zh ? (mode === "hans" ? simplifyZh(zh) : zh) : "";
+  if (!zhOut) return en;
+  return `${zhOut} ${en}`.trim();
+}
+
+/**
  * Wheels-style map route number (bottom-left over basemap).
  * @param {string} coLabel
  * @param {string} routeId
  * @param {string} [color]
  */
-function setMapRouteBadge(coLabel, routeId, color = "#fff") {
+function setMapRouteBadge(coLabel, routeId, color = "#fff", label = "", kind = "") {
   const badge = document.getElementById("map-route-badge");
   const coEl = document.getElementById("map-route-badge-co");
   const idEl = document.getElementById("map-route-badge-id");
@@ -4657,8 +4685,14 @@ function setMapRouteBadge(coLabel, routeId, color = "#fff") {
     coEl.style.color = color || "";
     coEl.hidden = !coLabel;
   }
-  idEl.textContent = routeId || "";
-  idEl.style.color = color || "#fff";
+  if (kind === "mtr") {
+    // Coloured pill: localized line name over the English full name
+    idEl.innerHTML = mtrLineBadgeHtml(routeId, color, label, "map-route-badge-mtr");
+    idEl.style.color = "";
+  } else {
+    idEl.textContent = routeId || "";
+    idEl.style.color = color || "#fff";
+  }
   badge.hidden = !routeId;
   badge.setAttribute("aria-hidden", routeId ? "false" : "true");
   if (routeId) {
@@ -5723,6 +5757,55 @@ function routeDisplayName(opt) {
 }
 
 /**
+ * Localized MTR line identifiers for the badge: upper = short code for
+ * en / ja / ko, Chinese name for zh modes (Simplified via the zhMap for
+ * zh-cn); lower = full English line name for every language.
+ * @param {string} code
+ * @param {string} [labelFallback]
+ */
+function mtrLineDisplayNames(code, labelFallback) {
+  const rec = MTR_LINE_NAMES[String(code || "").toUpperCase()];
+  const en = rec?.en || labelFallback || code || "";
+  const zh = rec?.zh || "";
+  const mode = LANG_META[getLang()].stationMode;
+  let upper = code || en;
+  if (mode === "hant" && zh) upper = zh;
+  else if (mode === "hans" && zh) upper = simplifyZh(zh);
+  return { upper, lower: en };
+}
+
+/**
+ * MTR route badge: rounded pill in the official line colour, white text.
+ * Upper = localized line name / code; lower = full English line name.
+ * @param {string} code
+ * @param {string} color
+ * @param {string} [label]
+ * @param {string} [extraClass]
+ */
+function mtrLineBadgeHtml(code, color, label, extraClass = "") {
+  const names = mtrLineDisplayNames(code, label);
+  return `<span class="mtr-route-badge${extraClass ? ` ${extraClass}` : ""}" style="--mtr-color:${escapeHtml(color)}">
+    <span class="mtr-route-badge-main">${escapeHtml(names.upper)}</span>
+    <span class="mtr-route-badge-sub">${escapeHtml(names.lower)}</span>
+  </span>`;
+}
+
+/**
+ * Stop name for the current language: KMB directories carry name_tc +
+ * name_en (GTFS fallbacks only English). zh modes prefer Chinese (Simplified
+ * via the zhMap for zh-cn); en / ja / ko prefer English.
+ * @param {{ name_en?: string, name?: string, name_tc?: string, name_zh?: string } | null | undefined} s
+ */
+function etaStopNameLabel(s) {
+  const mode = LANG_META[getLang()].stationMode;
+  const en = String(s?.name_en || s?.name || "").trim();
+  const tc = String(s?.name_tc || s?.name_zh || "").trim();
+  if (mode === "en") return en || tc;
+  const zhOut = tc ? (mode === "hans" ? simplifyZh(tc) : tc) : "";
+  return zhOut || en;
+}
+
+/**
  * Classify a walk for UI copy.
  * - indoor / free: ONLY official cross-station free links (CEN↔HOK, TST↔ETS, MOK↔MKK)
  * - in_station: same MTR station line change (e.g. Admiralty TWL↔ISL)
@@ -6355,6 +6438,12 @@ function planRouteLineHtml(legsArr, opts = {}) {
       const icon = transitModeIcon(opt);
       const route = transitRouteLabel(opt);
       const dir = transitDirectionLabel(opt);
+      // MTR legs get the coloured pill badge (line name over English full name)
+      const mtrCode = detectMtrLineCode(opt);
+      const routeBadge =
+        mtrCode && mtrCode !== "LRT"
+          ? mtrLineBadgeHtml(mtrCode, color, route, "rt-route-badge")
+          : `<span class="rt-route-id">${escapeHtml(route)}</span>`;
       const stops = transitStopSequence(opt, { full: fullStops });
       // Ride N for all modes (bus / LRT / MTR / ferry…) — not MTR-only
       const rideN = rideStopCount(opt);
@@ -6365,7 +6454,7 @@ function planRouteLineHtml(legsArr, opts = {}) {
         color,
         icon,
         bodyHtml: `<div class="rt-transit-head">
-          <span class="rt-route-id">${escapeHtml(route)}</span>
+          ${routeBadge}
           ${dir ? `<span class="rt-route-to">${escapeHtml(dir)}</span>` : ""}
         </div>`,
       });
@@ -8180,16 +8269,16 @@ function syncAppNavActive() {
 // ── ETA mode: bus / MTR / LRT route search ──────────────────────────────────
 
 const MTR_ETA_LINES = [
-  { id: "AEL", label: "Airport Express", aliases: ["機場快線", "機場快綫", "ael"] },
-  { id: "TCL", label: "Tung Chung Line", aliases: ["東涌綫", "東涌線", "tung chung"] },
-  { id: "TWL", label: "Tsuen Wan Line", aliases: ["荃灣綫", "荃灣線", "tsuen wan"] },
-  { id: "ISL", label: "Island Line", aliases: ["港島綫", "港島線", "island"] },
-  { id: "KTL", label: "Kwun Tong Line", aliases: ["觀塘綫", "觀塘線", "kwun tong"] },
-  { id: "TKL", label: "Tseung Kwan O Line", aliases: ["將軍澳綫", "將軍澳線", "tseung kwan o", "tko"] },
-  { id: "EAL", label: "East Rail Line", aliases: ["東鐵綫", "東鐵線", "east rail"] },
-  { id: "TML", label: "Tuen Ma Line", aliases: ["屯馬綫", "屯馬線", "tuen ma"] },
-  { id: "SIL", label: "South Island Line", aliases: ["南港島綫", "南港島線", "south island"] },
-  { id: "DRL", label: "Disneyland Resort Line", aliases: ["迪士尼綫", "迪士尼線", "disneyland"] },
+  { id: "AEL", label: "Airport Express", aliases: ["機場快線", "機場快綫", "机场快线", "ael"] },
+  { id: "TCL", label: "Tung Chung Line", aliases: ["東涌綫", "東涌線", "东涌线", "tung chung"] },
+  { id: "TWL", label: "Tsuen Wan Line", aliases: ["荃灣綫", "荃灣線", "荃湾线", "tsuen wan"] },
+  { id: "ISL", label: "Island Line", aliases: ["港島綫", "港島線", "港岛线", "island"] },
+  { id: "KTL", label: "Kwun Tong Line", aliases: ["觀塘綫", "觀塘線", "观塘线", "kwun tong"] },
+  { id: "TKL", label: "Tseung Kwan O Line", aliases: ["將軍澳綫", "將軍澳線", "将军澳线", "tseung kwan o", "tko"] },
+  { id: "EAL", label: "East Rail Line", aliases: ["東鐵綫", "東鐵線", "东铁线", "east rail"] },
+  { id: "TML", label: "Tuen Ma Line", aliases: ["屯馬綫", "屯馬線", "屯马线", "tuen ma"] },
+  { id: "SIL", label: "South Island Line", aliases: ["南港島綫", "南港島線", "南港岛线", "south island"] },
+  { id: "DRL", label: "Disneyland Resort Line", aliases: ["迪士尼綫", "迪士尼線", "迪士尼线", "disneyland"] },
 ];
 
 const LRT_ETA_ROUTES = [
@@ -9771,7 +9860,7 @@ async function fetchNearbyKmbEtaHits(geo, limit = 16) {
             label: `${coU === "lwb" ? "LWB" : "KMB"} ${route}`,
             kind: "bus",
             co: coU,
-            nearbyHint: `${s.name_tc || s.name_en} · ${Math.round(d)} m`,
+            nearbyHint: `${etaStopNameLabel(s)} · ${Math.round(d)} m`,
           };
           if (!etaKindMatchesFilter(entry)) continue;
           const rk = etaRouteKey(entry);
@@ -9781,7 +9870,7 @@ async function fetchNearbyKmbEtaHits(geo, limit = 16) {
             dest: String(row.dest_en || "").trim(),
             destZh: String(row.dest_tc || "").trim(),
             minutes: mins,
-            stopLabel: s.name_tc || s.name_en || "",
+            stopLabel: etaStopNameLabel(s),
             stopId: String(s.stop || ""),
             distM: d,
             stopLat: s.lat,
@@ -9848,7 +9937,7 @@ async function fetchNearbyKmbEtaHits(geo, limit = 16) {
   const sliced = hits.slice(0, limit);
   const stopNames = ranked
     .slice(0, 2)
-    .map((x) => x.s.name_tc || x.s.name_en)
+    .map((x) => etaStopNameLabel(x.s))
     .join(" · ");
   return {
     hits: sliced,
@@ -9938,9 +10027,7 @@ async function attachNearbyMtrLiveEtas(hits, geo, lineNear) {
         const first = result.etas?.[0];
         const mins = result.waitMins ?? first?.waitMins ?? null;
         if (mins == null) return;
-        const stopLabel = best.name_zh
-          ? `${best.name_zh} ${best.name_en}`
-          : best.name_en;
+        const stopLabel = mtrBoardStopLabel(best);
         etaLiveByKey.set(etaRouteKey(r), {
           minutes: mins,
           stopLabel,
@@ -9975,9 +10062,7 @@ async function attachMtrSearchBoardLabels(hits, geo) {
     const line = String(r.id || "").toUpperCase();
     const { best, dist } = nearestMtrStationForLine(line, geo);
     if (!best?.code) continue;
-    const stopLabel = best.name_zh
-      ? `${best.name_zh} ${best.name_en}`
-      : best.name_en;
+    const stopLabel = mtrBoardStopLabel(best);
     // Board-only live entry (no minutes): enables first-station hiding and
     // shows the nearest station as the board line; ETAs stay timetable-based.
     etaLiveByKey.set(etaRouteKey(r), {
@@ -10821,6 +10906,10 @@ function searchEtaRoutes(query, limit = 16) {
     .replace(/^@/, "");
   if (q.length < 1) return [];
   if (!etaRouteCatalog.length) buildEtaRouteCatalog();
+  // Simplified-Chinese query form (identity until the zhMap loads): lets
+  // zh-cn users type 东涌 while the static aliases already carry both variants.
+  const qSimp = simplifyZh(q);
+  const qForms = qSimp && qSimp !== q ? [q, qSimp] : [q];
 
   const scored = [];
   for (const r of etaRouteCatalog) {
@@ -10831,16 +10920,16 @@ function searchEtaRoutes(query, limit = 16) {
     let score = 0;
 
     if (r.kind === "mtr") {
-      // MTR: route id AND line name / aliases
+      // MTR: route id AND line name / aliases (both Chinese variants + English)
       if (id === q) score = 1000;
       else if (id.startsWith(q)) score = 900;
       else if (id.includes(q)) score = 700;
       else if (label === q) score = 950;
       else if (label.startsWith(q)) score = 850;
       else if (label.includes(q)) score = 600;
-      else if (aliases.some((a) => a === q)) score = 920;
-      else if (aliases.some((a) => a.startsWith(q))) score = 820;
-      else if (aliases.some((a) => a.includes(q))) score = 550;
+      else if (aliases.some((a) => qForms.includes(a))) score = 920;
+      else if (aliases.some((a) => qForms.some((f) => a.startsWith(f)))) score = 820;
+      else if (aliases.some((a) => qForms.some((f) => a.includes(f)))) score = 550;
       else continue;
       if (/^[a-z]{2,4}$/.test(q)) score += 40;
     } else {
@@ -10978,9 +11067,15 @@ function etaRouteCardInnerHtml(r, dir, eta = {}, opts = {}) {
             ? "is-live"
             : "is-na";
   const color = companyLineColor(r);
+  // MTR: coloured pill badge (localized line name over English full name);
+  // bus / LRT keep the plain company-coloured route number.
+  const routeIdHtml =
+    r.kind === "mtr"
+      ? mtrLineBadgeHtml(r.id, color, r.label, "eta-card-route-mtr")
+      : `<div class="eta-card-route ${etaCompanyColorClass(r)}" style="color:${escapeHtml(color)}">${escapeHtml(r.id)}</div>`;
   return `
     <div class="eta-card-main">
-      <div class="eta-card-route ${etaCompanyColorClass(r)}" style="color:${escapeHtml(color)}">${escapeHtml(r.id)}</div>
+      ${routeIdHtml}
       <div class="eta-card-dest">
         <span class="eta-card-arrow" aria-hidden="true">→</span>
         <span>${escapeHtml(destLabel)}</span>
@@ -13052,7 +13147,12 @@ function selectEtaRoute(route, listIndex) {
                 : route.co === "kmb" || route.co === "lwb"
                   ? "KMB"
                   : "Bus";
-  const dest = live?.destZh || live?.dest || dir?.destZh || dir?.dest || route.label;
+  // Localized destination for the toast: English first for en / ja / ko,
+  // Chinese first for zh modes (falling back to the other when absent).
+  const dest =
+    LANG_META[getLang()].stationMode === "en"
+      ? live?.dest || dir?.dest || live?.destZh || dir?.destZh || route.label
+      : live?.destZh || dir?.destZh || live?.dest || dir?.dest || route.label;
   showToast(t("{kindLabel} {routeId} → {dest}", { kindLabel: t(kindLabel), routeId: route.id, dest }), 1800);
   setDetailOpen(true);
   syncEtaActive();
@@ -13916,7 +14016,7 @@ async function showEtaRouteDetailsPanel() {
   if (els.etaRouteDetailHead) {
     els.etaRouteDetailHead.innerHTML = "";
   }
-  setMapRouteBadge(coLabel, route.id, color);
+  setMapRouteBadge(coLabel, route.id, color, route.label, route.kind);
   if (els.etaRouteDetailBody) {
     els.etaRouteDetailBody.innerHTML = `<p class="hint wheels-route-loading">${escapeHtml(t("Loading route…"))}</p>`;
   }

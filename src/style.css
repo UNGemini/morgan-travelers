@@ -2854,6 +2854,57 @@ body.mobile-ui [data-acrylic]::before {
   color: #0f766e; /* Residents' Bus Services */
 }
 
+/*
+ * MTR route badge — rounded pill in the official line colour, white text.
+ * Upper = localized line name / code, lower = full English line name.
+ * Context classes below pick the pill's font-size per surface.
+ */
+.mtr-route-badge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 0.34em 0.62em;
+  border-radius: 0.5em;
+  background: var(--mtr-color, #003da5);
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1.12;
+  letter-spacing: -0.01em;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  text-shadow: none;
+  vertical-align: middle;
+}
+.mtr-route-badge-main {
+  font-size: 1em;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.mtr-route-badge-sub {
+  font-size: 0.52em;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  opacity: 0.94;
+  white-space: nowrap;
+}
+/* ETA list cards — badge replaces the big company-coloured route number */
+.eta-card-route-mtr {
+  font-size: 1.5rem;
+}
+/* Pinned cards (route number was 1.35rem inline) */
+.pinned-route-badge {
+  font-size: 1.3rem;
+}
+/* Trip plan timeline route chip (rt-route-id was 0.88rem) */
+.rt-route-badge {
+  font-size: 0.88rem;
+}
+/* Map route-detail pill (plain number was clamp(2.6rem,12vw,3.6rem)) */
+.map-route-badge-mtr {
+  font-size: clamp(1.9rem, 8vw, 2.7rem);
+}
+
 .eta-card-dest {
   display: flex;
   align-items: baseline;

@@ -40,6 +40,28 @@ export const MTR_LINE_ORDER = {
   DRL: ["SUN", "DIS"],
 };
 
+/**
+ * Official MTR line names (EN / ZH-Traditional). Upper badge text picks the
+ * Chinese name for zh modes (Simplified via the zhMap for zh-cn) and the
+ * short code for en / ja / ko; the English name is the badge's lower line.
+ */
+/** @type {Record<string, { en: string, zh: string }>} */
+export const MTR_LINE_NAMES = {
+  AEL: { en: "Airport Express", zh: "機場快綫" },
+  TCL: { en: "Tung Chung Line", zh: "東涌綫" },
+  TWL: { en: "Tsuen Wan Line", zh: "荃灣綫" },
+  ISL: { en: "Island Line", zh: "港島綫" },
+  KTL: { en: "Kwun Tong Line", zh: "觀塘綫" },
+  TKL: { en: "Tseung Kwan O Line", zh: "將軍澳綫" },
+  EAL: { en: "East Rail Line", zh: "東鐵綫" },
+  TML: { en: "Tuen Ma Line", zh: "屯馬綫" },
+  MOL: { en: "Ma On Shan Line", zh: "馬鞍山綫" },
+  WRL: { en: "West Rail Line", zh: "西鐵綫" },
+  SIL: { en: "South Island Line", zh: "南港島綫" },
+  DRL: { en: "Disneyland Resort Line", zh: "迪士尼綫" },
+  LRT: { en: "Light Rail", zh: "輕鐵" },
+};
+
 /** Human labels for termini (EN / ZH). */
 const CODE_LABELS = {
   HOK: { en: "Hong Kong", zh: "香港" },
