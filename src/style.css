@@ -1100,7 +1100,8 @@ body.mobile-ui [data-acrylic]::before {
 .sheet-body,
 .eta-route-details-panel,
 .contribute-body,
-.loc-suggest {
+.loc-suggest,
+.eta-method-pills {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
@@ -1112,7 +1113,8 @@ body.mobile-ui [data-acrylic]::before {
 .sheet-body::-webkit-scrollbar,
 .eta-route-details-panel::-webkit-scrollbar,
 .contribute-body::-webkit-scrollbar,
-.loc-suggest::-webkit-scrollbar {
+.loc-suggest::-webkit-scrollbar,
+.eta-method-pills::-webkit-scrollbar {
   display: none;
   width: 0;
   height: 0;
@@ -7517,12 +7519,18 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
 /* Method filter pills (none selected = All) */
 .eta-method-pills {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: center;
+  /* When the pills overflow (small phones), safe center falls back to
+     flex-start so the first pill stays reachable by horizontal scroll. */
+  justify-content: safe center;
   gap: 8px;
   width: 100%;
   max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 .eta-method-pills.is-all .eta-method-pill {
   /* subtle “all on” look without filled selection */
@@ -7535,6 +7543,8 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   align-items: center;
   justify-content: center;
   gap: 5px;
+  /* Never squish on narrow screens — the row scrolls instead */
+  flex-shrink: 0;
   min-height: 32px;
   padding: 5px 12px;
   border-radius: 999px;
