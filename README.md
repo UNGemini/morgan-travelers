@@ -109,7 +109,9 @@ Generated files (`dist/`, `public/fares/hk-fares.json`, `artifacts/`) should be 
 
 ## Data & licensing
 
-- Application code © UNLOOP MORGAN 2026, [MIT](LICENSE). Brand marks and product naming are not open-sourced as assets for reuse.
+- **Main app** © UNLOOP MORGAN 2026, [Apache License 2.0](LICENSE).
+- **Live Position Engine** (`src/busPositionEngine.js`, `src/trafficSpeed.js`, `src/busSchedules.js`) is [GNU GPLv3](licenses/GPL-3.0.txt) only.
+- **Branding is not licensed.** Apache 2.0 §6 does not grant trademarks. “MORGAN”, “UNLOOP MORGAN”, “Travelers”, logos, and product naming may not be used for a fork or other product without written permission.
 - Routing engine: wheels-router-nano (MIT).
 - Basemap: OpenStreetMap contributors · [Protomaps](https://github.com/protomaps/basemaps).
 - Transit and fare inputs: Transport Department, MTR, and other Hong Kong open-data sources. Their terms still apply to the data itself.

@@ -1,0 +1,17 @@
+MORGAN Travelers
+Copyright 2026 UNLOOP MORGAN
+
+This product includes software developed by UNLOOP MORGAN.
+
+Main application code is licensed under the Apache License, Version 2.0.
+The Live Position Engine (src/busPositionEngine.js, src/trafficSpeed.js,
+src/busSchedules.js) is licensed under the GNU General Public License
+v3.0 only. See LICENSE and licenses/GPL-3.0.txt.
+
+Trademarks
+----------
+“MORGAN”, “UNLOOP MORGAN”, “Travelers”, “MORGAN Travelers”, logos, and
+related brand assets are trademarks or trade dress of UNLOOP MORGAN.
+No trademark license is granted by the Apache License or by GPLv3.
+Forks and redistributions must not imply endorsement or reuse these marks
+without written permission.

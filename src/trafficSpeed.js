@@ -1,4 +1,10 @@
 /**
+ * SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 UNLOOP MORGAN
+ *
+ * Live Position Engine — licensed under the GNU General Public License v3.0
+ * only. See licenses/GPL-3.0.txt. The rest of MORGAN Travelers is Apache-2.0.
+ *
  * TD Traffic Speed injection for the Live Bus Position Engine (PRD 4.2).
  *
  * Sources (spike-verified 2026-08, direct client fetch — both serve
