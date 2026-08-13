@@ -200,6 +200,7 @@ import {
   extractPublicStopCode,
   stopLabelWithPublicId,
 } from "./stopMerge.js";
+import { isOnboarded, startOnboarding } from "./onboarding.js";
 import "./style.css";
 
 // Sayram acrylic cursor lighting (Morgandev design system)
@@ -208,6 +209,13 @@ initAcrylic();
 // Persisted language → <html lang> + static DOM before first paint
 initLang();
 applyLangToDom();
+
+// First-run onboarding: an opaque cover sits above the boot splash while the
+// app keeps initializing underneath, so the map/router are ready when the
+// flow ends. The geolocation permission prompt below also waits for this gate.
+const onboardingGate = isOnboarded()
+  ? Promise.resolve()
+  : startOnboarding({ firstRun: true });
 
 // Hand-maintained static overrides (public/overrides/*) — never from collect pipeline
 loadStaticOverrides()
@@ -2675,8 +2683,9 @@ map.on("load", () => {
   });
   // Default Nearby center = user location when permission granted — deferred
   // until the opening splash is gone so the browser permission prompt never
-  // pops over the boot animation (bootSplashDonePromise resolves on removal).
-  void bootSplashDonePromise.then(() =>
+  // pops over the boot animation (bootSplashDonePromise resolves on removal)
+  // nor over the first-run onboarding flow (onboardingGate).
+  void Promise.all([bootSplashDonePromise, onboardingGate]).then(() =>
     bootstrapNearbyUserLocation({ fly: true, triggerControl: true }),
   );
 });
@@ -15943,6 +15952,43 @@ async function relocalizeEtaRouteDetail() {
 }
 
 initLanguageUi();
+
+// ── Settings: onboarding re-run + full device-data wipe ──────────────────────
+function initSettingsDangerZone() {
+  document.getElementById("btn-rerun-onboarding")?.addEventListener("click", () => {
+    void startOnboarding(); // blurred modal sheet over the live app
+  });
+  document.getElementById("btn-delete-all-data")?.addEventListener("click", () => {
+    showUpdateDialog({
+      title: t("Delete all data?"),
+      message: t("This will delete all cached data, preferences, and onboarded state. Are you sure?"),
+      confirmLabel: t("Delete all data"),
+      cancelLabel: t("Cancel"),
+      onConfirm: deleteAllDeviceData,
+    });
+  });
+}
+
+/** Clear every morgan.* preference + service-worker caches, then restart. */
+function deleteAllDeviceData() {
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("morgan.")) localStorage.removeItem(key);
+    }
+  } catch {
+    /* private mode — nothing to clear */
+  }
+  const reload = () => location.reload();
+  if ("caches" in window) {
+    caches
+      .keys()
+      .then((names) => Promise.all(names.map((name) => caches.delete(name))))
+      .then(reload, reload);
+  } else {
+    reload();
+  }
+}
+initSettingsDangerZone();
 
 // PRD 4.3 loops — all visibility-gated (same pattern as the existing timers).
 // 1 s cadence: keep the engine state in sync + advance Kalman interpolation.
