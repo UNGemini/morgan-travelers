@@ -2869,6 +2869,9 @@ body.mobile-ui [data-acrylic]::before {
   border-radius: 0.5em;
   background: var(--mtr-color, #003da5);
   color: #fff;
+  /* Column flex parents (.eta-card-main) would otherwise stretch the pill to
+   * the full card width — hug the text so left/right margins stay equal. */
+  align-self: flex-start;
   font-size: 1rem;
   line-height: 1.12;
   letter-spacing: -0.01em;
