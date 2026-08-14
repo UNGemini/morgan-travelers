@@ -30,6 +30,7 @@ import {
   injectShuttlePlans,
   routeOptionCompanyIds,
 } from "./shuttleInject.js";
+import { injectMtrPlans } from "./mtrInject.js";
 import { preferNameMatchedAlights } from "./alightPrefer.js";
 
 export interface RouteQuery {
@@ -1311,6 +1312,14 @@ export function planTrip(query: RouteQuery): PlanResponse {
     const shuttles = injectShuttlePlans(query, pooled);
     if (shuttles.length) {
       pooled.push(...(shuttles as Plan[]));
+    }
+
+    // MTR stop_times in the GTFS graph sit on station ids with empty
+    // coordinates, so RAPTOR never boards rail. Inject timetable itineraries.
+    const mtrInjected = injectMtrPlans(query);
+    if (mtrInjected.length) {
+      console.info("[router] injected", mtrInjected.length, "MTR plan(s)");
+      pooled.push(...(mtrInjected as Plan[]));
     }
 
     // Prefer alight stop with name similar to destination (e.g. Station vs Cable
