@@ -74,7 +74,7 @@ export const zhCn = {
   "Change platforms at {station}": "在 {station} 换乘月台",
   "Check your connection and try again": "请检查连接后重试",
   "Checking edge metadata…": "检查边缘元数据…",
-  "China T-Union Cards": "中国 T-Union 卡",
+  "China T-Union Cards": "交通联合卡",
   "Choose how to open a review PR on": "选择在何处打开审查 PR 的方式",
   "Choose operator + route →": "选择运营商 + 路线 →",
   "Choose your default fare ticket type for trip plans.": "选择规划行程时用于估算车费的默认票种。",

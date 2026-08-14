@@ -73,7 +73,7 @@ export const ja = {
   "Change platforms at {station}": "{station} でホームを乗り換え",
   "Check your connection and try again": "接続を確認してもう一度お試しください",
   "Checking edge metadata…": "エッジメタデータを確認中…",
-  "China T-Union Cards": "中国 T-Union カード",
+  "China T-Union Cards": "交通連合カード",
   "Choose how to open a review PR on": "レビュー PR の開き方を選択",
   "Choose operator + route →": "事業者 + 路線を選択 →",
   "Choose your default fare ticket type for trip plans.": "旅程プランで運賃の見積もりに使う既定の切符の種類を選択してください。",

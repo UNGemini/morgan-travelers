@@ -73,7 +73,7 @@ export const ko = {
   "Change platforms at {station}": "{station}에서 승강장 변경",
   "Check your connection and try again": "연결을 확인한 후 다시 시도하세요",
   "Checking edge metadata…": "엣지 메타데이터 확인 중…",
-  "China T-Union Cards": "중국 T-Union 카드",
+  "China T-Union Cards": "교통연합 카드",
   "Choose how to open a review PR on": "검토 PR을 여는 방식을 선택",
   "Choose operator + route →": "운수사 + 노선 선택 →",
   "Choose your default fare ticket type for trip plans.": "여정 계획에서 요금 계산에 사용할 기본 티켓 종류를 선택하세요.",

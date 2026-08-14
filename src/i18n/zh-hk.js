@@ -74,7 +74,7 @@ export const zhHk = {
   "Change platforms at {station}": "喺 {station} 轉月台",
   "Check your connection and try again": "檢查網絡連線後再試",
   "Checking edge metadata…": "檢查邊緣中繼資料…",
-  "China T-Union Cards": "中國 T-Union 卡",
+  "China T-Union Cards": "交通聯合卡",
   "Choose how to open a review PR on": "選擇喺邊度開審查 PR 嘅方式",
   "Choose operator + route →": "選擇營運商 + 路線 →",
   "Choose your default fare ticket type for trip plans.": "選擇規劃行程時用以估算車費的預設車票種類。",
