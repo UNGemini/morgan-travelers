@@ -30,7 +30,7 @@ import {
   injectShuttlePlans,
   routeOptionCompanyIds,
 } from "./shuttleInject.js";
-import { injectMtrPlans } from "./mtrInject.js";
+import { injectMtrPlans, injectMixedMtrPlans } from "./mtrInject.js";
 import { preferNameMatchedAlights } from "./alightPrefer.js";
 
 export interface RouteQuery {
@@ -1376,11 +1376,43 @@ export function planTrip(query: RouteQuery): PlanResponse {
     }
   }
 
-  // MTR once, after RAPTOR — not inside every walk/transfer retry.
-  const mtrInjected = injectMtrPlans(query);
-  if (mtrInjected.length) {
-    console.info("[router] injected", mtrInjected.length, "MTR plan(s)");
-    const merged = [...ranked, ...(mtrInjected as Plan[])];
+  // MTR (and bus+MTR feeders) once, after RAPTOR — not inside every retry.
+  const extras: Plan[] = injectMtrPlans(query) as Plan[];
+  const methods = query.trafficMethods;
+  const wantMixed =
+    !bothMtr &&
+    (!methods?.length ||
+      ((methods.includes("mtr") || methods.includes("ael")) &&
+        (methods.includes("bus") || methods.includes("gmb"))));
+  if (wantMixed && routerInstance) {
+    const mixed = injectMixedMtrPlans(
+      query,
+      (from, to, departAt) => {
+        try {
+          const raw = routerInstance!.plan({
+            origin: `${from.lat},${from.lon}`,
+            destination: `${to.lat},${to.lon}`,
+            depart_at: departAt || depart,
+            max_results: 2,
+            max_transfers: 2,
+            max_walk_distance: 700,
+            walking_speed: "normal",
+            modes: "bus,trolleybus,ferry",
+          }) as PlanResponse;
+          return (raw.plans || [])[0] || null;
+        } catch {
+          return null;
+        }
+      },
+    );
+    if (mixed.length) {
+      console.info("[router] injected", mixed.length, "mixed bus+MTR plan(s)");
+      extras.push(...(mixed as Plan[]));
+    }
+  }
+  if (extras.length) {
+    console.info("[router] injected", extras.length, "rail/mixed plan(s)");
+    const merged = [...ranked, ...extras];
     const wantCheap =
       (query.preferences || []).includes("cheapest") ||
       query.preference === "cheapest";

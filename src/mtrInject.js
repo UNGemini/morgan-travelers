@@ -13,6 +13,10 @@ import { MTR_LINE_NAMES, MTR_LINE_ORDER } from "./mtrLineOrder.js";
 import { MTR_PATTERNS } from "./data/mtrRuntime.js";
 
 const ACCESS_MAX_M = 900;
+/** How far we’ll look for a station when a bus feeder can cover the first/last mile. */
+const FEEDER_STATION_MAX_M = 2200;
+/** Prefer a bus hop instead of walking when the station is farther than this. */
+const FEEDER_WALK_OK_M = 480;
 const WALK_MPS = 1.25;
 const XFER_SEC = 150;
 /** Paid-area / indoor links that RAPTOR also treats as free MTR walks. */
@@ -337,7 +341,26 @@ function lineMeta(line) {
   };
 }
 
-function buildPlan(fromCode, toCode, path, origin, dest, departIso) {
+function addSecondsIso(iso, secs) {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(
+    String(iso || ""),
+  );
+  if (!m) return iso;
+  let mins =
+    Number(m[2]) * 60 + Number(m[3]) + Math.round((Number(m[4] || 0) + secs) / 60);
+  if (!Number.isFinite(mins)) return iso;
+  const dayShift = Math.floor(mins / (24 * 60));
+  mins = ((mins % (24 * 60)) + 24 * 60) % (24 * 60);
+  let date = m[1];
+  if (dayShift) {
+    const [y, mo, d] = date.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, mo - 1, d + dayShift, 12, 0, 0));
+    date = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+  }
+  return formatIso(date, mins);
+}
+
+function buildPlan(fromCode, toCode, path, origin, dest, departIso, opts = {}) {
   if (!path?.length) return null;
   const groups = groupLegs(path);
   if (!groups.length) return null;
@@ -358,8 +381,14 @@ function buildPlan(fromCode, toCode, path, origin, dest, departIso) {
   }
   if (cursor !== toCode) return null;
 
-  const access = walkLeg(origin.lat, origin.lon, fromCode, false);
-  const egress = walkLeg(dest.lat, dest.lon, toCode, true);
+  const skipAccess = !!opts.skipAccess;
+  const skipEgress = !!opts.skipEgress;
+  const access = skipAccess
+    ? { dist: 0, leg: null }
+    : walkLeg(origin.lat, origin.lon, fromCode, false);
+  const egress = skipEgress
+    ? { dist: 0, leg: null }
+    : walkLeg(dest.lat, dest.lon, toCode, true);
   if (!access || !egress) return null;
 
   const firstRail = groups.find((g) => g.line !== "LINK");
@@ -449,6 +478,185 @@ function buildPlan(fromCode, toCode, path, origin, dest, departIso) {
     mtr_injected: true,
     human_score: total * 0.72,
   };
+}
+
+function allowedLinesFromQuery(query) {
+  const methods = query.trafficMethods;
+  if (!methods?.length) return null;
+  const lines = [
+    ...(methods.includes("mtr")
+      ? ["TWL", "ISL", "KTL", "TKL", "TML", "TCL", "EAL", "SIL", "DRL"]
+      : []),
+    ...(methods.includes("ael") ? ["AEL"] : []),
+  ];
+  return lines.length ? new Set(lines) : null;
+}
+
+function railCore(fromCode, toCode, departIso, allowed) {
+  const graph = graphFor(allowed);
+  const path = shortestPath(graph, fromCode, toCode);
+  if (!path?.length) return null;
+  return buildPlan(
+    fromCode,
+    toCode,
+    path,
+    { lat: 0, lon: 0 },
+    { lat: 0, lon: 0 },
+    departIso,
+    { skipAccess: true, skipEgress: true },
+  );
+}
+
+function planHasTransit(plan) {
+  return !!(plan?.legs || []).some((l) => l.type === "transit");
+}
+
+function trimEdgeWalks(legs, side) {
+  const out = Array.isArray(legs) ? [...legs] : [];
+  if (side === "end") {
+    while (out.length && out[out.length - 1].type === "walk") out.pop();
+  } else {
+    while (out.length && out[0].type === "walk") out.shift();
+  }
+  return out;
+}
+
+function sumLegSeconds(legs) {
+  return (legs || []).reduce((s, l) => s + (Number(l.duration_seconds) || 0), 0);
+}
+
+function sumWalkM(legs) {
+  let m = 0;
+  for (const l of legs || []) {
+    if (l.type !== "walk") continue;
+    m +=
+      typeof l.distance_meters === "number"
+        ? l.distance_meters
+        : (l.duration_seconds || 0) * 0.8;
+  }
+  return m;
+}
+
+/**
+ * Bus/GMB first or last mile + injected MTR core, when RAPTOR cannot mix
+ * modes (it never boards heavy rail).
+ *
+ * @param {import("./router.ts").RouteQuery} query
+ * @param {(from: {lat:number,lon:number}, to: {lat:number,lon:number}, departAt: string) => object | null} feederFn
+ * @returns {import("./router.ts").Plan[]}
+ */
+export function injectMixedMtrPlans(query, feederFn) {
+  const methods = query.trafficMethods;
+  const wantRail =
+    !methods?.length || methods.includes("mtr") || methods.includes("ael");
+  const wantBus =
+    !methods?.length || methods.includes("bus") || methods.includes("gmb");
+  if (!wantRail || !wantBus || typeof feederFn !== "function") return [];
+  if (query.originIsMtr && query.destIsMtr) return [];
+
+  const oLat = query.origin?.[0];
+  const oLon = query.origin?.[1];
+  const dLat = query.destination?.[0];
+  const dLon = query.destination?.[1];
+  if (![oLat, oLon, dLat, dLon].every(Number.isFinite)) return [];
+
+  const origins = nearestStations(
+    oLat,
+    oLon,
+    FEEDER_STATION_MAX_M,
+    hintedCodes(query, "o"),
+  );
+  const dests = nearestStations(
+    dLat,
+    dLon,
+    FEEDER_STATION_MAX_M,
+    hintedCodes(query, "d"),
+  );
+  const o = origins[0];
+  const d = dests[0];
+  if (!o || !d || o.code === d.code) return [];
+
+  const needAccess = !query.originIsMtr && o.dist > FEEDER_WALK_OK_M;
+  const needEgress = !query.destIsMtr && d.dist > FEEDER_WALK_OK_M;
+  if (!needAccess && !needEgress) return [];
+
+  const allowed = allowedLinesFromQuery(query);
+  const depart = query.departAt || "";
+
+  let accessPlan = null;
+  if (needAccess) {
+    accessPlan = feederFn(
+      { lat: oLat, lon: oLon },
+      { lat: o.st.lat, lon: o.st.lon },
+      depart,
+    );
+    if (!planHasTransit(accessPlan)) accessPlan = null;
+  }
+
+  const arriveAccess = accessPlan
+    ? addSecondsIso(accessPlan.start_time, accessPlan.duration_seconds || 0)
+    : depart;
+  const core = railCore(o.code, d.code, arriveAccess, allowed);
+  if (!core) return [];
+
+  let egressPlan = null;
+  if (needEgress) {
+    const arriveRail = addSecondsIso(core.start_time, core.duration_seconds || 0);
+    egressPlan = feederFn(
+      { lat: d.st.lat, lon: d.st.lon },
+      { lat: dLat, lon: dLon },
+      arriveRail,
+    );
+    if (!planHasTransit(egressPlan)) egressPlan = null;
+  }
+
+  if (!accessPlan && !egressPlan) return [];
+
+  const accessLegs = accessPlan
+    ? trimEdgeWalks(accessPlan.legs, "end")
+    : [];
+  const egressLegs = egressPlan
+    ? trimEdgeWalks(egressPlan.legs, "start")
+    : [];
+  const walkOn = !accessPlan
+    ? walkLeg(oLat, oLon, o.code, false)
+    : { dist: 0, leg: null };
+  const walkOff = !egressPlan
+    ? walkLeg(dLat, dLon, d.code, true)
+    : { dist: 0, leg: null };
+
+  /** @type {object[]} */
+  const legs = [];
+  if (accessLegs.length) legs.push(...accessLegs);
+  if (walkOn?.leg) legs.push(walkOn.leg);
+  legs.push(...(core.legs || []));
+  if (walkOff?.leg) legs.push(walkOff.leg);
+  if (egressLegs.length) legs.push(...egressLegs);
+  if (!legs.some((l) => l.type === "transit")) return [];
+
+  const start = accessPlan?.start_time || core.start_time;
+  const duration = sumLegSeconds(legs);
+  return [
+    {
+      duration_seconds: duration,
+      start_time: start,
+      legs,
+      walk_meters: Math.round(sumWalkM(legs)),
+      transfer_count: Math.max(
+        0,
+        legs.filter((l) => l.type === "transit").length - 1,
+      ),
+      bus_transfer_count: (accessPlan ? 1 : 0) + (egressPlan ? 1 : 0),
+      mtr_transfer_count: core.mtr_transfer_count || 0,
+      mixed_transfer_count: (accessPlan ? 1 : 0) + (egressPlan ? 1 : 0),
+      mtr_only: false,
+      has_mtr: true,
+      has_bus: true,
+      mtr_injected: true,
+      mixed_injected: true,
+      human_score: duration * 0.8,
+    },
+  ];
 }
 
 function hintedCodes(query, which) {
