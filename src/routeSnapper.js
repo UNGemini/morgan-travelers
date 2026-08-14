@@ -217,6 +217,10 @@ export async function densifyStopsViaOsrm(stops, opts = {}) {
   if (!stops || stops.length < 2) {
     return (stops || []).map((s) => ({ lon: s.lon, lat: s.lat }));
   }
+  // OSRM is a live proxy — offline, skip the hang and use stop chords.
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return stops.map((s) => ({ lon: s.lon, lat: s.lat }));
+  }
 
   // Cap waypoints for public OSRM (URL length + latency). Keep ends + even sample.
   const MAX_WAYPOINTS = 28;
@@ -1345,8 +1349,11 @@ export async function buildTransitPolyline(opt, opts = {}) {
     }
   }
 
-  // Road-following for bus / surface modes
-  if ((!isRail && !isFerry) || opts.forceOsrm) {
+  // Road-following for bus / surface modes (needs the live OSRM proxy)
+  if (
+    ((!isRail && !isFerry) || opts.forceOsrm) &&
+    !(typeof navigator !== "undefined" && navigator.onLine === false)
+  ) {
     try {
       return await densifyStopsViaOsrm(stops, opts);
     } catch (e) {

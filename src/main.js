@@ -2044,6 +2044,10 @@ function kmbServiceTypesToTry(preferred = null) {
  * @param {number} [serviceType]
  * @returns {Promise<Array<{ seq: number, name: string, nameEn: string, nameTc: string, stopId: string, lon: number, lat: number }>>}
  */
+function appIsOffline() {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
+}
+
 async function fetchKmbRouteStopList(routeId, direction, serviceType = 1) {
   const rid = String(routeId || "").toUpperCase();
   const dir = direction === "inbound" ? "inbound" : "outbound";
@@ -2052,6 +2056,7 @@ async function fetchKmbRouteStopList(routeId, direction, serviceType = 1) {
   if (kmbRouteStopSeqCache.has(cacheKey)) {
     return kmbRouteStopSeqCache.get(cacheKey) || [];
   }
+  if (appIsOffline()) return [];
   try {
     const rs = await fetch(
       `/eta/kmb/route-stop/${encodeURIComponent(rid)}/${dir}/${stype}`,
@@ -13552,16 +13557,17 @@ function etaRouteAsOption(route, stops, dir = {}, boardStop = null) {
 async function loadEtaRouteStops(route) {
   // Ensure OD/bounds for non-KMB before reading direction
   const coPre = String(route.co || "").toLowerCase();
-  if (coPre === "ctb") await ensureCtbRouteBound(route.id);
-  if (coPre === "nlb") await ensureNlbRouteBounds();
+  const skipLiveEta = appIsOffline();
+  if (!skipLiveEta) {
+    if (coPre === "ctb") await ensureCtbRouteBound(route.id);
+    if (coPre === "nlb") await ensureNlbRouteBounds();
+    if (coPre === "gmb") await ensureGmbRouteDirections(route.id);
+  }
   if (route.kind === "mtr_bus" || coPre === "lrtfeeder" || coPre === "mtrbus") {
     await ensureMtrBusData();
   }
   if (route.kind === "lrt") {
     await ensureLrtRouteData();
-  }
-  if (coPre === "gmb") {
-    await ensureGmbRouteDirections(route.id);
   }
   if (route.kind === "mtr") {
     await ensureMtrStationLinesMap();
@@ -13579,10 +13585,11 @@ async function loadEtaRouteStops(route) {
   const co = String(route.co || "").toLowerCase();
 
   // Load official stop sequence from operator APIs first (names + ETA ids).
+  // Offline: skip live ETA hosts and use the downloaded GTFS / local copies.
   // Contributed path is applied later in paint via buildTransitPolyline (trip plan).
 
   // ── GMB (etagmb open data) ──
-  if (co === "gmb") {
+  if (!skipLiveEta && co === "gmb") {
     try {
       let seq = await loadGmbStopSequence(route.id, bound);
       if (seq.length < 2) {
@@ -13628,7 +13635,10 @@ async function loadEtaRouteStops(route) {
   // Circular / one-way airport feeders (S64 series) often have:
   //  · only outbound stop-lists (inbound = [])
   //  · multiple service_type rows (1 / 2 / 3)
-  if (co === "kmb" || co === "lwb" || (route.kind === "bus" && !co)) {
+  if (
+    !skipLiveEta &&
+    (co === "kmb" || co === "lwb" || (route.kind === "bus" && !co))
+  ) {
     try {
       const serviceType =
         dir?.serviceType ??
@@ -13661,7 +13671,7 @@ async function loadEtaRouteStops(route) {
   }
 
   // ── CTB only ──
-  if (co === "ctb") {
+  if (!skipLiveEta && co === "ctb") {
     try {
       const direction = bound === "I" ? "inbound" : "outbound";
       const rs = await fetch(
@@ -13713,7 +13723,7 @@ async function loadEtaRouteStops(route) {
   }
 
   // ── NLB: pick routeId for selected direction (each OD is its own routeId) ──
-  if (co === "nlb") {
+  if (!skipLiveEta && co === "nlb") {
     try {
       await ensureNlbRouteBounds();
       const want = String(route.id).toUpperCase();

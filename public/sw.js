@@ -46,7 +46,7 @@
  * deploy path for "force fresh shell". The data cache survives upgrades
  * unless the user clears it.
  */
-const CACHE = "mtravelers-shell-v14";
+const CACHE = "mtravelers-shell-v15";
 const DATA_CACHE = "mtravelers-data-v3"; // v3: all-data serve-only regime
 const TILES_CACHE = "mtravelers-tiles-v1";
 const STAGING_CACHE = "mtravelers-stage-v1"; // atomic download staging
@@ -332,6 +332,7 @@ async function precacheData(urls) {
       const headers = new Headers(res.headers);
       headers.delete("content-encoding");
       headers.delete("content-length");
+      headers.delete("vary");
       headers.set("content-length", String(buf.byteLength));
       await stage.put(key, new Response(buf, { status: res.status, headers }));
       totalBytes += buf.byteLength;
@@ -401,10 +402,33 @@ async function commitPrecache() {
  * @param {FetchEvent} event
  * @param {string} cacheName
  */
+/** Match a cached data file even if Vary / query strings differ. */
+async function matchDataCache(cache, request) {
+  const opts = { ignoreVary: true, ignoreSearch: true };
+  const hit = await cache.match(request, opts);
+  if (hit) return hit;
+  try {
+    const u = new URL(request.url);
+    return cache.match(u.origin + u.pathname, opts);
+  } catch {
+    return undefined;
+  }
+}
+
+async function fetchLiveWithTimeout(request, ms) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(request, { signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function cachedOnlyFetch(event, cacheName) {
   const { request } = event;
   const cache = await caches.open(cacheName);
-  const hit = await cache.match(request);
+  const hit = await matchDataCache(cache, request);
   if (hit) {
     if (!(await cachedBodyComplete(hit))) {
       console.warn(
@@ -412,7 +436,7 @@ async function cachedOnlyFetch(event, cacheName) {
         urlPath(event.request.url),
       );
       await cache.delete(request);
-    } else if (dataSourcePref === "local") {
+    } else if (dataSourcePref === "local" || !self.navigator.onLine) {
       console.info(
         "[sw] serving downloaded data",
         urlPath(event.request.url),
@@ -421,13 +445,13 @@ async function cachedOnlyFetch(event, cacheName) {
     } else {
       // Cloud: prefer live data when online, fall back offline.
       try {
-        const live = await fetch(request);
+        const live = await fetchLiveWithTimeout(request, 2500);
         if (live && live.ok) {
           console.info("[sw] live data", urlPath(event.request.url));
           return live;
         }
       } catch {
-        /* offline — fall through to the downloaded copy */
+        /* offline / hung — fall through to the downloaded copy */
       }
       console.info(
         "[sw] serving downloaded data",

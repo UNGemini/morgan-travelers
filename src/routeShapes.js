@@ -52,12 +52,23 @@ const BASE = () =>
 /** @type {Map<string, Promise<any>>} */
 const cache = new Map();
 
+function deviceOffline() {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
+}
+
 async function fetchJson(url, signal) {
-  const res = await fetch(url, { signal, cache: "no-cache" });
+  const offline = deviceOffline();
+  const res = await fetch(url, {
+    signal,
+    // Online: revalidate. Offline: use the SW / HTTP cache — no-cache would
+    // try the network and fail even when the full dataset is downloaded.
+    cache: offline ? "force-cache" : "no-cache",
+  });
   if (!res.ok) throw new Error(`bus-shapes ${res.status} ${url}`);
   try {
     return await res.json();
   } catch (e) {
+    if (offline) throw e;
     // Truncated/corrupt cached body (HTTP cache or SW) — retry once with
     // caches bypassed so a bad copy can't silently kill every route's path.
     console.warn("[bus-shapes] json parse failed, retrying uncached", url, e);
