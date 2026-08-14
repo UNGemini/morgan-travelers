@@ -1209,6 +1209,8 @@ export function planTrip(query: RouteQuery): PlanResponse {
   }
 
   type WalkSpeed = NonNullable<RouteQuery["walkingSpeed"]>;
+  // One RAPTOR pass: MTR is injected after, so extra walk/transfer retries
+  // only burned the main thread (4 OD pairs × 3 attempts froze the tab).
   const attempts: Array<{
     max_results: number;
     max_transfers: number;
@@ -1217,60 +1219,43 @@ export function planTrip(query: RouteQuery): PlanResponse {
   }> = bothMtr
     ? [
         {
-          max_results: Math.max(displayMax * 4, 20),
-          max_transfers: Math.max(baseTransfers, 5),
+          max_results: Math.min(8, Math.max(displayMax, 5)),
+          max_transfers: Math.min(baseTransfers, 4),
           max_walk_distance: Math.min(baseWalk, 900),
           walking_speed: speed,
-        },
-        {
-          max_results: Math.max(displayMax * 4, 20),
-          max_transfers: 6,
-          max_walk_distance: Math.min(Math.max(baseWalk, 1200), 1400),
-          walking_speed: speed,
-        },
-        {
-          max_results: 25,
-          max_transfers: 6,
-          max_walk_distance: Math.min(baseWalk, 1600),
-          walking_speed: "normal",
         },
       ]
     : lrtArea
       ? [
-          // Wider candidate pool so multi-leg Light Rail is not crowded out by buses
           {
-            max_results: Math.max(displayMax * 4, 24),
-            max_transfers: Math.max(baseTransfers, 5),
+            max_results: Math.min(12, Math.max(displayMax * 2, 8)),
+            max_transfers: Math.min(baseTransfers, 4),
             max_walk_distance: Math.min(Math.max(baseWalk, 800), 1200),
             walking_speed: speed,
-          },
-          {
-            max_results: 28,
-            max_transfers: 6,
-            max_walk_distance: Math.min(Math.max(baseWalk, 1000), 1500),
-            walking_speed: "normal",
           },
         ]
       : [
           {
-            max_results: Math.max(displayMax, Math.min(15, displayMax * 3)),
+            max_results: Math.min(8, Math.max(displayMax, 5)),
             max_transfers: baseTransfers,
             max_walk_distance: baseWalk,
-            walking_speed: speed,
-          },
-          {
-            max_results: 20,
-            max_transfers: Math.max(baseTransfers, 4),
-            max_walk_distance: Math.min(baseWalk, 1000),
             walking_speed: speed,
           },
         ];
 
   /** Cap OD pairs so dual-access stays cheap (2×2 max for CEN/HOK). */
   const odPairs: Array<{ o: (typeof origins)[0]; d: (typeof dests)[0] }> = [];
-  for (const o of origins.slice(0, 2)) {
-    for (const d of dests.slice(0, 2)) {
-      odPairs.push({ o, d });
+  if (bothMtr) {
+    // Pin-to-pin only, plus one sibling (CEN↔HOK / TST↔ETS). Full 2×2
+    // was four RAPTOR runs on a 170k-trip graph and froze the tab.
+    odPairs.push({ o: origins[0], d: dests[0] });
+    if (origins[1]) odPairs.push({ o: origins[1], d: dests[0] });
+    else if (dests[1]) odPairs.push({ o: origins[0], d: dests[1] });
+  } else {
+    for (const o of origins.slice(0, 2)) {
+      for (const d of dests.slice(0, 2)) {
+        odPairs.push({ o, d });
+      }
     }
   }
 
@@ -1312,14 +1297,6 @@ export function planTrip(query: RouteQuery): PlanResponse {
     const shuttles = injectShuttlePlans(query, pooled);
     if (shuttles.length) {
       pooled.push(...(shuttles as Plan[]));
-    }
-
-    // MTR stop_times in the GTFS graph sit on station ids with empty
-    // coordinates, so RAPTOR never boards rail. Inject timetable itineraries.
-    const mtrInjected = injectMtrPlans(query);
-    if (mtrInjected.length) {
-      console.info("[router] injected", mtrInjected.length, "MTR plan(s)");
-      pooled.push(...(mtrInjected as Plan[]));
     }
 
     // Prefer alight stop with name similar to destination (e.g. Station vs Cable
@@ -1397,6 +1374,27 @@ export function planTrip(query: RouteQuery): PlanResponse {
         attempt.max_walk_distance,
       );
     }
+  }
+
+  // MTR once, after RAPTOR — not inside every walk/transfer retry.
+  const mtrInjected = injectMtrPlans(query);
+  if (mtrInjected.length) {
+    console.info("[router] injected", mtrInjected.length, "MTR plan(s)");
+    const merged = [...ranked, ...(mtrInjected as Plan[])];
+    const wantCheap =
+      (query.preferences || []).includes("cheapest") ||
+      query.preference === "cheapest";
+    if (wantCheap && typeof query.fareEstimator === "function") {
+      ctx.fareByIndex = merged.map((p) => {
+        try {
+          return query.fareEstimator!(p);
+        } catch {
+          return null;
+        }
+      });
+    }
+    ranked = rankPlansHumanCentric(merged, ctx);
+    ranked = dedupePlans(ranked);
   }
 
   return { plans: ranked.slice(0, displayMax) };

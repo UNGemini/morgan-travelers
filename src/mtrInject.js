@@ -65,6 +65,10 @@ function completePattern(pat) {
 }
 
 const COMPLETED_PATTERNS = MTR_PATTERNS.map(completePattern);
+/** Full network — built once. Filtered graphs are derived on demand. */
+const FULL_GRAPH = buildGraphFrom(null);
+/** @type {Map<string, ReturnType<typeof buildGraphFrom>>} */
+const graphCache = new Map();
 
 function haversineM(lat1, lon1, lat2, lon2) {
   const R = 6371000;
@@ -158,7 +162,7 @@ function nearestStations(lat, lon, maxM, extraCodes = []) {
   return pool.filter((h) => h.dist <= nearest + 150).slice(0, 2);
 }
 
-function buildGraph(allowedLines) {
+function buildGraphFrom(allowedLines) {
   /** @type {Map<string, Array<{ to: string, line: string, sec: number, pat: any }>>} */
   const g = new Map();
   const add = (a, b, e) => {
@@ -181,6 +185,17 @@ function buildGraph(allowedLines) {
   return g;
 }
 
+function graphFor(allowedLines) {
+  if (!allowedLines) return FULL_GRAPH;
+  const key = [...allowedLines].sort().join(",");
+  let g = graphCache.get(key);
+  if (!g) {
+    g = buildGraphFrom(allowedLines);
+    graphCache.set(key, g);
+  }
+  return g;
+}
+
 /**
  * Dijkstra on (station, line). Line change costs XFER_SEC.
  * @returns {Array<{ code: string, line: string, sec: number, pat: any }> | null}
@@ -188,20 +203,27 @@ function buildGraph(allowedLines) {
 function shortestPath(graph, from, to) {
   if (from === to) return [];
   const key = (code, line) => `${code}|${line}`;
-  /** @type {Map<string, { sec: number, prev: string | null, edge: any, code: string, line: string }>} */
+  /** @type {Map<string, { sec: number, xfers: number, prev: string | null, edge: any, code: string, line: string }>} */
   const best = new Map();
+  /** @type {Array<{ sec: number, xfers: number, code: string, line: string }>} */
   const pq = [];
-  const push = (sec, code, line, prev, edge) => {
+  const push = (sec, xfers, code, line, prev, edge) => {
+    if (xfers > 2) return;
     const k = key(code, line);
     const cur = best.get(k);
     if (cur && cur.sec <= sec) return;
-    best.set(k, { sec, prev, edge, code, line });
-    pq.push({ sec, code, line });
+    best.set(k, { sec, xfers, prev, edge, code, line });
+    pq.push({ sec, xfers, code, line });
   };
-  push(0, from, "-", null, null);
+  push(0, 0, from, "-", null, null);
   while (pq.length) {
-    pq.sort((a, b) => a.sec - b.sec);
-    const cur = pq.shift();
+    let bestI = 0;
+    for (let i = 1; i < pq.length; i++) {
+      if (pq[i].sec < pq[bestI].sec) bestI = i;
+    }
+    const cur = pq[bestI];
+    const last = pq.pop();
+    if (bestI < pq.length) pq[bestI] = last;
     const rec = best.get(key(cur.code, cur.line));
     if (!rec || rec.sec !== cur.sec) continue;
     if (cur.code === to) {
@@ -223,10 +245,19 @@ function shortestPath(graph, from, to) {
     }
     const edges = graph.get(cur.code) || [];
     for (const e of edges) {
-      const xfer = cur.line !== "-" && e.line !== cur.line && e.line !== "LINK" && cur.line !== "LINK"
-        ? XFER_SEC
-        : 0;
-      push(cur.sec + e.sec + xfer, e.to, e.line, key(cur.code, cur.line), e);
+      const isXfer =
+        cur.line !== "-" &&
+        e.line !== cur.line &&
+        e.line !== "LINK" &&
+        cur.line !== "LINK";
+      push(
+        cur.sec + e.sec + (isXfer ? XFER_SEC : 0),
+        cur.xfers + (isXfer ? 1 : 0),
+        e.to,
+        e.line,
+        key(cur.code, cur.line),
+        e,
+      );
     }
   }
   return null;
@@ -463,7 +494,7 @@ export function injectMtrPlans(query) {
   const dests = nearestStations(dLat, dLon, ACCESS_MAX_M, hintedCodes(query, "d"));
   if (!origins.length || !dests.length) return [];
 
-  const graph = buildGraph(allowed);
+  const graph = graphFor(allowed);
   /** @type {object[]} */
   const out = [];
   const seen = new Set();

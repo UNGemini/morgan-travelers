@@ -6351,6 +6351,8 @@ function collectViaWaypoints(from, to) {
   return { users, snaps };
 }
 
+let planRunGen = 0;
+
 function runPlan() {
   if (els.btnPlanCta) els.btnPlanCta.disabled = true;
   els.planResults.hidden = false;
@@ -6358,8 +6360,20 @@ function runPlan() {
   // Hide any previous path; blur until densified geometry is ready
   clearRouteGeometry();
   setMapRouteLoading(true, t("Planning…"));
+  const myGen = ++planRunGen;
+  // Paint “Planning…” before RAPTOR blocks the main thread.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (myGen !== planRunGen) return;
+      runPlanCompute(myGen);
+    });
+  });
+}
+
+function runPlanCompute(myGen) {
   const t0 = performance.now();
   try {
+    if (myGen !== planRunGen) return;
     const from = snapPlanEndpoint(origin);
     const to = snapPlanEndpoint(destination);
     const viaPack = collectViaWaypoints(from, to);
@@ -6421,6 +6435,7 @@ function runPlan() {
     } else if (leastFareOn && plans.length > 1) {
       plans = prioritizeCompleteFares(plans);
     }
+    if (myGen !== planRunGen) return;
     renderPlans(plans, ms, {
       bothMtr,
       leastFareOn,
