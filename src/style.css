@@ -6048,16 +6048,36 @@ body.contrib-submitting .bg-orb {
   letter-spacing: 0.01em;
 }
 
+.rt-step-meet {
+  align-items: start;
+}
+
+.rt-step-meet .rt-rail {
+  align-self: stretch;
+}
+
 .rt-step-meet .rt-marker-meet {
   color: #34c759;
-  font-size: 16px;
+  font-size: 18px !important;
+  width: 22px;
+  height: 22px;
+}
+
+.rt-step-meet .rt-body {
+  display: block;
+  font-size: 0.78rem;
+  line-height: 1.25;
+  padding-top: calc((22px - 1.25em) / 2);
+  padding-bottom: 8px;
 }
 
 .rt-meet-text {
-  font-size: 0.78rem;
+  display: block;
+  font-size: inherit;
   font-weight: 650;
   color: #86efac;
-  line-height: 1.25;
+  line-height: inherit;
+  margin: 0;
 }
 
 /* Board stop: keep first-line alignment; line flush under the first-line box */
