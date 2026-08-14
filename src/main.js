@@ -7008,17 +7008,41 @@ function transitRouteLabel(opt) {
 }
 
 /**
+ * Destination name for a transit header (no "To " prefix).
+ * @param {object} [opt]
+ */
+function transitDirectionDest(opt) {
+  if (!opt) return "";
+  const head = String(opt.headsign || "").trim();
+  if (head) return head.replace(/^to\s+/i, "").trim();
+  return cleanStopLabel(formatStopName(opt.to));
+}
+
+/**
  * "To {headsign|destination}" for transit header.
  * @param {object} [opt]
  */
 function transitDirectionLabel(opt) {
-  if (!opt) return "";
-  const head = String(opt.headsign || "").trim();
-  if (head) {
-    return /^to\s+/i.test(head) ? head : t("To {dest}", { dest: head });
-  }
-  const to = cleanStopLabel(formatStopName(opt.to));
-  return to ? t("To {dest}", { dest: to }) : "";
+  const dest = transitDirectionDest(opt);
+  return dest ? t("To {dest}", { dest }) : "";
+}
+
+/**
+ * Stacked “To” + larger dest for plan cards / timeline heads.
+ * @param {object} [opt]
+ */
+function transitDirectionHtml(opt) {
+  const dest = transitDirectionDest(opt);
+  if (!dest) return "";
+  const phrase = t("To {dest}", { dest });
+  const idx = phrase.indexOf(dest);
+  const prefix = idx > 0 ? phrase.slice(0, idx).trim() : idx < 0 ? phrase : "";
+  const suffix = idx >= 0 ? phrase.slice(idx + dest.length).trim() : "";
+  return `<span class="rt-route-to">
+    ${prefix ? `<span class="rt-route-to-prefix">${escapeHtml(prefix)}</span>` : ""}
+    <span class="rt-route-to-dest">${escapeHtml(dest)}</span>
+    ${suffix ? `<span class="rt-route-to-prefix">${escapeHtml(suffix)}</span>` : ""}
+  </span>`;
 }
 
 /**
@@ -7270,7 +7294,7 @@ function planRouteLineHtml(legsArr, opts = {}) {
         icon,
         bodyHtml: `<div class="rt-transit-head">
           ${routeBadge}
-          ${dir ? `<span class="rt-route-to">${escapeHtml(dir)}</span>` : ""}
+          ${transitDirectionHtml(opt)}
         </div>`,
       });
 
