@@ -5859,10 +5859,14 @@ body.contrib-submitting .bg-orb {
 
 /* Plan result cards: more air under the MTR pill + station names so the
  * coloured spine reads longer, and the dest sits on its own line. */
-.plan-card .rt-route-badge {
+.plan-card .rt-route-badge,
+.trip-detail-timeline .rt-route-badge,
+#trip-detail-timeline .rt-route-badge {
   padding-bottom: 0.5em;
 }
-.plan-card .rt-step-transit .rt-body {
+.plan-card .rt-step-transit .rt-body,
+.trip-detail-timeline .rt-step-transit .rt-body,
+#trip-detail-timeline .rt-step-transit .rt-body {
   padding-bottom: 8px;
 }
 .plan-card .rt-step-stop .rt-body {
