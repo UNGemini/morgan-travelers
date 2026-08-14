@@ -561,6 +561,7 @@ export const ja = {
   "Terms & Privacy": "規約とプライバシー",
   "Terms of Service": "利用規約",
   "The map's graphics engine keeps failing. Reload the page to try again.": "地図のグラフィックスエンジンが繰り返し失敗しています。ページを再読み込みしてください。",
+  "The terms and policies you agreed to when you first set up Travelers.": "初回セットアップで同意した利用規約とポリシーです。",
   "The transit data has been refreshed on the server. Re-download the offline set to get the latest routes, stops and fares?": "サーバーの交通データが更新されました。最新の路線・停留所・運賃を取得するため、オフラインセットを再ダウンロードしますか？",
   "Third-party software, fonts, and data used by Travelers, with license identifiers and attribution links for compliance.": "Travelers が使用するサードパーティのソフトウェア・フォント・データ。コンプライアンスのためライセンス識別子と帰属リンク付き。",
   "Third-party software, fonts, and data used by Travelers, with license identifiers and attribution links for compliance. Last updated 12 Aug 2026 — versions are package ranges; lockfile pins apply at build time. SPDX identifiers as declared upstream; full license text is in each project’s distribution.": "Travelers が使用するサードパーティのソフトウェア・フォント・データ。コンプライアンスのためライセンス識別子と帰属リンク付き。最終更新 2026 年 8 月 12 日 — バージョンはパッケージ範囲；ビルド時に lockfile で固定。SPDX 識別子は上流の宣言に準拠；ライセンス全文は各プロジェクトの配布物に記載。",

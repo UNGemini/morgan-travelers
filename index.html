@@ -621,6 +621,60 @@
         </div>
       </div>
 
+      <!-- Terms & Privacy (same documents accepted in onboarding) -->
+      <div
+        id="terms-privacy-sheet"
+        class="sheet"
+        hidden
+        role="dialog"
+        aria-labelledby="terms-privacy-title"
+      >
+        <div class="sheet-backdrop" data-sheet-close></div>
+        <div class="sheet-card" data-acrylic>
+          <header class="sheet-head">
+            <h2 id="terms-privacy-title">
+              <span class="material-symbols-outlined" aria-hidden="true">policy</span>
+              Terms &amp; Privacy
+            </h2>
+            <button
+              type="button"
+              class="btn btn-icon"
+              data-sheet-close
+              aria-label="Close"
+            >
+              <span class="material-symbols-outlined" aria-hidden="true">close</span>
+            </button>
+          </header>
+          <div class="sheet-body licenses-body">
+            <p class="hint">
+              The terms and policies you agreed to when you first set up Travelers.
+            </p>
+            <div class="onb-terms-list about-terms-list">
+              <a
+                class="onb-term-row onb-term-row--primary"
+                href="https://www.morgandev.cc/terms"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span class="material-symbols-outlined onb-term-icon" aria-hidden="true">verified</span>
+                <span class="onb-term-title">UNLOOP MORGAN Universal Terms of Use for Open-Source Software</span>
+                <span class="material-symbols-outlined onb-term-open" aria-hidden="true">open_in_new</span>
+              </a>
+              <a
+                class="onb-term-row"
+                href="https://www.morgandev.cc/privacy-policy"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span class="material-symbols-outlined onb-term-icon" aria-hidden="true">privacy_tip</span>
+                <span class="onb-term-title">Privacy Policy</span>
+                <span class="material-symbols-outlined onb-term-open" aria-hidden="true">open_in_new</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Open source & data licenses (About page) -->
       <div
         id="licenses-sheet"
@@ -1600,6 +1654,24 @@
               <p class="hint contrib-desktop-note" style="margin-top: 8px">
                 Desktop only · mouse/trackpad recommended.
               </p>
+            </section>
+            <section class="panel-section">
+              <h3>Terms &amp; Privacy</h3>
+              <p class="hint">
+                The terms and policies you agreed to when you first set up Travelers.
+              </p>
+              <button
+                type="button"
+                id="btn-terms-privacy"
+                class="btn btn-ghost"
+                data-acrylic
+                style="margin-top: 10px; width: 100%"
+              >
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">policy</span>
+                  Terms &amp; Privacy
+                </span>
+              </button>
             </section>
             <section class="panel-section">
               <h3>Licenses</h3>

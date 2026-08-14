@@ -561,6 +561,7 @@ export const ko = {
   "Terms & Privacy": "약관 및 개인정보",
   "Terms of Service": "서비스 약관",
   "The map's graphics engine keeps failing. Reload the page to try again.": "지도 그래픽 엔진이 계속 실패합니다. 페이지를 다시 로드하세요.",
+  "The terms and policies you agreed to when you first set up Travelers.": "처음 Travelers를 설정할 때 동의한 약관과 정책입니다.",
   "The transit data has been refreshed on the server. Re-download the offline set to get the latest routes, stops and fares?": "서버의 교통 데이터가 갱신되었습니다. 최신 노선·정류장·요금을 받으려면 오프라인 세트를 다시 다운로드할까요?",
   "Third-party software, fonts, and data used by Travelers, with license identifiers and attribution links for compliance.": "Travelers가 사용하는 타사 소프트웨어, 글꼴, 데이터 — 규정 준수를 위해 라이선스 식별자와 출처 링크 포함.",
   "Third-party software, fonts, and data used by Travelers, with license identifiers and attribution links for compliance. Last updated 12 Aug 2026 — versions are package ranges; lockfile pins apply at build time. SPDX identifiers as declared upstream; full license text is in each project’s distribution.": "Travelers가 사용하는 타사 소프트웨어, 글꼴, 데이터 — 규정 준수를 위해 라이선스 식별자와 출처 링크 포함. 최종 업데이트 2026년 8월 12일 — 버전은 패키지 범위; 빌드 시 lockfile로 고정. SPDX 식별자는 업스트림 선언 기준; 전체 라이선스 전문은 각 프로젝트 배포본에 포함.",

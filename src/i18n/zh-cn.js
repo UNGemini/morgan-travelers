@@ -562,6 +562,7 @@ export const zhCn = {
   "Terms & Privacy": "条款及隐私",
   "Terms of Service": "服务条款",
   "The map's graphics engine keeps failing. Reload the page to try again.": "地图图形引擎持续故障。请重新加载页面重试。",
+  "The terms and policies you agreed to when you first set up Travelers.": "这些是你首次设置 Travelers 时同意的条款与政策。",
   "The transit data has been refreshed on the server. Re-download the offline set to get the latest routes, stops and fares?": "服务器上的交通数据已更新。重新下载离线数据集以获取最新路线、站点与车费？",
   "Third-party software, fonts, and data used by Travelers, with license identifiers and attribution links for compliance.": "Travelers 使用的第三方软件、字体与数据，附许可证标识符与出处链接以符合规定。",
   "Third-party software, fonts, and data used by Travelers, with license identifiers and attribution links for compliance. Last updated 12 Aug 2026 — versions are package ranges; lockfile pins apply at build time. SPDX identifiers as declared upstream; full license text is in each project’s distribution.": "Travelers 使用的第三方软件、字体与数据，附许可证标识符与出处链接以符合规定。最后更新 2026 年 8 月 12 日——版本为包范围；构建时以 lockfile 锁定。SPDX 标识符按上游声明；完整许可证文字在各项目的发布中。",

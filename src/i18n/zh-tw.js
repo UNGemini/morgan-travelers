@@ -560,6 +560,7 @@ export const zhTw = {
   "Terms & Privacy": "條款及隱私",
   "Terms of Service": "服務條款",
   "The map's graphics engine keeps failing. Reload the page to try again.": "地圖圖形引擎持續故障。請重新載入頁面再試。",
+  "The terms and policies you agreed to when you first set up Travelers.": "這些是你首次設定 Travelers 時同意的條款與政策。",
   "The transit data has been refreshed on the server. Re-download the offline set to get the latest routes, stops and fares?": "伺服器上的交通資料已更新。重新下載離線資料集以取得最新路線、站點與車資？",
   "Third-party software, fonts, and data used by Travelers, with license identifiers and attribution links for compliance.": "Travelers 使用的第三方軟體、字型與資料，附授權識別符與出處連結以符合規定。",
   "Third-party software, fonts, and data used by Travelers, with license identifiers and attribution links for compliance. Last updated 12 Aug 2026 — versions are package ranges; lockfile pins apply at build time. SPDX identifiers as declared upstream; full license text is in each project’s distribution.": "Travelers 使用的第三方軟體、字型與資料，附授權識別符與出處連結以符合規定。最後更新 2026 年 8 月 12 日——版本為套件範圍；建置時以 lockfile 鎖定。SPDX 識別符按上游聲明；完整授權文字在各專案的發布中。",

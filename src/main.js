@@ -355,6 +355,7 @@ const els = {
   btnSettings: document.getElementById("btn-settings"),
   btnInfo: document.getElementById("btn-info"),
   btnLicenses: document.getElementById("btn-licenses"),
+  btnTermsPrivacy: document.getElementById("btn-terms-privacy"),
   btnProfile: document.getElementById("btn-profile"),
   profileMenu: document.getElementById("profile-menu"),
   mapProfile: document.getElementById("map-profile"),
@@ -368,6 +369,7 @@ const els = {
   settingsSheet: document.getElementById("settings-sheet"),
   infoSheet: document.getElementById("info-sheet"),
   licensesSheet: document.getElementById("licenses-sheet"),
+  termsPrivacySheet: document.getElementById("terms-privacy-sheet"),
   sidebarPageSearch: document.getElementById("sidebar-page-search"),
   sidebarPageTrip: document.getElementById("sidebar-page-trip"),
   sidebarPageEtaRoute: document.getElementById("sidebar-page-eta-route"),
@@ -15704,7 +15706,13 @@ els.btnLicenses?.addEventListener("click", (e) => {
   closeProfileMenu();
   openSheet(els.licensesSheet);
 });
+els.btnTermsPrivacy?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  closeProfileMenu();
+  openSheet(els.termsPrivacySheet);
+});
 wireSheet(els.licensesSheet);
+wireSheet(els.termsPrivacySheet);
 document.addEventListener("click", (e) => {
   const root = els.mapProfile || document.getElementById("map-profile");
   if (!root?.contains(/** @type {Node} */ (e.target))) {

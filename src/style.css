@@ -3390,6 +3390,11 @@ body.contrib-desktop-ok .contrib-desktop-only {
   margin: 0 0 14px;
 }
 
+.about-terms-list {
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+
 .license-list {
   display: flex;
   flex-direction: column;
