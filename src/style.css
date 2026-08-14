@@ -5961,14 +5961,17 @@ body.contrib-submitting .bg-orb {
 }
 
 .rt-route-to {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
   min-width: 0;
   font-size: 0.78rem;
   font-weight: 500;
   color: var(--text-secondary);
+}
+
+.rt-route-to-mtr {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
 }
 
 .rt-route-to-prefix {

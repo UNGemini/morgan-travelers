@@ -7028,17 +7028,23 @@ function transitDirectionLabel(opt) {
 }
 
 /**
- * Stacked “To” + larger dest for plan cards / timeline heads.
+ * Direction label beside the route chip.
+ * Heavy-rail MTR: stacked “To” + larger dest. Bus / LRT / ferry stay one line.
  * @param {object} [opt]
  */
 function transitDirectionHtml(opt) {
   const dest = transitDirectionDest(opt);
   if (!dest) return "";
   const phrase = t("To {dest}", { dest });
+  const mtrCode = detectMtrLineCode(opt);
+  const stackMtr = !!(mtrCode && mtrCode !== "LRT");
+  if (!stackMtr) {
+    return `<span class="rt-route-to">${escapeHtml(phrase)}</span>`;
+  }
   const idx = phrase.indexOf(dest);
   const prefix = idx > 0 ? phrase.slice(0, idx).trim() : idx < 0 ? phrase : "";
   const suffix = idx >= 0 ? phrase.slice(idx + dest.length).trim() : "";
-  return `<span class="rt-route-to">
+  return `<span class="rt-route-to rt-route-to-mtr">
     ${prefix ? `<span class="rt-route-to-prefix">${escapeHtml(prefix)}</span>` : ""}
     <span class="rt-route-to-dest">${escapeHtml(dest)}</span>
     ${suffix ? `<span class="rt-route-to-prefix">${escapeHtml(suffix)}</span>` : ""}
