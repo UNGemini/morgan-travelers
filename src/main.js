@@ -16,6 +16,7 @@ import { Protocol } from "pmtiles";
 import { layers, namedFlavor } from "@protomaps/basemaps";
 import { initAcrylic } from "./acrylic.js";
 import { loadStaticOverrides } from "./overrides.js";
+import { fetchDataJson } from "./offlineCache.js";
 import { createPathContributor } from "./contributePath.js";
 
 import { applyAccessPinOverrides } from "./mtrStations.js";
@@ -10483,11 +10484,7 @@ async function ensureEtaNearbyIndex() {
   if (etaNearbyIndexPromise) return etaNearbyIndexPromise;
   etaNearbyIndexPromise = (async () => {
     try {
-      const res = await fetch("/data/eta-nearby-stops.json", {
-        headers: { Accept: "application/json" },
-      });
-      if (!res.ok) throw new Error(String(res.status));
-      const j = await res.json();
+      const j = await fetchDataJson("/data/eta-nearby-stops.json");
       etaNearbyIndex = {
         v: Number(j.v) || 1,
         stops: Array.isArray(j.stops) ? j.stops : [],
@@ -10496,11 +10493,8 @@ async function ensureEtaNearbyIndex() {
       // Fold in RBS stops (NR/DB residents' bus, TD headway GTFS) so Nearby
       // browse finds them geographically; existing stop ids get extra pairs.
       try {
-        const rbsRes = await fetch("/data/rbs-stops.json", {
-          headers: { Accept: "application/json" },
-        });
-        if (rbsRes.ok) {
-          const rj = await rbsRes.json();
+        const rj = await fetchDataJson("/data/rbs-stops.json");
+        if (rj) {
           const rows = Array.isArray(rj.stops) ? rj.stops : [];
           if (rows.length) {
             const byId = new Map(
@@ -10551,11 +10545,7 @@ async function ensureRbsRouteData() {
   if (rbsRouteDataPromise) return rbsRouteDataPromise;
   rbsRouteDataPromise = (async () => {
     try {
-      const res = await fetch("/data/rbs-routes.json", {
-        headers: { Accept: "application/json" },
-      });
-      if (!res.ok) throw new Error(String(res.status));
-      const j = await res.json();
+      const j = await fetchDataJson("/data/rbs-routes.json");
       rbsRouteData = {
         v: Number(j.v) || 1,
         routes: j.routes && typeof j.routes === "object" ? j.routes : {},
@@ -13554,15 +13544,56 @@ function etaRouteAsOption(route, stops, dir = {}, boardStop = null) {
   };
 }
 
+/**
+ * Stop sequence from the downloaded dataset (GTFS bus-shapes + local packs).
+ * Used first so a PWA opened already-offline can paint markers without
+ * waiting on live operator APIs (which hang when onLine is a false positive).
+ */
+async function loadDownloadedBusStops(route, bound, co) {
+  const busCo = co || (route.kind === "bus" ? "kmb" : "");
+  if (
+    !busCo ||
+    busCo === "rbs" ||
+    !(
+      route.kind === "bus" ||
+      ["kmb", "lwb", "ctb", "nlb", "gmb"].includes(busCo)
+    )
+  ) {
+    return [];
+  }
+  try {
+    const { getGtfsRouteStopSequence } = await import("./routeShapes.js");
+    const rid = String(route.id || "");
+    const candidates = [`${busCo.toUpperCase()}-${rid}`];
+    if (busCo === "lwb") candidates.push(`KMB-${rid}`);
+    if (busCo === "gmb") {
+      for (const region of ["HKI", "KLN", "NT"]) {
+        candidates.push(`GMB-${region}-${rid}`);
+      }
+    }
+    for (const routeId of candidates) {
+      const seq = await getGtfsRouteStopSequence(
+        {
+          route_id: routeId,
+          route_short_name: rid,
+          agency: { id: busCo.toUpperCase(), name: busCo.toUpperCase() },
+        },
+        bound,
+      );
+      if (seq.length >= 2) return seq;
+    }
+  } catch (e) {
+    console.warn("[eta] downloaded stop-sequence", e);
+  }
+  return [];
+}
+
 async function loadEtaRouteStops(route) {
-  // Ensure OD/bounds for non-KMB before reading direction
   const coPre = String(route.co || "").toLowerCase();
   const skipLiveEta = appIsOffline();
-  if (!skipLiveEta) {
-    if (coPre === "ctb") await ensureCtbRouteBound(route.id);
-    if (coPre === "nlb") await ensureNlbRouteBounds();
-    if (coPre === "gmb") await ensureGmbRouteDirections(route.id);
-  }
+  // Local packs only — do not await live /eta OD here. A PWA opened already
+  // offline still reports onLine=true on some devices; those fetches hang
+  // and stop markers never paint.
   if (route.kind === "mtr_bus" || coPre === "lrtfeeder" || coPre === "mtrbus") {
     await ensureMtrBusData();
   }
@@ -13583,6 +13614,12 @@ async function loadEtaRouteStops(route) {
   let bound = String(dir?.bound || "O").toUpperCase();
   if (bound === "LINE" || bound === "LRT") bound = "O";
   const co = String(route.co || "").toLowerCase();
+
+  // Downloaded GTFS first — paints markers when the PWA is opened already
+  // offline. Do not wait on live /eta hosts: navigator.onLine is often still
+  // true on a cold start, and those fetches hang. ETA ids strip the GTFS prefix.
+  const downloaded = await loadDownloadedBusStops(route, bound, co);
+  if (downloaded.length >= 2) return downloaded;
 
   // Load official stop sequence from operator APIs first (names + ETA ids).
   // Offline: skip live ETA hosts and use the downloaded GTFS / local copies.
@@ -13797,40 +13834,9 @@ async function loadEtaRouteStops(route) {
   }
 
   // ── GTFS stop-sequence fallback (offline / operator API down) ──────────
-  // KMB/CTB/NLB/GMB only — MTR/LRT/MTR Bus/RBS have their own local data above.
-  const busCo = co || (route.kind === "bus" ? "kmb" : "");
-  if (
-    busCo &&
-    busCo !== "rbs" &&
-    (route.kind === "bus" ||
-      ["kmb", "lwb", "ctb", "nlb", "gmb"].includes(busCo))
-  ) {
-    try {
-      const { getGtfsRouteStopSequence } = await import("./routeShapes.js");
-      const rid = String(route.id || "");
-      // GMB route codes are region-agnostic ("69") but the feed splits them
-      // per region ("GMB-HKI-69") — try each region, first hit wins.
-      const candidates = [`${busCo.toUpperCase()}-${rid}`];
-      if (busCo === "gmb") {
-        for (const region of ["HKI", "KLN", "NT"]) {
-          candidates.push(`GMB-${region}-${rid}`);
-        }
-      }
-      for (const routeId of candidates) {
-        const seq = await getGtfsRouteStopSequence(
-          {
-            route_id: routeId,
-            route_short_name: rid,
-            agency: { id: busCo.toUpperCase(), name: busCo.toUpperCase() },
-          },
-          bound,
-        );
-        if (seq.length >= 2) return seq;
-      }
-    } catch (e) {
-      console.warn("[eta] gtfs stop-sequence fallback", e);
-    }
-  }
+  if (downloaded.length >= 2) return downloaded;
+  const gtfsAgain = await loadDownloadedBusStops(route, bound, co);
+  if (gtfsAgain.length >= 2) return gtfsAgain;
 
   // MTR line stations — official line order (not nearest-neighbour)
   if (route.kind === "mtr") {

@@ -18,12 +18,11 @@
  *  3. OPT-IN data cache (router graph, fares, map data) — controlled by
  *     the Settings "Data cache" toggle via DATA_CACHE_PREF messages.
  *     ALL transit data (route/stop files, fares, overrides, MTR geo,
- *     basemap archive) is serve-only: with the Cloud preference (default)
- *     the live network copy is tried first and the downloaded copy is the
- *     offline fallback; with the Local preference the downloaded copy is
- *     served directly. Either way nothing is ever auto-written —
- *     automatic caching is limited to static shell assets so ordinary use
- *     does not burn mobile data.
+ *     basemap archive) is serve-only: a downloaded copy is served when
+ *     present (so a PWA opened already-offline can paint stop markers);
+ *     otherwise the request passes through to the network. Nothing is
+ *     ever auto-written — automatic caching is limited to static shell
+ *     assets so ordinary use does not burn mobile data.
  *
  *     The only writer is the explicit Settings "Download offline data"
  *     flow (PRECACHE_DATA): every URL is fetched fresh and byte-verified
@@ -46,7 +45,7 @@
  * deploy path for "force fresh shell". The data cache survives upgrades
  * unless the user clears it.
  */
-const CACHE = "mtravelers-shell-v15";
+const CACHE = "mtravelers-shell-v16";
 const DATA_CACHE = "mtravelers-data-v3"; // v3: all-data serve-only regime
 const TILES_CACHE = "mtravelers-tiles-v1";
 const STAGING_CACHE = "mtravelers-stage-v1"; // atomic download staging
@@ -409,20 +408,21 @@ async function matchDataCache(cache, request) {
   if (hit) return hit;
   try {
     const u = new URL(request.url);
-    return cache.match(u.origin + u.pathname, opts);
+    const byPath = await cache.match(u.origin + u.pathname, opts);
+    if (byPath) return byPath;
+    const keys = await cache.keys();
+    const req = keys.find((r) => {
+      try {
+        return new URL(r.url).pathname === u.pathname;
+      } catch {
+        return false;
+      }
+    });
+    if (req) return cache.match(req);
   } catch {
-    return undefined;
+    /* ignore */
   }
-}
-
-async function fetchLiveWithTimeout(request, ms) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), ms);
-  try {
-    return await fetch(request, { signal: ctrl.signal });
-  } finally {
-    clearTimeout(timer);
-  }
+  return undefined;
 }
 
 async function cachedOnlyFetch(event, cacheName) {
@@ -436,23 +436,11 @@ async function cachedOnlyFetch(event, cacheName) {
         urlPath(event.request.url),
       );
       await cache.delete(request);
-    } else if (dataSourcePref === "local" || !self.navigator.onLine) {
-      console.info(
-        "[sw] serving downloaded data",
-        urlPath(event.request.url),
-      );
-      return hit;
     } else {
-      // Cloud: prefer live data when online, fall back offline.
-      try {
-        const live = await fetchLiveWithTimeout(request, 2500);
-        if (live && live.ok) {
-          console.info("[sw] live data", urlPath(event.request.url));
-          return live;
-        }
-      } catch {
-        /* offline / hung — fall through to the downloaded copy */
-      }
+      // Always serve the downloaded copy when present. A PWA opened already
+      // offline (or with a lying navigator.onLine) must not wait on live
+      // /data fetches — those hang and stop markers never paint. Freshness
+      // is the explicit Settings download, not this request.
       console.info(
         "[sw] serving downloaded data",
         urlPath(event.request.url),

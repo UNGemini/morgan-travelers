@@ -6,6 +6,7 @@
  */
 
 import { LRT_STOPS } from "./lrtStops.js";
+import { fetchDataText } from "./offlineCache.js";
 
 /** Same-origin static bundle (COEP-safe, no proxy required) */
 function lrtCsvStaticUrl() {
@@ -194,12 +195,16 @@ export async function ensureLrtRouteData(opts = {}) {
       const staticUrl = lrtCsvStaticUrl();
       for (const url of [staticUrl, CSV_PROXY, CSV_DIRECT]) {
         try {
-          const res = await fetch(url, {
-            headers: { Accept: "text/csv,text/plain,*/*" },
-            cache: url === staticUrl || url.includes("/data/") ? "force-cache" : "default",
-          });
-          if (!res.ok) throw new Error(`LRT CSV ${res.status} @ ${url}`);
-          const body = await res.text();
+          const body =
+            url === staticUrl
+              ? await fetchDataText(url)
+              : await (async () => {
+                  const res = await fetch(url, {
+                    headers: { Accept: "text/csv,text/plain,*/*" },
+                  });
+                  if (!res.ok) throw new Error(`LRT CSV ${res.status} @ ${url}`);
+                  return res.text();
+                })();
           if (body && /line\s*code|sequence/i.test(body) && body.length > 40) {
             text = body;
             used = url;

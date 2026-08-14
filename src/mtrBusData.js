@@ -10,6 +10,8 @@
  *  3) Direct opendata.mtr.com.hk (may fail under COEP)
  */
 
+import { fetchDataText } from "./offlineCache.js";
+
 /** Same-origin static bundle */
 function staticUrl(file) {
   try {
@@ -126,12 +128,15 @@ function parseCsv(text) {
  * @returns {Promise<string>}
  */
 async function fetchText(url, opts = {}) {
-  const res = await fetch(url, {
-    headers: { Accept: "text/csv,text/plain,*/*" },
-    cache: opts.preferCache ? "force-cache" : "default",
-  });
-  if (!res.ok) throw new Error(`MTR bus CSV ${res.status} @ ${url}`);
-  const text = await res.text();
+  const text = opts.preferCache
+    ? await fetchDataText(url)
+    : await (async () => {
+        const res = await fetch(url, {
+          headers: { Accept: "text/csv,text/plain,*/*" },
+        });
+        if (!res.ok) throw new Error(`MTR bus CSV ${res.status} @ ${url}`);
+        return res.text();
+      })();
   if (!text || text.length < 40) {
     throw new Error(`MTR bus CSV empty @ ${url}`);
   }
