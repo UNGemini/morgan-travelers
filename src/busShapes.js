@@ -712,11 +712,20 @@ export function buildPathContributionDraft(fields) {
   };
 }
 
+/** Strip KMB-/CTB-… so GTFS ids match contributed raw operator ids. */
+function visualStopIdKey(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const m =
+    /^(?:KMB|CTB|NLB|GMB|LWB|NWFB|MTRBUS|LRTFEEDER|LRT|MTR)-(.+)$/i.exec(s);
+  return (m ? m[1] : s).toUpperCase();
+}
+
 /**
  * Apply contributed visual stop positions onto plan stop features for a leg.
  * Official GTFS coords / merge identity are not changed — only display geometry.
  *
- * Match order: stop_id → seq/stop_index → ordered fallback.
+ * Match order: normalized stop_id → seq aligned to 0/1-based → order.
  *
  * @param {Array<{ properties?: object, geometry?: object }>} stopFeatures
  * @param {BusShapeOverride | null | undefined} shape
@@ -730,26 +739,43 @@ export function applyVisualStopsFromShape(stopFeatures, shape) {
   const byId = new Map();
   /** @type {Map<number, BusShapeVisualStop>} */
   const bySeq = new Map();
+  const vsSeqs = [];
   for (const s of vs) {
     if (!s?.visual || s.visual.length < 2) continue;
-    const id = String(s.stop_id || "").trim();
+    const id = visualStopIdKey(s.stop_id);
     if (id) byId.set(id, s);
-    if (Number.isFinite(Number(s.seq))) bySeq.set(Number(s.seq), s);
+    const sq = Number(s.seq);
+    if (Number.isFinite(sq)) {
+      bySeq.set(sq, s);
+      vsSeqs.push(sq);
+    }
   }
 
-  let n = 0;
-  const ordered = [...stopFeatures].sort(
-    (a, b) =>
-      (Number(a.properties?.stop_index) || 0) -
-      (Number(b.properties?.stop_index) || 0),
-  );
+  const ordered = [...stopFeatures].sort((a, b) => {
+    const as = Number(a.properties?.stop_index);
+    const bs = Number(b.properties?.stop_index);
+    const av = Number.isFinite(as) ? as : 0;
+    const bv = Number.isFinite(bs) ? bs : 0;
+    return av - bv;
+  });
 
+  const featSeqs = ordered
+    .map((f) => Number(f.properties?.stop_index))
+    .filter((n) => Number.isFinite(n));
+  const featMin = featSeqs.length ? Math.min(...featSeqs) : 0;
+  const vsMin = vsSeqs.length ? Math.min(...vsSeqs) : 0;
+  // Contribute tool stores 0-based seq; GTFS/ETA lists are often 1-based.
+  const seqShift =
+    Number.isFinite(featMin) && Number.isFinite(vsMin) ? featMin - vsMin : 0;
+
+  let n = 0;
   for (let i = 0; i < ordered.length; i++) {
     const f = ordered[i];
-    const sid = String(f.properties?.stop_id || "").trim();
+    const sid = visualStopIdKey(f.properties?.stop_id);
     const seq = Number(f.properties?.stop_index);
     let hit =
       (sid && byId.get(sid)) ||
+      (Number.isFinite(seq) ? bySeq.get(seq - seqShift) : null) ||
       (Number.isFinite(seq) ? bySeq.get(seq) : null) ||
       vs[i] ||
       null;
