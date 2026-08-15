@@ -16427,6 +16427,11 @@ function busPosCheapSigOf(st) {
   if (di >= dirs.length) di = Math.max(0, dirs.length - 1);
   const dir = dirs[di] || dirs[0] || {};
   const bound = String(dir.bound || "O").toUpperCase();
+  const cacheKey =
+    etaMapGeomCache &&
+    String(etaMapGeomCache.routeId || "") === String(st.route.id || "")
+      ? `${etaMapGeomCache.coords?.length || 0}:${etaMapGeomCache.coords?.[0]?.[0] ?? ""}`
+      : "";
   return [
     st.co,
     String(st.route.id || ""),
@@ -16436,6 +16441,7 @@ function busPosCheapSigOf(st) {
     st.named.length,
     st.boardIndex,
     st.fetchMore ? "more" : "",
+    cacheKey,
   ].join("|");
 }
 
@@ -16457,27 +16463,73 @@ async function busPosBuildCtx(st) {
   const bound = String(dir?.bound || "O").toUpperCase();
   if (bound === "LINE" || bound === "LRT") return null;
 
-  const { getGtfsBusShape, projectOntoShape } = await getBusPosRouteShapesMod();
+  const { getGtfsBusShape, projectOntoShape, cumulativeMeters } =
+    await getBusPosRouteShapesMod();
   busPosProjectOntoShape = projectOntoShape;
   const coUp = st.co.toUpperCase();
-  // Same shape pipeline the drawn route path uses (see buildTransitPolyline)
-  const shape = await getGtfsBusShape({
+  const opt = {
     route_id: `${coUp}-${st.route.id}`,
     route_short_name: String(st.route.id || ""),
     agency: { id: coUp, name: coUp },
     bound,
     stops: st.named,
     headsign: dir?.dest || "",
-  });
-  if (!shape?.coords?.length || !shape.cumM?.length) {
-    console.warn("[buspos] no GTFS shape for", st.co, st.route.id, bound);
+    from: st.named[0],
+    to: st.named[st.named.length - 1],
+  };
+
+  // Same pipeline as the drawn line: map cache → contributed override → GTFS.
+  /** @type {Array<{ lon: number, lat: number }> | null} */
+  let coords = null;
+  const cached = etaMapGeomCache;
+  if (
+    cached?.coords?.length >= 2 &&
+    String(cached.routeId || "") === String(st.route.id || "")
+  ) {
+    coords = cached.coords
+      .map((c) => ({ lon: Number(c[0]), lat: Number(c[1]) }))
+      .filter((p) => Number.isFinite(p.lon) && Number.isFinite(p.lat));
+    if (coords.length < 2) coords = null;
+  }
+  if (!coords) {
+    try {
+      const override = matchBusShapeOverride(opt);
+      if (override) {
+        const poly = busShapeToPolyline(
+          override,
+          opt.stops,
+          sliceRouteBetweenStops,
+        );
+        if (poly?.length >= 2) coords = poly;
+      }
+    } catch (e) {
+      console.warn("[buspos] contributed shape", e);
+    }
+  }
+  if (!coords) {
+    const gtfs = await getGtfsBusShape(opt);
+    if (gtfs?.coords?.length >= 2) coords = gtfs.coords;
+  }
+  if (!coords?.length) {
+    console.warn("[buspos] no shape for", st.co, st.route.id, bound);
     return null;
   }
+  const cumM = cumulativeMeters(coords);
+  if (!cumM?.length) {
+    console.warn("[buspos] empty shape measure for", st.co, st.route.id);
+    return null;
+  }
+  const shape = { coords, cumM };
+
+  // Prefer map-baked visual pins (contributed visual_stops) so along-shape
+  // distances sit on the same line the user sees.
+  const pinStops =
+    cached?.stops?.length === st.named.length ? cached.stops : st.named;
 
   // Along-shape distances for the window stops (monotonic, travel order)
   const stopDistM = [];
   let searchFrom = 0;
-  for (const s of st.named) {
+  for (const s of pinStops) {
     if (!Number.isFinite(s.lon) || !Number.isFinite(s.lat)) {
       stopDistM.push(NaN);
       continue;
