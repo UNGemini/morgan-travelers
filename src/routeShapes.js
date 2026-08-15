@@ -500,6 +500,7 @@ export async function loadGtfsStopDirectory(signal) {
           lon: Number(row[1]) / 1e5,
           lat: Number(row[2]) / 1e5,
           name: j.n?.[row[3]] ?? "",
+          nameZh: j.z?.[row[4]] ?? "",
         }));
         const byId = new Map(list.map((s, i) => [s.id, i]));
         return { list, byId };
@@ -541,9 +542,9 @@ export async function getGtfsRouteStopSequence(opt, bound = "O", opts = {}) {
       if (!s) continue;
       stops.push({
         seq: i + 1,
-        name: s.name,
+        name: s.nameZh || s.name,
         nameEn: s.name,
-        nameTc: "",
+        nameTc: s.nameZh || "",
         stopId: s.id,
         lon: s.lon,
         lat: s.lat,
@@ -592,6 +593,8 @@ export async function searchGtfsStopsLocal(query, limit = 8) {
     return hits.map((s) => ({
       stopId: s.id,
       name: s.name,
+      nameEn: s.name,
+      nameTc: s.nameZh || "",
       lat: s.lat,
       lon: s.lon,
     }));

@@ -25,7 +25,7 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync } from "node:fs";
 import { mkdirSync, existsSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
@@ -65,6 +65,7 @@ const STOP_AGENCIES = new Set(["kmb", "ctb", "nlb", "gmb"]);
 const args = process.argv.slice(2);
 const zipArg = args.find((a) => a.startsWith("--zip="))?.slice(6);
 const outArg = args.find((a) => a.startsWith("--out="))?.slice(6);
+const stopsZhOnly = args.includes("--stops-zh");
 const zipPath = zipArg || (existsSync(TMP_ZIP) ? TMP_ZIP : null);
 const outDir = outArg || OUT_DIR;
 
@@ -118,6 +119,84 @@ async function* zipCsvRows(zipPath, member) {
   } finally {
     child.kill();
   }
+}
+
+/**
+ * zh-Hant stop_name translations from GTFS translations.txt.
+ * @param {string} zip
+ * @returns {Promise<Map<string, string>>} stop_id → Traditional Chinese name
+ */
+async function loadZhStopNames(zip) {
+  /** @type {Map<string, string>} */
+  const zh = new Map();
+  let head = true;
+  let iTable = 0;
+  let iField = 1;
+  let iLang = 2;
+  let iRec = 3;
+  let iText = 4;
+  try {
+    for await (const row of zipCsvRows(zip, "translations.txt")) {
+      if (head) {
+        head = false;
+        const lower = row.map((c) => String(c || "").trim().toLowerCase());
+        iTable = Math.max(0, lower.indexOf("table_name"));
+        iField = Math.max(1, lower.indexOf("field_name"));
+        iLang = Math.max(2, lower.indexOf("language"));
+        iRec = Math.max(3, lower.indexOf("record_id"));
+        iText = Math.max(4, lower.indexOf("translation"));
+        continue;
+      }
+      if (row[iTable] !== "stops.txt" || row[iField] !== "stop_name") continue;
+      const lang = String(row[iLang] || "");
+      if (lang !== "zh-Hant" && lang !== "zh" && lang !== "zh-HK") continue;
+      const id = String(row[iRec] || "").trim();
+      const text = String(row[iText] || "").trim();
+      if (id && text) zh.set(id, text);
+    }
+  } catch (e) {
+    console.warn("[bus-shapes] translations.txt", e?.message || e);
+  }
+  console.log(`[bus-shapes] zh-Hant stop names: ${zh.size}`);
+  return zh;
+}
+
+/**
+ * Pack English + Chinese name tables onto stop rows.
+ * s: [id, lonE5, latE5, enIdx, zhIdx]
+ * @param {string[]} ids
+ * @param {Map<string, { name?: string }>} meta
+ * @param {Map<string, string>} zhById
+ */
+function packStopNames(ids, meta, zhById) {
+  const nameIndex = new Map();
+  const names = [];
+  const zhIndex = new Map();
+  const zNames = [];
+  const indexOf = (table, map, value) => {
+    const key = value || "";
+    let idx = map.get(key);
+    if (idx === undefined) {
+      idx = table.length;
+      map.set(key, idx);
+      table.push(key);
+    }
+    return idx;
+  };
+  const stopList = [];
+  for (const id of ids) {
+    const m = meta.get(id);
+    const en = String(m?.name || "").trim();
+    const zh = String(zhById.get(id) || "").trim();
+    stopList.push([
+      id,
+      Math.round((m?.lon || 0) * SCALE),
+      Math.round((m?.lat || 0) * SCALE),
+      indexOf(names, nameIndex, en),
+      indexOf(zNames, zhIndex, zh),
+    ]);
+  }
+  return { names, zNames, stopList };
 }
 
 /** Sanitize an agency id to a safe file name. */
@@ -210,10 +289,60 @@ async function downloadZip() {
   return TMP_ZIP;
 }
 
+/** Patch existing stops.json with zh-Hant names (no shape rebuild). */
+async function patchStopsZh(zip) {
+  const stopsPath = join(outDir, "stops.json");
+  if (!existsSync(stopsPath)) {
+    console.error("[bus-shapes] missing", stopsPath);
+    process.exit(1);
+  }
+  const zhById = await loadZhStopNames(zip);
+  const cur = JSON.parse(readFileSync(stopsPath, "utf8"));
+  const rows = Array.isArray(cur.s) ? cur.s : [];
+  const enTable = Array.isArray(cur.n) ? cur.n : [];
+  const zhIndex = new Map();
+  const zNames = [];
+  const indexOfZh = (value) => {
+    const key = value || "";
+    let idx = zhIndex.get(key);
+    if (idx === undefined) {
+      idx = zNames.length;
+      zhIndex.set(key, idx);
+      zNames.push(key);
+    }
+    return idx;
+  };
+  let hit = 0;
+  const next = rows.map((row) => {
+    const id = String(row[0] || "");
+    const zh = String(zhById.get(id) || "").trim();
+    if (zh) hit += 1;
+    return [row[0], row[1], row[2], row[3], indexOfZh(zh)];
+  });
+  const updatedAt = new Date().toISOString();
+  writeFileSync(
+    stopsPath,
+    JSON.stringify({
+      v: 2,
+      updated_at: updatedAt,
+      n: enTable,
+      z: zNames,
+      s: next,
+    }),
+  );
+  console.log(
+    `[bus-shapes] patched stops.json: ${hit}/${rows.length} with zh-Hant (${zNames.length} unique)`,
+  );
+}
+
 async function main() {
   checkUnzip();
   const zip = zipPath || (await downloadZip());
   console.log(`[bus-shapes] parsing ${zip}`);
+  if (stopsZhOnly) {
+    await patchStopsZh(zip);
+    return;
+  }
 
   // routes.txt: route_id → { agency, short }
   /** @type {Map<string, { agency: string, short: string }>} */
@@ -401,24 +530,11 @@ async function main() {
   }
   const stopIds = [...referenced].sort();
   const stopIndex = new Map(stopIds.map((id, i) => [id, i]));
-  const nameIndex = new Map();
-  const names = [];
-  const stopList = [];
-  for (const id of stopIds) {
-    const m = stopMeta.get(id);
-    let nameIdx = nameIndex.get(m?.name);
-    if (nameIdx === undefined) {
-      nameIdx = names.length;
-      nameIndex.set(m?.name, nameIdx);
-      names.push(m?.name);
-    }
-    stopList.push([
-      id,
-      Math.round((m?.lon || 0) * SCALE),
-      Math.round((m?.lat || 0) * SCALE),
-      nameIdx,
-    ]);
-  }
+  const zhById = await loadZhStopNames(zip);
+  const packed = packStopNames(stopIds, stopMeta, zhById);
+  const names = packed.names;
+  const zNames = packed.zNames;
+  const stopList = packed.stopList;
 
   /** @type {Map<string, object>} agency → file payload */
   const agencies = new Map();
@@ -507,10 +623,16 @@ async function main() {
 
   writeFileSync(
     join(outDir, "stops.json"),
-    JSON.stringify({ v: 1, updated_at: updatedAt, n: names, s: stopList }),
+    JSON.stringify({
+      v: 2,
+      updated_at: updatedAt,
+      n: names,
+      z: zNames,
+      s: stopList,
+    }),
   );
   console.log(
-    `[bus-shapes] stops.json: ${stopList.length} stops, ${names.length} names`,
+    `[bus-shapes] stops.json: ${stopList.length} stops, ${names.length} en names, ${zNames.length} zh names`,
   );
 
   writeFileSync(

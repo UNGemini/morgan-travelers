@@ -80,6 +80,7 @@ import {
   LANG_META,
   waitZhMap,
   stationDisplayName,
+  stopDisplayName,
   localizeStopName,
   localizeDirLabel,
   simplifyZh,
@@ -9655,7 +9656,7 @@ async function ensureKmbStops() {
           .map((s) => ({
             stop: String(s.id).slice("KMB-".length),
             name_en: s.name,
-            name_tc: s.name,
+            name_tc: s.nameZh || "",
             lat: s.lat,
             lon: s.lon,
           }));
@@ -10530,6 +10531,32 @@ async function ensureEtaNearbyIndex() {
   return etaNearbyIndexPromise;
 }
 
+/** Look up a bilingual stop label in a loaded GTFS directory. */
+function gtfsDirStopLabel(dir, rawId, co, fallback) {
+  const fb = String(fallback || "").trim();
+  if (!dir?.byId) return { name: fb, nameEn: fb, nameTc: "" };
+  const coUp = String(co || "").toUpperCase();
+  const raw = String(rawId || "").trim();
+  const ids = [];
+  if (raw) {
+    ids.push(raw);
+    if (coUp) ids.push(`${coUp}-${raw}`);
+  }
+  for (const id of ids) {
+    const i = dir.byId.get(id);
+    if (i == null) continue;
+    const s = dir.list[i];
+    const nameEn = s.name || fb;
+    const nameTc = s.nameZh || "";
+    return {
+      nameEn,
+      nameTc,
+      name: stopDisplayName({ nameEn, nameTc, name: nameEn }) || fb,
+    };
+  }
+  return { name: fb, nameEn: fb, nameTc: "" };
+}
+
 /**
  * Compact RBS route data (TD headway GTFS): route id → per-direction
  * { dest/orig, headwayMins, first/last, stops }. No live ETA exists for
@@ -10622,6 +10649,13 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
   const idx = await ensureEtaNearbyIndex();
   const stops = idx?.stops || [];
   if (!stops.length) return { hits: [], hint: "" };
+  let gtfsDir = null;
+  try {
+    const { loadGtfsStopDirectory } = await import("./routeShapes.js");
+    gtfsDir = await loadGtfsStopDirectory();
+  } catch {
+    /* offline pack without stops.json */
+  }
 
   /** @type {Array<{ s: any, d: number }>} */
   const ranked = [];
@@ -10647,13 +10681,15 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
   for (const { s, d } of topStops) {
     const lat = Number(s[0]);
     const lon = Number(s[1]);
-    const name = String(s[2] || "");
+    const nameEn = String(s[2] || "");
     const stopId = String(s[3] || "");
     const routes = Array.isArray(s[4]) ? s[4] : [];
     for (const pair of routes) {
       const co = String(pair?.[0] || "").toLowerCase();
       const route = String(pair?.[1] || "").toUpperCase();
       if (!co || !route) continue;
+      const lab = gtfsDirStopLabel(gtfsDir, stopId, co, nameEn);
+      const name = lab.name || nameEn;
       const kind = co === "lrtfeeder" || co === "mtrbus" ? "mtr_bus" : "bus";
       const entry = {
         id: route,
