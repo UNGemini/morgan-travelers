@@ -15,6 +15,7 @@ export const zhTw = {
   "@LRT": "@輕鐵",
   "@MTR": "@港鐵",
   "AEL": "機場快綫",
+  "bus": "巴士",
   "About": "關於",
   "About Travelers": "關於 Travelers",
   "Add via": "加入途經",
