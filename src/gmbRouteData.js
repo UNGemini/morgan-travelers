@@ -223,7 +223,7 @@ export async function loadGmbStopSequence(routeCode, bound = "O") {
         const sid = String(s.stop_id ?? s.stopId ?? "");
         const nameEn = String(s.name_en || "").trim();
         const nameTc = String(s.name_tc || s.name_sc || "").trim();
-        const name = nameTc || nameEn || sid;
+        const name = nameEn || nameTc || sid;
         let lon = NaN;
         let lat = NaN;
         if (sid) {

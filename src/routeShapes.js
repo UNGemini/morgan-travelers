@@ -542,7 +542,7 @@ export async function getGtfsRouteStopSequence(opt, bound = "O", opts = {}) {
       if (!s) continue;
       stops.push({
         seq: i + 1,
-        name: s.nameZh || s.name,
+        name: s.name,
         nameEn: s.name,
         nameTc: s.nameZh || "",
         stopId: s.id,

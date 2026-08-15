@@ -1569,6 +1569,8 @@ const etaCardDirIndex = new Map();
  * @type {Map<string, { minutes: number | null, stopLabel: string, dest?: string, destZh?: string, bound?: string, stopId?: string, scheduled?: boolean, clock?: string }>}
  */
 const etaLiveByKey = new Map();
+/** GTFS stop directory when already loaded (Nearby / card label lookup). */
+let etaGtfsDir = null;
 /**
  * Live ETA per route key (list cards). Carries fetch metadata for UI chips.
  * @typedef {{
@@ -1847,6 +1849,8 @@ function applyNearbyDirLive(r, opts = {}) {
     ...(etaLiveByKey.get(key) || {}),
     minutes: slot.minutes,
     stopLabel: slot.stopLabel,
+    stopNameEn: slot.stopNameEn || "",
+    stopNameTc: slot.stopNameTc || "",
     dest: slot.dest,
     destZh: slot.destZh,
     bound: slot.bound || want,
@@ -1912,6 +1916,8 @@ async function refreshCardLiveEta(r, opts = {}) {
       board = {
         stopId: slot.stopId,
         name: slot.stopLabel,
+        nameEn: slot.stopNameEn || "",
+        nameTc: slot.stopNameTc || "",
         lon: slot.stopLon,
         lat: slot.stopLat,
       };
@@ -1964,6 +1970,8 @@ async function refreshCardLiveEta(r, opts = {}) {
           board = {
             stopId: best.stopId,
             name: best.name,
+            nameEn: best.nameEn || best.name_en || "",
+            nameTc: best.nameTc || best.name_tc || best.nameZh || "",
             lon: best.lon,
             lat: best.lat,
             stationCode: best.stationCode || best.code,
@@ -1976,6 +1984,8 @@ async function refreshCardLiveEta(r, opts = {}) {
         board = {
           stopId: s.stopId,
           name: s.name,
+          nameEn: s.nameEn || s.name_en || "",
+          nameTc: s.nameTc || s.name_tc || s.nameZh || "",
           lon: s.lon,
           lat: s.lat,
           stationCode: s.stationCode || s.code,
@@ -2048,12 +2058,15 @@ async function refreshCardLiveEta(r, opts = {}) {
     const first = result?.etas?.[0];
     const mins = result?.waitMins ?? first?.waitMins ?? null;
     const stopLabel =
+      etaStopNameLabel(board) ||
       board.name ||
       result?.stopId ||
       "";
     etaLiveByKey.set(key, {
       minutes: mins,
       stopLabel,
+      stopNameEn: board.nameEn || board.name_en || "",
+      stopNameTc: board.nameTc || board.name_tc || "",
       dest: first?.dest || dir.dest || "",
       destZh: dir.destZh || "",
       bound: dir.bound || bound,
@@ -2078,6 +2091,8 @@ async function refreshCardLiveEta(r, opts = {}) {
         destZh: dir.destZh || "",
         minutes: mins,
         stopLabel,
+        stopNameEn: board.nameEn || board.name_en || "",
+        stopNameTc: board.nameTc || board.name_tc || "",
         stopId: String(board.stopId || ""),
         distM: Number.isFinite(board.lat) && etaUserGeo
           ? haversineMEta(
@@ -6724,12 +6739,43 @@ function mtrLineBadgeHtml(code, color, label, extraClass = "") {
  * @param {{ name_en?: string, name?: string, name_tc?: string, name_zh?: string } | null | undefined} s
  */
 function etaStopNameLabel(s) {
-  const mode = LANG_META[getLang()].stationMode;
-  const en = String(s?.name_en || s?.name || "").trim();
-  const tc = String(s?.name_tc || s?.name_zh || "").trim();
-  if (mode === "en") return en || tc;
-  const zhOut = tc ? (mode === "hans" ? simplifyZh(tc) : tc) : "";
-  return zhOut || en;
+  if (!s) return "";
+  const en = String(s.nameEn || s.name_en || "").trim();
+  const tc = String(
+    s.nameTc || s.name_tc || s.nameZh || s.name_zh || "",
+  ).trim();
+  const raw = String(s.name || s.stopLabel || s.stopName || "").trim();
+  const looksZh = /[\u4e00-\u9fff]/.test(raw);
+  return stopDisplayName({
+    nameEn: en || (!looksZh ? raw : ""),
+    nameTc: tc || (looksZh ? raw : ""),
+    name: en || (!looksZh ? raw : ""),
+  });
+}
+
+/** Display text for an ETA card’s current-stop line (language-aware). */
+function etaCardStopLine(r, dir, eta = {}) {
+  const fromFields = etaStopNameLabel({
+    nameEn: eta.stopNameEn,
+    nameTc: eta.stopNameTc,
+    name: eta.stopLabel,
+    stopId: eta.stopId,
+  });
+  if (fromFields) return fromFields;
+  if (eta.stopId) {
+    const lab = gtfsDirStopLabel(
+      etaGtfsDir,
+      eta.stopId,
+      r?.co,
+      "",
+    );
+    if (lab.name) return lab.name;
+  }
+  const raw = String(eta.stopLabel || r?.nearbyHint || "")
+    .replace(/\s*·\s*\d+\s*m\s*$/i, "")
+    .trim();
+  if (raw) return etaStopNameLabel({ name: raw, stopId: eta.stopId });
+  return dir?.orig ? localizeDirLabel(dir, "orig") : "";
 }
 
 /**
@@ -10772,6 +10818,7 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
   try {
     const { loadGtfsStopDirectory } = await import("./routeShapes.js");
     gtfsDir = await loadGtfsStopDirectory();
+    etaGtfsDir = gtfsDir;
   } catch {
     /* offline pack without stops.json */
   }
@@ -10829,7 +10876,15 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
         pack.nearStops.length < 6 &&
         !pack.nearStops.some((x) => x.stopId === stopId)
       ) {
-        pack.nearStops.push({ stopId, name, d, lat, lon });
+        pack.nearStops.push({
+        stopId,
+        name,
+        nameEn: lab.nameEn,
+        nameTc: lab.nameTc,
+        d,
+        lat,
+        lon,
+      });
       }
       pack.nearStops.sort((a, b) => a.d - b.d);
     }
@@ -10902,7 +10957,9 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
             dest: info.dest,
             destZh: info.destZh,
             minutes: info.mins,
-            stopLabel: near.name,
+            stopLabel: etaStopNameLabel(near) || near.name,
+            stopNameEn: near.nameEn || "",
+            stopNameTc: near.nameTc || "",
             stopId: usedStop || near.stopId,
             distM: near.d,
             stopLat: Number(near.lat),
@@ -10980,7 +11037,9 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
         dest: d.dest || "",
         destZh: d.destZh || "",
         minutes: null,
-        stopLabel: n.name,
+        stopLabel: etaStopNameLabel(n) || n.name,
+        stopNameEn: n.nameEn || "",
+        stopNameTc: n.nameTc || "",
         stopId: n.stopId,
         distM: n.d,
         // Without geo termini, keep catalog order (O first)
@@ -11101,6 +11160,8 @@ async function fetchNearbyKmbEtaHits(geo, limit = 16) {
             destZh: String(row.dest_tc || "").trim(),
             minutes: mins,
             stopLabel: etaStopNameLabel(s),
+            stopNameEn: s.name_en || s.nameEn || "",
+            stopNameTc: s.name_tc || s.nameTc || s.name_zh || "",
             stopId: String(s.stop || ""),
             distM: d,
             stopLat: s.lat,
@@ -11409,7 +11470,7 @@ async function fetchNearbyMtrBusEtaHits(geo, limit = 12) {
       label: `MTR Bus ${route}`,
       kind: "mtr_bus",
       co: "lrtfeeder",
-      nearbyHint: `${s.nameZh || s.nameEn} · ${Math.round(distM)} m`,
+      nearbyHint: `${etaStopNameLabel({ nameEn: s.nameEn, nameTc: s.nameZh, name: s.nameEn }) || s.nameEn} · ${Math.round(distM)} m`,
     };
     if (!etaKindMatchesFilter(entry)) continue;
     const rk = etaRouteKey(entry);
@@ -11425,7 +11486,9 @@ async function fetchNearbyMtrBusEtaHits(geo, limit = 12) {
       dest: "",
       destZh: "",
       minutes: null,
-      stopLabel: s.nameZh || s.nameEn || s.stopId,
+      stopLabel: etaStopNameLabel({ nameEn: s.nameEn, nameTc: s.nameZh, name: s.nameEn }) || s.nameEn || s.stopId,
+      stopNameEn: s.nameEn || "",
+      stopNameTc: s.nameZh || "",
       stopId: s.stopId,
       distM,
       stopLat: s.lat,
@@ -12194,8 +12257,7 @@ function etaRouteCardInnerHtml(r, dir, eta = {}, opts = {}) {
   const dest = dir.destZh || dir.dest || r.label || "—";
   const destLabel = opts.destLabel || localizeDirLabel(dir, "dest") || dest;
   let stop =
-    eta.stopLabel ||
-    r.nearbyHint ||
+    etaCardStopLine(r, dir, eta) ||
     (dir.orig ? localizeDirLabel(dir, "orig") : "");
   // Platform indicator in the stop line for MTR / LRT (e.g. “金鐘 Admiralty - Platform 7”)
   if (stop && eta.platforms?.length && (r.kind === "mtr" || r.kind === "lrt")) {
