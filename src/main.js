@@ -705,6 +705,114 @@ function savePinnedPlans(list) {
   }
 }
 
+/** Attach GTFS zh/en names onto a stop-like object (does not bake .name). */
+function attachGtfsNamesToStop(s, dir) {
+  if (!s || typeof s !== "object" || !dir?.byId) return;
+  const raw = String(s.stop_id || s.id || s.stopId || "").trim();
+  if (!raw) return;
+  const ids = [raw];
+  const stripped = raw.replace(/^(KMB|CTB|NLB|GMB|LWB|NWFB)-/i, "");
+  if (stripped !== raw) ids.push(stripped);
+  else {
+    for (const p of ["KMB-", "CTB-", "NLB-", "GMB-", "LWB-"]) ids.push(p + raw);
+  }
+  for (const id of ids) {
+    const i = dir.byId.get(id);
+    if (i == null) continue;
+    const g = dir.list[i];
+    if (g.name) {
+      if (!s.nameEn) s.nameEn = g.name;
+      if (!s.name_en) s.name_en = g.name;
+    }
+    if (g.nameZh) {
+      s.nameTc = g.nameZh;
+      s.name_tc = g.nameZh;
+      s.name_zh = g.nameZh;
+    }
+    return;
+  }
+}
+
+function bakeLocalizedStopName(s) {
+  if (!s || typeof s !== "object") return;
+  const disp = stopDisplayName(s);
+  if (!disp) return;
+  if (s.stop_name != null || "stop_name" in s) s.stop_name = disp;
+  if (s.name != null || "name" in s) s.name = disp;
+  if (s.label != null && (s.nameEn || s.name_en || s.nameTc || s.name_zh)) {
+    s.label = disp;
+  }
+}
+
+function walkPlanStops(plan, fn) {
+  if (!plan || typeof plan !== "object") return;
+  fn(plan.origin);
+  fn(plan.destination);
+  for (const v of plan.vias || []) fn(v);
+  for (const v of plan.via_points || []) fn(v);
+  for (const leg of plan.legs || []) {
+    fn(leg.from);
+    fn(leg.to);
+    const opt = leg.route_options?.[0];
+    if (opt) {
+      fn(opt.from);
+      fn(opt.to);
+      for (const s of opt.stops || []) fn(s);
+    }
+  }
+}
+
+/**
+ * Re-apply the current language to a plan copy (pinned trips keep the
+ * language they were saved in). Does not write back to storage.
+ */
+async function relocalizePlanInPlace(plan) {
+  if (!plan) return plan;
+  let dir = null;
+  try {
+    const { loadGtfsStopDirectory } = await import("./routeShapes.js");
+    dir = await loadGtfsStopDirectory();
+  } catch {
+    /* optional */
+  }
+  walkPlanStops(plan, (s) => {
+    attachGtfsNamesToStop(s, dir);
+    bakeLocalizedStopName(s);
+  });
+  const first = plan.legs?.find((l) => l.route_options?.[0]?.from)?.route_options?.[0]?.from;
+  const lastOpt = [...(plan.legs || [])].reverse().find((l) => l.route_options?.[0]?.to);
+  const last = lastOpt?.route_options?.[0]?.to;
+  if (first) {
+    plan.fromLabel = stopDisplayName(first) || first.stop_name || plan.fromLabel;
+  } else if (plan.origin) {
+    plan.fromLabel = stopDisplayName(plan.origin) || plan.origin.label || plan.fromLabel;
+  }
+  if (last) {
+    plan.toLabel = stopDisplayName(last) || last.stop_name || plan.toLabel;
+  } else if (plan.destination) {
+    plan.toLabel = stopDisplayName(plan.destination) || plan.destination.label || plan.toLabel;
+  }
+  if (Array.isArray(plan.via_labels) && (plan.vias || plan.via_points)) {
+    const pts = (plan.vias || plan.via_points || []).filter(Boolean);
+    plan.via_labels = plan.via_labels.map((lab, i) => {
+      const pt = pts[i];
+      return (pt && stopDisplayName(pt)) || lab;
+    });
+  }
+  return plan;
+}
+
+async function localizedPlanCopy(plan) {
+  let copy;
+  try {
+    copy = JSON.parse(JSON.stringify(plan));
+  } catch {
+    return plan;
+  }
+  await relocalizePlanInPlace(copy);
+  return copy;
+}
+
 /** Stable identity for a plan: departure + per-leg route/stops. */
 function planPinKey(p) {
   const head = p.start_time || "";
@@ -894,8 +1002,7 @@ function syncPinnedRouteToolbar() {
   if (!btn) return;
   const total = routes.length + trips.length;
   btn.classList.toggle("has-pins", total > 0);
-  // Always keep the tab name “Pinned” (supports multiple stops)
-  if (label) label.textContent = "Pinned";
+  if (label) label.textContent = t("Pinned");
   if (total > 0) {
     btn.disabled = false;
     if (routes.length === 1 && trips.length === 0) {
@@ -903,29 +1010,28 @@ function syncPinnedRouteToolbar() {
         routes[0].stopName || routes[0].stopId
           ? ` @ ${routes[0].stopName || routes[0].stopId}`
           : "";
-      btn.title = `Pinned: ${routes[0].id}${oneStop}`;
+      btn.title = `${t("Pinned")}: ${routes[0].id}${oneStop}`;
       btn.setAttribute(
         "aria-label",
-        `Open pinned ${routes[0].id}${oneStop}`,
+        t("Open pinned {id}", { id: `${routes[0].id}${oneStop}` }),
       );
     } else if (trips.length === 0) {
-      btn.title = `Pinned (${routes.length} stops)`;
+      btn.title = `${t("Pinned")} (${routes.length})`;
       btn.setAttribute(
         "aria-label",
-        `Open ${routes.length} pinned stops`,
+        t("Open {n} pinned stops", { n: routes.length }),
       );
     } else if (routes.length === 0) {
-      const n = trips.length === 1 ? "1 trip" : `${trips.length} trips`;
-      btn.title = `Pinned (${n})`;
-      btn.setAttribute("aria-label", `Open ${n}`);
+      btn.title = `${t("Pinned")} (${trips.length})`;
+      btn.setAttribute("aria-label", t("Open {n} pinned trips", { n: trips.length }));
     } else {
-      btn.title = `Pinned (${total} items)`;
-      btn.setAttribute("aria-label", `Open ${total} pinned items`);
+      btn.title = `${t("Pinned")} (${total})`;
+      btn.setAttribute("aria-label", t("Open {n} pinned items", { n: total }));
     }
   } else {
     btn.disabled = true;
-    btn.title = "Pin a route stop or trip plan";
-    btn.setAttribute("aria-label", "No pinned items");
+    btn.title = t("Pin a route stop or trip plan");
+    btn.setAttribute("aria-label", t("No pinned items"));
   }
   const pinBtn = els.btnEtaPinRoute;
   if (pinBtn && etaSelectedForDetails) {
@@ -936,7 +1042,7 @@ function syncPinnedRouteToolbar() {
     const on = isRoutePinned(etaSelectedForDetails, stop);
     pinBtn.classList.toggle("is-pinned", on);
     const row = pinBtn.querySelector(".btn-row span:last-child");
-    if (row) row.textContent = on ? "Pinned" : "Pin stop";
+    if (row) row.textContent = on ? t("Pinned") : t("Pin stop");
   }
 }
 
@@ -1231,17 +1337,28 @@ async function renderPinnedRoutePage() {
     body.innerHTML = `
       <div class="pinned-empty">
         <span class="material-symbols-outlined" aria-hidden="true">push_pin</span>
-        <p>Nothing pinned yet</p>
-        <p class="hint">Pin trip plans from Plan Results, or open a route, pick a stop, then tap <strong>Pin</strong>.</p>
+        <p>${escapeHtml(t("Nothing pinned yet"))}</p>
+        <p class="hint">${escapeHtml(t("Pin trip plans from Plan Results, or open a route, pick a stop, then tap Pin."))}</p>
       </div>`;
     return;
   }
 
+  const localizedPlans = await Promise.all(
+    pinnedPlans.map(async (entry) => ({
+      ...entry,
+      plan: await localizedPlanCopy(entry.plan),
+    })),
+  );
+  for (const entry of localizedPlans) {
+    entry.fromLabel = entry.plan.fromLabel || entry.fromLabel;
+    entry.toLabel = entry.plan.toLabel || entry.toLabel;
+  }
+
   const parts = [];
-  if (pinnedPlans.length) {
-    parts.push(`<h3 class="results-section-title">Pinned Trips</h3>`);
+  if (localizedPlans.length) {
+    parts.push(`<h3 class="results-section-title">${escapeHtml(t("Pinned Trips"))}</h3>`);
     parts.push(
-      pinnedPlans
+      localizedPlans
         .map((entry, i) =>
           planCardHtml(entry.plan, i, {
             pinned: true,
@@ -1272,7 +1389,7 @@ async function renderPinnedRoutePage() {
   body.querySelectorAll("[data-pinned-plan]").forEach((card) => {
     card.addEventListener("click", (e) => {
       if (e.target.closest("button")) return;
-      const entry = pinnedPlans.find(
+      const entry = localizedPlans.find(
         (x) => x.key === card.getAttribute("data-pinned-plan"),
       );
       if (entry) openTripDetailPage(entry.plan);
@@ -1280,7 +1397,7 @@ async function renderPinnedRoutePage() {
     card.addEventListener("keydown", (e) => {
       if (e.key !== "Enter" && e.key !== " ") return;
       e.preventDefault();
-      const entry = pinnedPlans.find(
+      const entry = localizedPlans.find(
         (x) => x.key === card.getAttribute("data-pinned-plan"),
       );
       if (entry) openTripDetailPage(entry.plan);
@@ -1289,7 +1406,7 @@ async function renderPinnedRoutePage() {
   body.querySelectorAll("[data-pin-plan-detail]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      const entry = pinnedPlans.find(
+      const entry = localizedPlans.find(
         (x) => x.key === btn.getAttribute("data-pin-plan-detail"),
       );
       if (entry) openTripDetailPage(entry.plan);
@@ -6535,7 +6652,8 @@ function routeColorCss(opt, fallbackColor) {
 /** Prefer station-quality labels; hide bare "Platform N" when we have no parent. */
 function formatStopName(stop) {
   if (!stop) return "";
-  const name = (stop.stop_name || stop.address || "").trim();
+  const localized = stopDisplayName(stop);
+  const name = (localized || stop.stop_name || stop.address || "").trim();
   const platform = (stop.platform || "").trim();
   if (!name) {
     return platform ? t("Platform {p}", { p: platform }) : "";
@@ -6890,7 +7008,7 @@ function walkTimeParen(leg) {
  */
 function stopLineLabel(stop) {
   if (!stop) return "";
-  let name = (stop.stop_name || stop.address || "").trim();
+  let name = (stopDisplayName(stop) || stop.stop_name || stop.address || "").trim();
   let platform = String(stop.platform || "").trim();
   const publicCode = extractPublicStopCode(stop);
   const m = name.match(/\(\s*Platform\s*([^)]+)\)/i);
@@ -7822,11 +7940,11 @@ function planCardHtml(p, idx, opts = {}) {
     <div class="plan-actions">
       <button type="button" class="plan-detail-btn" ${pinned ? `data-pin-plan-detail="${escapeHtml(planKey)}"` : `data-detail-idx="${idx}"`}>
         <span class="material-symbols-outlined" aria-hidden="true">list_alt</span>
-        Show detail
+        ${escapeHtml(t("Show detail"))}
       </button>
-      <button type="button" class="plan-pin-btn${isPinned ? " is-pinned" : ""}" ${pinned ? `data-pin-plan-unpin="${escapeHtml(planKey)}"` : `data-plan-pin="${idx}"`} title="${isPinned ? "Unpin plan" : "Pin plan"}">
+      <button type="button" class="plan-pin-btn${isPinned ? " is-pinned" : ""}" ${pinned ? `data-pin-plan-unpin="${escapeHtml(planKey)}"` : `data-plan-pin="${idx}"`} title="${escapeHtml(isPinned ? t("Unpin plan") : t("Pin plan"))}">
         <span class="material-symbols-outlined" aria-hidden="true">${isPinned ? "keep_off" : "push_pin"}</span>
-        <span class="plan-pin-label">${isPinned ? "Unpin" : "Pin"}</span>
+        <span class="plan-pin-label">${escapeHtml(isPinned ? t("Unpin") : t("Pin"))}</span>
       </button>
     </div>
   </article>`;
@@ -8294,11 +8412,12 @@ function startTripEtaPolling() {
  * @param {number | object} idxOrPlan plan index in `plans`, or the plan object itself (pinned trips)
  * @param {object} [planOverride]
  */
-function openTripDetailPage(idxOrPlan, planOverride) {
-  const plan =
+async function openTripDetailPage(idxOrPlan, planOverride) {
+  const raw =
     planOverride ||
     (typeof idxOrPlan === "number" ? plans[idxOrPlan] : idxOrPlan);
-  if (!plan) return;
+  if (!raw) return;
+  const plan = await localizedPlanCopy(raw);
   tripDetailIdx = plan;
   tripDetailEtas = null;
   if (typeof idxOrPlan === "number" && !planOverride) {
@@ -14953,13 +15072,13 @@ async function renderEtaRouteDetailBody(route, ctx) {
       : null;
     const pinnedNow = isRoutePinned(route, pinStop);
     pinBtn.classList.toggle("is-pinned", pinnedNow);
-    pinBtn.title = pinnedNow ? "Unpin stop" : "Pin this stop";
+    pinBtn.title = pinnedNow ? t("Unpin stop") : t("Pin this stop");
     pinBtn.setAttribute(
       "aria-label",
-      pinnedNow ? "Unpin stop" : "Pin this stop",
+      pinnedNow ? t("Unpin stop") : t("Pin this stop"),
     );
     const labelEl = pinBtn.querySelector(".eta-detail-chrome-label");
-    if (labelEl) labelEl.textContent = pinnedNow ? "Pinned" : "Pin stop";
+    if (labelEl) labelEl.textContent = pinnedNow ? t("Pinned") : t("Pin stop");
     const ic = pinBtn.querySelector(".material-symbols-outlined");
     if (ic) ic.textContent = pinnedNow ? "keep" : "push_pin";
     pinBtn.onclick = () => {
@@ -14970,12 +15089,12 @@ async function renderEtaRouteDetailBody(route, ctx) {
       showToast(nowPinned ? `Pinned ${label}` : `Unpinned ${label}`, 1600);
       syncPinnedRouteToolbar();
       pinBtn.classList.toggle("is-pinned", nowPinned);
-      pinBtn.title = nowPinned ? "Unpin stop" : "Pin this stop";
+      pinBtn.title = nowPinned ? t("Unpin stop") : t("Pin this stop");
       pinBtn.setAttribute(
         "aria-label",
-        nowPinned ? "Unpin stop" : "Pin this stop",
+        nowPinned ? t("Unpin stop") : t("Pin this stop"),
       );
-      if (labelEl) labelEl.textContent = nowPinned ? "Pinned" : "Pin stop";
+      if (labelEl) labelEl.textContent = nowPinned ? t("Pinned") : t("Pin stop");
       if (ic) ic.textContent = nowPinned ? "keep" : "push_pin";
     };
   }
@@ -17061,6 +17180,7 @@ function initLanguageUi() {
 function refreshLanguageViews() {
   applyLangToDom();
   localizeFareTypeSelect();
+  syncPinnedRouteToolbar();
   relocalizeMapLabels(map, LANG_META[getLang()].stationMode);
   if (sidebarPage === "eta-route" && etaSelectedForDetails) {
     void relocalizeEtaRouteDetail();
