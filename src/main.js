@@ -16427,11 +16427,6 @@ function busPosCheapSigOf(st) {
   if (di >= dirs.length) di = Math.max(0, dirs.length - 1);
   const dir = dirs[di] || dirs[0] || {};
   const bound = String(dir.bound || "O").toUpperCase();
-  const cacheKey =
-    etaMapGeomCache &&
-    String(etaMapGeomCache.routeId || "") === String(st.route.id || "")
-      ? `${etaMapGeomCache.coords?.length || 0}:${etaMapGeomCache.coords?.[0]?.[0] ?? ""}`
-      : "";
   return [
     st.co,
     String(st.route.id || ""),
@@ -16441,7 +16436,6 @@ function busPosCheapSigOf(st) {
     st.named.length,
     st.boardIndex,
     st.fetchMore ? "more" : "",
-    cacheKey,
   ].join("|");
 }
 
@@ -16478,34 +16472,28 @@ async function busPosBuildCtx(st) {
     to: st.named[st.named.length - 1],
   };
 
-  // Same pipeline as the drawn line: map cache → contributed override → GTFS.
+  // Full-route line only: exact contributed override, else GTFS.
+  // Do not use a sliced map cache or a "similar" corridor — the engine
+  // projects every schedule stop onto this line; a short/wrong slice
+  // drops every pattern and the markers never appear.
   /** @type {Array<{ lon: number, lat: number }> | null} */
   let coords = null;
-  const cached = etaMapGeomCache;
-  if (
-    cached?.coords?.length >= 2 &&
-    String(cached.routeId || "") === String(st.route.id || "")
-  ) {
-    coords = cached.coords
-      .map((c) => ({ lon: Number(c[0]), lat: Number(c[1]) }))
-      .filter((p) => Number.isFinite(p.lon) && Number.isFinite(p.lat));
-    if (coords.length < 2) coords = null;
-  }
-  if (!coords) {
-    try {
-      const override = matchBusShapeOverride(opt);
-      if (override) {
-        const poly = busShapeToPolyline(
-          override,
-          opt.stops,
-          sliceRouteBetweenStops,
-        );
-        if (poly?.length >= 2) coords = poly;
-      }
-    } catch (e) {
-      console.warn("[buspos] contributed shape", e);
+  try {
+    const override = matchBusShapeOverride(opt);
+    const exact =
+      override &&
+      String(override.route_short_name || "").trim().toUpperCase() ===
+        String(st.route.id || "").trim().toUpperCase();
+    if (exact && override.coordinates?.length >= 2) {
+      coords = override.coordinates
+        .map((c) => ({ lon: Number(c[0]), lat: Number(c[1]) }))
+        .filter((p) => Number.isFinite(p.lon) && Number.isFinite(p.lat));
+      if (coords.length < 2) coords = null;
     }
+  } catch (e) {
+    console.warn("[buspos] contributed shape", e);
   }
+  const usedContrib = !!coords;
   if (!coords) {
     const gtfs = await getGtfsBusShape(opt);
     if (gtfs?.coords?.length >= 2) coords = gtfs.coords;
@@ -16514,34 +16502,42 @@ async function busPosBuildCtx(st) {
     console.warn("[buspos] no shape for", st.co, st.route.id, bound);
     return null;
   }
+
+  const measure = (line) => {
+    const stopDistM = [];
+    let searchFrom = 0;
+    let ok = 0;
+    for (const s of st.named) {
+      if (!Number.isFinite(s.lon) || !Number.isFinite(s.lat)) {
+        stopDistM.push(NaN);
+        continue;
+      }
+      const p = projectOntoShape(line, s.lon, s.lat, searchFrom);
+      if (!p) {
+        stopDistM.push(NaN);
+        continue;
+      }
+      stopDistM.push(p.alongM);
+      searchFrom = p.segEnd;
+      ok += 1;
+    }
+    return { stopDistM, ok };
+  };
+
+  let { stopDistM, ok } = measure(coords);
+  if (usedContrib && ok < 2) {
+    const gtfs = await getGtfsBusShape(opt);
+    if (gtfs?.coords?.length >= 2) {
+      coords = gtfs.coords;
+      ({ stopDistM, ok } = measure(coords));
+    }
+  }
   const cumM = cumulativeMeters(coords);
   if (!cumM?.length) {
     console.warn("[buspos] empty shape measure for", st.co, st.route.id);
     return null;
   }
   const shape = { coords, cumM };
-
-  // Prefer map-baked visual pins (contributed visual_stops) so along-shape
-  // distances sit on the same line the user sees.
-  const pinStops =
-    cached?.stops?.length === st.named.length ? cached.stops : st.named;
-
-  // Along-shape distances for the window stops (monotonic, travel order)
-  const stopDistM = [];
-  let searchFrom = 0;
-  for (const s of pinStops) {
-    if (!Number.isFinite(s.lon) || !Number.isFinite(s.lat)) {
-      stopDistM.push(NaN);
-      continue;
-    }
-    const p = projectOntoShape(shape.coords, s.lon, s.lat, searchFrom);
-    if (!p) {
-      stopDistM.push(NaN);
-      continue;
-    }
-    stopDistM.push(p.alongM);
-    searchFrom = p.segEnd;
-  }
 
   const serviceType =
     Number(dir?.serviceType ?? dir?.service_type) ||
@@ -16601,7 +16597,14 @@ async function busPosSyncState() {
     busPosCheapSig = cheap;
     const built = await busPosBuildCtx(st);
     const st2 = busPosDetailState();
-    if (!st2 || busPosCheapSigOf(st2) !== cheap) return; // changed mid-build
+    // Ignore cheap-sig flicker (map cache landing mid-build). Only drop if
+    // the user left the page or switched route / bound.
+    if (!st2) return;
+    const cheapNow = busPosCheapSigOf(st2);
+    const sameRoute =
+      cheapNow.split("|").slice(0, 5).join("|") ===
+      cheap.split("|").slice(0, 5).join("|");
+    if (!sameRoute) return;
     if (busPosEngine) busPosStopEngine();
     if (!built) return;
     const { BusPositionEngine, alongToLonLat } = await getBusPosMod();
