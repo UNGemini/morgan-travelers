@@ -16248,7 +16248,7 @@ function showUpdateDialog({
   title,
   message,
   confirmLabel,
-  cancelLabel = "Later",
+  cancelLabel = t("Later"),
   onConfirm,
   onCancel,
 }) {
