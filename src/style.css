@@ -296,26 +296,6 @@ body.mobile-ui [data-acrylic]::before {
   will-change: filter;
 }
 
-/* Installed PWA: viewport-fit=cover paints the map under the translucent
-   system status bar, which frosts the map's top safe-area strip. Draw a
-   theme-dark scrim over that strip so the glass blends into a clean, solid
-   status bar (native-app height) instead of a tall blur floating over the
-   map. The map still renders edge-to-edge below the band. */
-html.pwa .map-stage::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: calc(env(safe-area-inset-top, 0px) + 12px);
-  z-index: 1;
-  pointer-events: none;
-  background: linear-gradient(
-    to bottom,
-    #12161c 0%,
-    #12161c calc(100% - 24px),
-    rgba(18, 22, 28, 0) 100%
-  );
-}
-
 /* Live bus marker labels: DOM overlay above the canvas so they can use the
    app's Montserrat typeface — map glyph servers only ship Noto Sans.
    z-index 1: above the canvas but below the MapLibre tools (z-index 2). */
@@ -6287,7 +6267,11 @@ body.contrib-submitting .bg-orb {
   top: 12px; /* fallback before env() support */
   top: calc(12px + env(safe-area-inset-top, 0px));
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(-50%) translateZ(0);
+  /* translateZ(0) + will-change promote the card to its own compositing
+     layer so the iOS status-bar glass blurs the map behind it but leaves
+     the card's text and icon razor-sharp. */
+  will-change: transform;
   z-index: 9500;
   display: flex;
   align-items: center;
@@ -6319,7 +6303,7 @@ body.contrib-submitting .bg-orb {
     left: auto;
     right: 16px;
     top: 16px;
-    transform: none;
+    transform: translateZ(0);
     width: 35%;
     max-width: none;
   }
@@ -6330,7 +6314,7 @@ html.pwa .offline-banner {
   left: 50%;
   right: auto;
   top: calc(12px + env(safe-area-inset-top, 0px));
-  transform: translateX(-50%);
+  transform: translateX(-50%) translateZ(0);
 }
 
 /* ── Beta banner — floating card while the live bus position engine runs ── */
@@ -6387,13 +6371,13 @@ html.pwa .offline-banner {
   right: 16px;
   width: auto;
   max-width: none;
-  transform: none;
+  transform: translateZ(0);
   justify-content: flex-start;
 }
 html.pwa .offline-banner.beta-banner {
   left: 16px;
   right: 16px;
-  transform: none;
+  transform: translateZ(0);
 }
 /* Desktop: same 35% cap as the offline card, back at the right edge.
    Must come after the full-width rule above (equal specificity). */
@@ -6407,7 +6391,7 @@ html.pwa .offline-banner.beta-banner {
     left: auto;
     right: 16px;
     width: 35%;
-    transform: none;
+    transform: translateZ(0);
   }
 }
 /* Offline + beta cards at once: stack, don't overlap */
@@ -6429,7 +6413,7 @@ html.pwa .offline-banner.gl-error-banner {
   right: 16px;
   width: auto;
   max-width: none;
-  transform: none;
+  transform: translateZ(0);
   justify-content: flex-start;
 }
 /* Sits below the offline/beta cards whenever they are visible */
