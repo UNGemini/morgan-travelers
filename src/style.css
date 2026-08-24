@@ -144,25 +144,23 @@ html.pwa #app {
 }
 
 /*
- * Installed PWA (iOS black-translucent): viewport-fit=cover paints the map
- * under the system status bar, and iOS glass frosts that strip into a tall
- * blur. Fill only the native safe-area with the same glass as html/body so
- * the status bar reads as a solid native band. Map still draws edge-to-edge
- * below it. Keep z-index under the boot splash (9999) and the floating
- * banners (9500), which already sit below the inset.
+ * iOS 26 Liquid Glass samples body (not html) to tint the status bar.
+ * A solid body colour + any page backdrop-filter frosts the map in that
+ * strip. Keep html painted for letterbox; let body stay transparent so
+ * the live map shows through the bar instead of a blurred glass fill.
  */
-html.pwa::before {
-  content: "";
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 9000;
-  height: constant(safe-area-inset-top);
-  height: env(safe-area-inset-top, 0px);
-  pointer-events: none;
-  background: #12161c;
-  background: rgb(var(--glass-rgb));
+html.pwa body {
+  background: transparent;
+}
+
+/* Own compositor layer so dock/sheet backdrop-filter cannot sample the
+   WebGL map into the status-bar glass. */
+html.pwa .map-stage,
+html.pwa #map,
+html.pwa .maplibregl-canvas-container,
+html.pwa .maplibregl-canvas {
+  transform: translateZ(0);
+  isolation: isolate;
 }
 
 .material-symbols-outlined {
@@ -315,7 +313,6 @@ body.mobile-ui [data-acrylic]::before {
   /* Slightly lifted near-black so it reads as map, not empty chrome */
   background: #0a0c10;
   transition: filter 0.45s cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: filter;
 }
 
 /* Live bus marker labels: DOM overlay above the canvas so they can use the
@@ -342,6 +339,7 @@ body.mobile-ui [data-acrylic]::before {
 
 /* Blur basemap while densified path is calculated */
 .map-stage.is-drawing-route #map {
+  will-change: filter;
   filter: blur(8px) brightness(0.72) saturate(0.85);
   pointer-events: none;
 }
@@ -8562,6 +8560,10 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     padding-bottom: 0;
     min-height: 0;
     box-shadow: none;
+    /* Contain the dock's backdrop-filter so WebKit does not treat the
+       whole viewport (status-bar map strip) as the backdrop root. */
+    isolation: isolate;
+    transform: translateZ(0);
   }
   /* Soft dissolve over the whole dock: transparent above, ramps through the
      pills, dense over the nav — the band reaches the dock foot so it never
