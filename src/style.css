@@ -296,6 +296,26 @@ body.mobile-ui [data-acrylic]::before {
   will-change: filter;
 }
 
+/* Installed PWA: viewport-fit=cover paints the map under the translucent
+   system status bar, which frosts the map's top safe-area strip. Draw a
+   theme-dark scrim over that strip so the glass blends into a clean, solid
+   status bar (native-app height) instead of a tall blur floating over the
+   map. The map still renders edge-to-edge below the band. */
+html.pwa .map-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: calc(env(safe-area-inset-top, 0px) + 12px);
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    #12161c 0%,
+    #12161c calc(100% - 24px),
+    rgba(18, 22, 28, 0) 100%
+  );
+}
+
 /* Live bus marker labels: DOM overlay above the canvas so they can use the
    app's Montserrat typeface — map glyph servers only ship Noto Sans.
    z-index 1: above the canvas but below the MapLibre tools (z-index 2). */
