@@ -143,6 +143,28 @@ html.pwa #app {
   min-height: -webkit-fill-available;
 }
 
+/*
+ * Installed PWA (iOS black-translucent): viewport-fit=cover paints the map
+ * under the system status bar, and iOS glass frosts that strip into a tall
+ * blur. Fill only the native safe-area with the same glass as html/body so
+ * the status bar reads as a solid native band. Map still draws edge-to-edge
+ * below it. Keep z-index under the boot splash (9999) and the floating
+ * banners (9500), which already sit below the inset.
+ */
+html.pwa::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9000;
+  height: constant(safe-area-inset-top);
+  height: env(safe-area-inset-top, 0px);
+  pointer-events: none;
+  background: #12161c;
+  background: rgb(var(--glass-rgb));
+}
+
 .material-symbols-outlined {
   font-family: "Material Symbols Outlined";
   font-weight: normal;
