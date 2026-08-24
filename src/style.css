@@ -6282,8 +6282,9 @@ body.contrib-submitting .bg-orb {
   color: #ffd479;
   font: 500 12px/1.4 var(--font);
   text-align: center;
-  backdrop-filter: blur(10px) saturate(1.1);
-  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  /* Intentionally no backdrop blur — the card floats over the map and the
+     sheet chrome, and a frosted glass would smear whatever passes under it
+     (the card is already ~92% opaque, so the blur adds no visual value). */
 }
 .offline-banner .material-symbols-outlined {
   font-size: 15px;
