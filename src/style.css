@@ -8426,10 +8426,12 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   }
   /* Full screen reaches the top edge — keep the grabber/title clear of the
      iOS status bar / Dynamic Island (viewport-fit=cover paints under it).
+     Extra 20px past the inset: iOS 26 glass keeps blurring below the
+     official safe-area, which is exactly where the grabber sat.
      The measured chrome height (JS → --sheet-chrome-h-px) grows with this
      padding, so scrollers and the floating banners below stay in sync. */
   .app-shell[data-sheet="full"] .sheet-chrome {
-    padding-top: calc(6px + env(safe-area-inset-top, 0px));
+    padding-top: calc(var(--safe-top) + 20px);
   }
   .sheet-chrome:active {
     cursor: grabbing;
@@ -8766,7 +8768,7 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     border-radius: 16px 16px 0 0;
   }
   .app-shell[data-sheet="full"] .sheet-chrome {
-    padding-top: max(6px, var(--safe-top));
+    padding-top: calc(var(--safe-top) + 20px);
   }
 
   /* Map tools just above whole shell (content + dock) */
@@ -8838,8 +8840,8 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
   }
 
   html.pwa .app-shell[data-sheet="full"] .sheet-chrome {
-    padding-top: max(8px, constant(safe-area-inset-top));
-    padding-top: max(8px, env(safe-area-inset-top, 0px));
+    padding-top: calc(constant(safe-area-inset-top) + 20px);
+    padding-top: calc(env(safe-area-inset-top, 0px) + 20px);
   }
 }
 
