@@ -6419,6 +6419,20 @@ html.pwa .offline-banner.gl-error-banner {
   }
 }
 
+/* Full screen (mobile): the sheet chrome reaches the top edge, so float the
+   cards below the grabber/title row instead of over it — the frosted glass
+   would otherwise blur the title and profile behind it. Top keys off the
+   measured chrome height (JS), which already includes the safe-area pad. */
+body:has(#app.app-shell[data-sheet="full"]) .offline-banner {
+  top: calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) + 12px);
+}
+body:has(#app.app-shell[data-sheet="full"]) #offline-banner:not([hidden]) + #beta-banner {
+  top: calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) + 12px + 52px);
+}
+body:has(#app.app-shell[data-sheet="full"]) .offline-banner.gl-error-banner {
+  top: calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) + 12px + 104px);
+}
+
 /* ── Banner entrance — both floating cards drop in when they appear ── */
 @keyframes banner-enter {
   from {
@@ -8384,6 +8398,13 @@ body.mobile-ui .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group:not(:has(.ma
     cursor: grab;
     /* Keep profile clear of list / dock below */
     padding: 6px 16px 12px;
+  }
+  /* Full screen reaches the top edge — keep the grabber/title clear of the
+     iOS status bar / Dynamic Island (viewport-fit=cover paints under it).
+     The measured chrome height (JS → --sheet-chrome-h-px) grows with this
+     padding, so scrollers and the floating banners below stay in sync. */
+  .app-shell[data-sheet="full"] .sheet-chrome {
+    padding-top: calc(6px + env(safe-area-inset-top, 0px));
   }
   .sheet-chrome:active {
     cursor: grabbing;
