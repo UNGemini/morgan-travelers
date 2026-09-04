@@ -203,6 +203,13 @@ export function sliceRouteBetweenStops(route, orderedStops) {
  * the bridge (~90 km detour) when local access is restricted or mis-snapped
  * (e.g. Tung Chung → Chek Lap Kok South Road). Reject those legs and fall
  * back to a short chord so stop markers are not pulled onto the Link Road.
+ *
+ * Chek Lap Kok is stable when we treat OSRM as a *corridor snap*, not a
+ * car router through every GTFS vertex: few waypoints, 80 m snap radius
+ * (Link Road is typically 150–400 m off CLK South Road), island/bridge
+ * fence, then GTFS interpolation if the match leaves the seed corridor.
+ * Feeding the full S64C PM shape as /route waypoints doubled the length
+ * with cargo U-turns (~18 km vs 6.6 km).
  */
 const OSRM_MAX_DETOUR_RATIO = 3.5;
 const OSRM_MAX_EXTRA_M = 2200;
@@ -212,6 +219,10 @@ const OSRM_ABSURD_HOP_M = 12_000;
 const OSRM_ABSURD_TOTAL_M = 80_000;
 /** Reject multi path if any original stop is farther than this from the line */
 const OSRM_MAX_STOP_SNAP_M = 140;
+/** CLK / Tung Chung snap cap — tight enough that Link Road cannot win */
+const OSRM_CLK_RADIUS_M = 80;
+/** Public demo /match TooBig above ~5 trace points or radius ≳ 50 m */
+const OSRM_MATCH_WINDOW = 5;
 
 // ── Terminal / endpoint approach guards ──────────────────────────────────────
 // OSRM (car profile) misses bus-only terminal roads and often ends the route
@@ -253,9 +264,12 @@ export async function densifyStopsViaOsrm(stops, opts = {}) {
       ? stops
       : sampleStops(stops, MAX_WAYPOINTS);
 
+  const clk = pointsInClkTungChung(waypoints);
+  const routeOpts = clk ? { radiusesM: OSRM_CLK_RADIUS_M } : {};
+
   // Prefer one multi-waypoint request when the path stays near every stop
   try {
-    const path = await osrmRoute(waypoints, opts.signal);
+    const path = await osrmRoute(waypoints, opts.signal, routeOpts);
     if (
       path.length >= 2 &&
       osrmMultiPathPlausible(path, waypoints, stops) &&
@@ -273,7 +287,7 @@ export async function densifyStopsViaOsrm(stops, opts = {}) {
     console.warn("[routeSnapper] multi-waypoint OSRM failed, trying pairs", e);
   }
 
-  return densifyOsrmPairs(waypoints, opts.signal);
+  return densifyOsrmPairs(waypoints, opts.signal, routeOpts);
 }
 
 /**
@@ -959,12 +973,6 @@ function bearingDeg(p, q) {
  * OSRM map-matching — snap a trace onto the driving network.
  * @param {LngLat[]} points
  * @param {AbortSignal} [signal]
- * @returns {Promise<LngLat[] | null>}
- */
-/**
- * OSRM map-matching — snap a trace onto the driving network.
- * @param {LngLat[]} points
- * @param {AbortSignal} [signal]
  * @param {{ radiusesM?: number[], gaps?: "split" | "ignore" }} [opts]
  * @returns {Promise<LngLat[] | null>}
  */
@@ -1022,16 +1030,22 @@ async function osrmMatch(points, signal, opts = {}) {
 /**
  * @param {Array<{ lon: number, lat: number }>} waypoints
  * @param {AbortSignal} [signal]
+ * @param {{ radiusesM?: number }} [routeOpts]
  */
-async function densifyOsrmPairs(waypoints, signal) {
+async function densifyOsrmPairs(waypoints, signal, routeOpts = {}) {
   const chunks = [];
   for (let i = 0; i < waypoints.length - 1; i++) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     const a = waypoints[i];
     const b = waypoints[i + 1];
+    const hopOpts =
+      routeOpts.radiusesM ||
+      (pointInClkTungChung(a) && pointInClkTungChung(b))
+        ? { radiusesM: Number(routeOpts.radiusesM) || OSRM_CLK_RADIUS_M }
+        : {};
     let path = null;
     try {
-      path = await osrmRoute([a, b], signal);
+      path = await osrmRoute([a, b], signal, hopOpts);
     } catch (e) {
       if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
       path = null;
@@ -1076,6 +1090,13 @@ function osrmHopPlausible(a, b, path) {
   // Classic HZMB loop: ~90 km for a ~1.5 km airport-island hop
   if (len >= OSRM_ABSURD_HOP_M && len > straight * 4) return false;
   if (len > straight * OSRM_MAX_DETOUR_RATIO + OSRM_MAX_EXTRA_M) return false;
+  if (
+    pointInClkTungChung(a) &&
+    pointInClkTungChung(b) &&
+    path.some(pointOnHzmbWest)
+  ) {
+    return false;
+  }
   const endA = haversineM(a.lat, a.lon, path[0].lat, path[0].lon);
   const endB = haversineM(
     b.lat,
@@ -1107,6 +1128,9 @@ function osrmMultiPathPlausible(path, waypoints, allStops) {
   }
   if (chordSum < 50) return pathLen < 2000;
   if (pathLen > chordSum * OSRM_MAX_DETOUR_RATIO + waypoints.length * 600) {
+    return false;
+  }
+  if (pointsInClkTungChung(waypoints) && path.some(pointOnHzmbWest)) {
     return false;
   }
 
@@ -1374,10 +1398,9 @@ export async function buildTransitPolyline(opt, opts = {}) {
           }
         }
         if (poly?.length >= 2) {
-          // Keep the GTFS corridor (S64C AM loop / PM inbound). OSRM on Chek
-          // Lap Kok hops the Link Road. Sparse stop-seq shapes (S1) still
-          // densify via OSRM; everyone else interpolates along the operator
-          // line so zooming does not collapse to stop chords.
+          // Sparse stop-seq shapes (S1) densify stop-to-stop. Dense GTFS
+          // (S64C AM/PM) snaps a handful of corridor waypoints — never the
+          // full vertex list — then interpolates so zoom stays road-like.
           if (gtfs.sparse) {
             try {
               const dens = await densifyStopsViaOsrm(poly, opts);
@@ -1385,6 +1408,14 @@ export async function buildTransitPolyline(opt, opts = {}) {
             } catch (e) {
               if (e?.name === "AbortError") throw e;
               console.warn("[routeSnapper] sparse GTFS OSRM densify", e);
+            }
+          } else {
+            try {
+              const snapped = await snapGtfsCorridorViaOsrm(poly, opts);
+              if (snapped?.length >= 2) return densifyAlongPolyline(snapped);
+            } catch (e) {
+              if (e?.name === "AbortError") throw e;
+              console.warn("[routeSnapper] GTFS corridor OSRM", e);
             }
           }
           return densifyAlongPolyline(poly);
@@ -1414,8 +1445,8 @@ export async function buildTransitPolyline(opt, opts = {}) {
 
 /**
  * Extra vertices along an existing polyline (no reroute). GTFS hops are
- * ~80–120 m; without this, zoom-in looks like stop chords. S64C PM uses
- * this on the inbound shape — not OSRM.
+ * ~80–120 m; without this, zoom-in looks like stop chords. Used after a
+ * CLK-safe OSRM corridor snap, or on the raw GTFS line when OSRM refuses.
  */
 function densifyAlongPolyline(poly, maxStepM = 22) {
   if (!poly?.length || poly.length < 2) return poly || [];
@@ -1483,6 +1514,194 @@ function polylineCoversStops(poly, stops, fullCoords = null) {
   return ok / usable.length >= 0.55;
 }
 
+/**
+ * CLK island + Tung Chung / Yat Tung. Excludes HZMB HK Port (~113.87) and
+ * the bridge. Used to tighten snap radius so Hong Kong Link Road cannot win.
+ */
+function pointInClkTungChung(p) {
+  return (
+    !!p &&
+    p.lon > 113.905 &&
+    p.lon < 113.965 &&
+    p.lat > 22.272 &&
+    p.lat < 22.335
+  );
+}
+
+function pointsInClkTungChung(pts, minFrac = 0.85) {
+  if (!pts?.length) return false;
+  let n = 0;
+  for (const p of pts) {
+    if (pointInClkTungChung(p)) n += 1;
+  }
+  return n / pts.length >= minFrac;
+}
+
+/** West of CLK — HZMB Hong Kong Port / the bridge, never a local cargo hop. */
+function pointOnHzmbWest(p) {
+  return !!p && p.lon < 113.885;
+}
+
+function lngLatBbox(pts) {
+  let minLon = Infinity;
+  let minLat = Infinity;
+  let maxLon = -Infinity;
+  let maxLat = -Infinity;
+  for (const p of pts) {
+    if (p.lon < minLon) minLon = p.lon;
+    if (p.lat < minLat) minLat = p.lat;
+    if (p.lon > maxLon) maxLon = p.lon;
+    if (p.lat > maxLat) maxLat = p.lat;
+  }
+  return { minLon, minLat, maxLon, maxLat };
+}
+
+function padBboxM(b, padM) {
+  const midLat = (b.minLat + b.maxLat) / 2;
+  const dLat = padM / 111320;
+  const dLon =
+    padM / (111320 * Math.max(0.2, Math.cos((midLat * Math.PI) / 180)));
+  return {
+    minLon: b.minLon - dLon,
+    maxLon: b.maxLon + dLon,
+    minLat: b.minLat - dLat,
+    maxLat: b.maxLat + dLat,
+  };
+}
+
+function pointInBbox(p, b) {
+  return (
+    p.lon >= b.minLon &&
+    p.lon <= b.maxLon &&
+    p.lat >= b.minLat &&
+    p.lat <= b.maxLat
+  );
+}
+
+/**
+ * Accept an OSRM geometry only if it still represents the seed corridor.
+ * Length inflation catches cargo U-turns; seed-on-path catches Link Road.
+ */
+function osrmCorridorPlausible(path, seed, seedLen) {
+  if (!path || path.length < 2 || !seed?.length) return false;
+  const pathLen = pathLengthM(path);
+  if (!(pathLen > 0) || !Number.isFinite(pathLen)) return false;
+  if (pathLen > seedLen * 1.38 + 600) return false;
+  if (pathLen < seedLen * 0.55) return false;
+
+  const seedBox = lngLatBbox(seed);
+  if (seedBox.minLon > 113.9 && path.some(pointOnHzmbWest)) return false;
+
+  const padded = padBboxM(seedBox, 240);
+  for (const p of path) {
+    if (!pointInBbox(p, padded)) return false;
+  }
+
+  const step = Math.max(1, Math.floor(seed.length / 24));
+  let ok = 0;
+  let n = 0;
+  for (let i = 0; i < seed.length; i += step) {
+    n += 1;
+    if (distPointToLngLatPolylineM(seed[i], path) <= 140) ok += 1;
+  }
+  return n > 0 && ok / n >= 0.8;
+}
+
+/**
+ * Road-hug a dense GTFS polyline without routing every vertex.
+ * CLK: 80 m radiuses + optional 5-point /match windows. Elsewhere: few
+ * waypoints, corridor checks. Returns null → caller keeps GTFS interpolation.
+ *
+ * @param {LngLat[]} poly
+ * @param {{ signal?: AbortSignal }} [opts]
+ * @returns {Promise<LngLat[] | null>}
+ */
+async function snapGtfsCorridorViaOsrm(poly, opts = {}) {
+  if (!poly || poly.length < 2) return null;
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return null;
+  }
+  const seedLen = pathLengthM(poly);
+  if (!(seedLen > 120)) return null;
+
+  const clk = pointsInClkTungChung(poly);
+  const controls = pathControlWaypoints(poly, {
+    maxPoints: 10,
+    maxSpacingM: Math.max(500, seedLen / 8),
+    minTurnDeg: 25,
+  });
+  if (controls.length < 2) return null;
+
+  let routed = null;
+  try {
+    routed = await osrmRoute(controls, opts.signal, {
+      radiusesM: clk ? OSRM_CLK_RADIUS_M : 0,
+    });
+  } catch (e) {
+    if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
+    routed = null;
+  }
+
+  const routedOk =
+    routed &&
+    routed.length >= 2 &&
+    osrmCorridorPlausible(routed, poly, seedLen);
+  const routedRatio = routedOk ? pathLengthM(routed) / seedLen : Infinity;
+
+  // CLK: if /route fattens or shortcuts the cargo loop, map-match windows.
+  if (clk && (!routedOk || routedRatio > 1.18 || routedRatio < 0.92)) {
+    const trace = pathControlWaypoints(poly, {
+      maxPoints: 20,
+      maxSpacingM: Math.max(280, seedLen / 16),
+      minTurnDeg: 18,
+    });
+    try {
+      const matched = await osrmMatchWindows(trace, opts.signal);
+      if (
+        matched &&
+        matched.length >= 2 &&
+        osrmCorridorPlausible(matched, poly, seedLen)
+      ) {
+        return matched;
+      }
+    } catch (e) {
+      if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
+    }
+  }
+
+  return routedOk ? routed : null;
+}
+
+/**
+ * Public OSRM map-matching rejects long traces (TooBig). Stitch overlapping
+ * 5-point windows at radius 30 m — tight enough to stay off Link Road.
+ *
+ * @param {LngLat[]} trace
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<LngLat[] | null>}
+ */
+async function osrmMatchWindows(trace, signal) {
+  if (!trace || trace.length < 2) return null;
+  /** @type {LngLat[]} */
+  const out = [];
+  for (let i = 0; i < trace.length - 1; ) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const end = Math.min(trace.length, i + OSRM_MATCH_WINDOW);
+    const slice = trace.slice(i, end);
+    if (slice.length < 2) break;
+    const matched = await osrmMatch(slice, signal, {
+      radiusesM: [30, 40],
+      gaps: "ignore",
+    });
+    if (!matched || matched.length < 2) return null;
+    if (!out.length) out.push(...matched);
+    else out.push(...matched.slice(1));
+    if (end >= trace.length) break;
+    i = end - 1;
+  }
+  return out.length >= 2 ? out : null;
+}
+
 // ── internals ────────────────────────────────────────────────────────────────
 
 function osrmBase() {
@@ -1497,15 +1716,21 @@ const OSRM_TIMEOUT_MS = 12000;
 /**
  * @param {Array<{ lon: number, lat: number }>} points
  * @param {AbortSignal} [signal]
+ * @param {{ radiusesM?: number }} [opts]
  */
-async function osrmRoute(points, signal) {
+async function osrmRoute(points, signal, opts = {}) {
   if (!points || points.length < 2) {
     return (points || []).map((p) => ({ lon: p.lon, lat: p.lat }));
   }
   const coordStr = points.map((p) => `${p.lon},${p.lat}`).join(";");
+  const r = Number(opts.radiusesM);
+  const radiusQs =
+    Number.isFinite(r) && r > 0
+      ? `&radiuses=${points.map(() => Math.round(r)).join(";")}`
+      : "";
   const url =
     `${osrmBase()}/route/v1/driving/${coordStr}` +
-    `?overview=full&geometries=geojson&steps=false`;
+    `?overview=full&geometries=geojson&steps=false${radiusQs}`;
   // Own abort controller: hard timeout + forward the caller's signal.
   const ctrl = new AbortController();
   const timer = setTimeout(
