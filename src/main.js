@@ -889,42 +889,52 @@ function togglePinPlan(p) {
 function resolveCircularBoardIndex(named, pin) {
   if (!named?.length) return 0;
   if (!pin) return 0;
-  if (
-    Number.isFinite(Number(pin.stopIndex)) &&
-    Number(pin.stopIndex) >= 0 &&
-    Number(pin.stopIndex) < named.length
-  ) {
-    return Number(pin.stopIndex);
-  }
+
+  const wantIdx = Number(pin.stopIndex);
   const wantSeq = Number(pin.stopSeq ?? pin.seq);
+  const sid = String(pin.stopId || "").trim();
+  const name = String(pin.stopName || pin.name || pin.nameEn || "").trim();
+  const pinKey = circularVisitKey({
+    stopId: sid,
+    name,
+    nameEn: pin.nameEn || name,
+  });
+
+  const hitsId = [];
+  const hitsName = [];
+  for (let i = 0; i < named.length; i++) {
+    if (sid && String(named[i].stopId || "") === sid) hitsId.push(i);
+    if (pinKey && circularVisitKey(named[i]) === pinKey) hitsName.push(i);
+  }
+  // Same bay (identical stopId) first; else repeated name (inbound/outbound
+  // platforms) so 2/2 is not collapsed onto 1/2.
+  const hits = hitsId.length ? hitsId : hitsName;
+
+  const idxOk =
+    Number.isFinite(wantIdx) && wantIdx >= 0 && wantIdx < named.length;
+  if (idxOk && (!hits.length || hits.includes(wantIdx))) return wantIdx;
+
   if (Number.isFinite(wantSeq)) {
+    const inHits = hits.find((i) => Number(named[i].seq) === wantSeq);
+    if (inHits != null) return inHits;
     const bySeq = named.findIndex((s) => Number(s.seq) === wantSeq);
     if (bySeq >= 0) return bySeq;
   }
-  const sid = String(pin.stopId || "");
-  if (sid) {
-    const hits = [];
-    for (let i = 0; i < named.length; i++) {
-      if (String(named[i].stopId || "") === sid) hits.push(i);
-    }
-    if (hits.length === 1) return hits[0];
-    if (hits.length > 1 && Number.isFinite(wantSeq)) {
-      const m = hits.find((i) => Number(named[i].seq) === wantSeq);
-      if (m != null) return m;
-    }
-    if (hits.length) return hits[0];
+
+  const session = Number(etaDetailStopIndex);
+  if (hits.includes(session)) return session;
+
+  const visitN = Number(pin.visitN);
+  if (visitN >= 1) {
+    const pool = hits.length ? hits : hitsName;
+    const j = pool[visitN - 1];
+    if (j != null) return j;
+    if (visitN >= pool.length && pool.length) return pool[pool.length - 1];
   }
-  const name = pin.stopName || pin.name || "";
-  if (name) {
-    const i = named.findIndex(
-      (s) =>
-        s.name === name ||
-        s.nameEn === name ||
-        (s.name && name && s.name.includes(name)),
-    );
-    if (i >= 0) return i;
-  }
-  return 0;
+
+  if (hits.length) return hits[0];
+  if (hitsName.length) return hitsName[0];
+  return idxOk ? wantIdx : 0;
 }
 
 /**
@@ -14511,6 +14521,7 @@ function selectEtaRoute(route, listIndex) {
   // Invalidate any in-flight shape paint; detail page will redraw
   ++etaShapeGen;
   etaSelectedStops = [];
+  etaDetailStopIndex = -1;
   clearRouteGeometry();
 
   const dirs = etaRouteDirections(route);
@@ -15187,6 +15198,7 @@ async function renderEtaRouteDetailBody(route, ctx) {
         stopLabel: s?.name || prev.stopLabel,
         stopIndex: idx,
         stopSeq: s?.seq ?? idx + 1,
+        visitN: s?.visitN,
       });
     } catch {
       /* ignore */
@@ -15493,30 +15505,26 @@ async function showEtaRouteDetailsPanel(opts = {}) {
     dirBound === "LINE" ||
     dirBound === "LRT";
   let selectedIndex = Math.min(
-    Math.max(0, etaDetailStopIndex || 0),
+    Math.max(0, etaDetailStopIndex >= 0 ? etaDetailStopIndex : 0),
     Math.max(0, named.length - 1),
   );
-  // Restore pinned / circular visit (stopIndex / stopSeq)
-  if (
-    Number.isFinite(Number(route.stopIndex)) ||
-    Number.isFinite(Number(route.stopSeq)) ||
-    (route.stopId && Number.isFinite(Number(route.stopIndex)))
-  ) {
-    selectedIndex = resolveCircularBoardIndex(named, route);
-  } else if (liveBoundOk && liveMeta?.stopId) {
-    // Prefer visit index from live meta when circular
-    selectedIndex = resolveCircularBoardIndex(named, {
-      stopId: liveMeta.stopId,
-      stopName: liveMeta.stopLabel,
-      stopIndex: liveMeta.stopIndex,
-      stopSeq: liveMeta.stopSeq,
-    });
-  } else if (liveBoundOk && liveMeta?.stopLabel) {
-    selectedIndex = resolveCircularBoardIndex(named, {
-      stopName: liveMeta.stopLabel,
-    });
-  } else if (!liveBoundOk) {
+  // Restore pinned / circular visit (stopIndex / stopSeq / session tap)
+  if (!liveBoundOk) {
     selectedIndex = 0;
+  } else {
+    selectedIndex = resolveCircularBoardIndex(named, {
+      stopId: liveMeta?.stopId || route.stopId,
+      stopName: liveMeta?.stopLabel || route.stopName,
+      nameEn: liveMeta?.stopNameEn || route.stopNameEn,
+      stopIndex:
+        etaDetailStopIndex >= 0
+          ? etaDetailStopIndex
+          : Number.isFinite(Number(route.stopIndex))
+            ? Number(route.stopIndex)
+            : liveMeta?.stopIndex,
+      stopSeq: liveMeta?.stopSeq ?? route.stopSeq,
+      visitN: liveMeta?.visitN ?? route.visitN,
+    });
   }
 
   // Last station on this bound → auto-switch to opposite direction’s first stop
@@ -16741,7 +16749,10 @@ function busPosDetailState() {
   else if (kind !== "bus" || !["kmb", "ctb", "nlb"].includes(co)) return null;
   const named = etaSelectedStops.filter((s) => s.name && !s._polylineOnly);
   if (named.length < 2) return null;
-  const boardIndex = Math.min(Math.max(0, etaDetailStopIndex || 0), named.length - 1);
+  const boardIndex = Math.min(
+    Math.max(0, etaDetailStopIndex >= 0 ? etaDetailStopIndex : 0),
+    named.length - 1,
+  );
   if (!named[boardIndex]?.stopId && kind !== "mtr" && kind !== "lrt") return null;
   if ((kind === "mtr" || kind === "lrt") && !named[boardIndex]) return null;
   return { route, co, kind, named, boardIndex, fetchMore: loadLiveBusMorePref() };
