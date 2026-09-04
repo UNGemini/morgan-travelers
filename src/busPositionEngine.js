@@ -6,6 +6,8 @@
  * only. See licenses/GPL-3.0.txt. The rest of MORGAN Travelers is Apache-2.0.
  *
  * Live Bus Position Engine (PRD 4.2 v2) — schedule-based whole-route tracking.
+ * ETA remaining-time walk (Now + 35 s slack, min 30 s hops) places markers
+ * from the board stop; MTR/LRT use the same walk on rail geometry (no GTFS).
  *
  * Positioning stays Speed + Time = Position: traffic speed (trafficSpeed.js,
  * unchanged) × time from a known reference. The time source is now the GTFS
@@ -77,6 +79,16 @@ import {
 
 /** Typical bus speed for synthetic/fallback anchoring (m/s, ~30 km/h). */
 const V_TYP = 8.3;
+/**
+ * Extra seconds after a minute-rounded "Now" before the marker is treated
+ * as at the stop (traffic lights). Inside the 25–45 s band.
+ */
+const NOW_SLACK_S = 35;
+const NOW_SLACK_MS = NOW_SLACK_S * 1000;
+/** Floor on scheduled/estimated travel time between consecutive stops. */
+const MIN_HOP_S = 30;
+/** Along-track gap between two markers after walkback (metres). */
+const CLUMP_MIN_M = 15;
 /**
  * Max simultaneously emitted vehicles. Anchored buses and tracked buses
  * (mid-continuation after an arrival dwell) always emit; the cap applies to
@@ -163,6 +175,52 @@ export function hashId(s) {
   return Math.abs(h) || 1;
 }
 
+/**
+ * Joint KMB+CTB (and LWB 9xx) cross-harbour route numbers. Island vs Kowloon
+ * stops flip the operator code; live-pos identity must not.
+ */
+const JOINT_HARBOUR_ROUTES = new Set(
+  [
+    101, 102, 103, 104, 106, 107, 109, 110, 111, 112, 113, 115, 116, 117, 118,
+    170, 171, 182, 307, 373, 601, 603, 606, 608, 613, 619, 671, 673, 678, 680,
+    681, 682, 690, 694, 914, 930, 934, 935, 936, 948, 960, 961, 962, 967, 968,
+    969, 978, 980, 981, 982, 985,
+  ].flatMap((n) => {
+    const s = String(n);
+    return [s, `${s}A`, `${s}B`, `${s}P`, `${s}S`, `${s}X`, `N${s}`];
+  }),
+);
+
+/** @param {string} routeId */
+export function isJointHarbourRoute(routeId) {
+  const raw = String(routeId || "").toUpperCase().replace(/[^0-9A-Z]/g, "");
+  if (JOINT_HARBOUR_ROUTES.has(raw)) return true;
+  const stripped = raw.replace(/[APXS]$/, "");
+  return JOINT_HARBOUR_ROUTES.has(stripped);
+}
+
+/**
+ * Operator key for engine identity (cheap sig / vehicle ids). Joint harbour
+ * routes share one engine across KMB↔CTB stop flips.
+ * @param {string} co
+ * @param {string} routeId
+ */
+export function canonicalLivePosOp(co, routeId) {
+  const c = String(co || "").toLowerCase();
+  if (
+    (c === "kmb" || c === "ctb" || c === "lwb") &&
+    isJointHarbourRoute(routeId)
+  ) {
+    return "joint";
+  }
+  return c || "kmb";
+}
+
+/** Seconds still to go until we treat the ETA as physically at the stop. */
+function remainingSec(etaT, now) {
+  return Math.max(0, (etaT + NOW_SLACK_MS - now) / 1000);
+}
+
 /** Default per-operator ETA row fetcher (browser; lazy eta.js import).
  * 1. Reuses the ETA panel's just-fetched rows when fresh (one fetch drives
  *    both panel and engine — the panel strips operator prefixes, so this
@@ -204,6 +262,70 @@ async function defaultFetchRows(ctx, stop) {
       if (rows.length) return rows;
     }
     return [];
+  }
+  if (op === "mtr") {
+    const line = String(ctx.routeShort || "");
+    const sta = sid;
+    if (!line || !sta) return [];
+    const data = await fetchJson(
+      `/eta/mtr/getSchedule.php?line=${encodeURIComponent(line)}&sta=${encodeURIComponent(sta)}`,
+    );
+    const key = `${line}-${sta}`;
+    const block = data?.data?.[key] || data?.data?.[sta] || {};
+    const bound = String(ctx.bound || "O").toUpperCase();
+    const dirKey = bound === "I" ? "DOWN" : "UP";
+    const trains = Array.isArray(block[dirKey])
+      ? block[dirKey]
+      : [...(block.UP || []), ...(block.DOWN || [])];
+    const now = Date.now();
+    return (trains || []).map((t) => {
+      const wait =
+        t.ttnt != null && t.ttnt !== "" ? Math.max(0, Number(t.ttnt)) : 0;
+      let iso;
+      try {
+        iso = t.time
+          ? new Date(String(t.time).replace(" ", "T") + "+08:00").toISOString()
+          : new Date(now + wait * 60_000).toISOString();
+      } catch {
+        iso = new Date(now + wait * 60_000).toISOString();
+      }
+      return { eta: iso, dest_en: t.dest || "", dir: bound };
+    });
+  }
+  if (op === "lrt") {
+    const data = await fetchJson(
+      `/eta/mtr/lrt/getSchedule?station_id=${encodeURIComponent(sid)}`,
+    );
+    const platforms = Array.isArray(data?.platform_list)
+      ? data.platform_list
+      : [];
+    const now = Date.now();
+    const route = String(ctx.routeShort || "").toUpperCase();
+    const rows = [];
+    for (const p of platforms) {
+      for (const r of p.route_list || []) {
+        const rno = String(r.route_no || r.routeNo || "").toUpperCase();
+        if (route && rno && rno !== route && route !== "LRT") continue;
+        const timeEn = String(r.time_en || r.time_ch || "").trim();
+        let waitMins = null;
+        if (/arriving|departing|即將|正在|^-$/i.test(timeEn) || timeEn === "-") {
+          waitMins = 0;
+        } else {
+          const m = /(\d+)\s*min/i.exec(timeEn);
+          if (m) waitMins = Number(m[1]);
+        }
+        if (waitMins == null && r.time_min != null) {
+          waitMins = Math.max(0, Number(r.time_min));
+        }
+        if (waitMins == null) continue;
+        rows.push({
+          eta: new Date(now + waitMins * 60_000).toISOString(),
+          dest_en: r.dest_en || r.dest_ch || "",
+          dir: ctx.bound,
+        });
+      }
+    }
+    return rows;
   }
   return [];
 }
@@ -280,6 +402,7 @@ export class BusPositionEngine {
     this.lastEmit = null;
     this.lastTickMs = 0;
     this.initPromise = null;
+    this.hasPolled = false;
     /** Latest board-stop feed row's ETA (ms ahead of now) + slack; 0 = unverifiable */
     this.boardHorizonMs = 0;
   }
@@ -295,10 +418,15 @@ export class BusPositionEngine {
     }
     this.ctx = ctx;
     this.running = true;
+    this.hasPolled = false;
     this.lastTickMs = this.nowFn();
     // Schedule lookup key + GTFS direction: same mapping the shape loader uses
     // (ctx.routeId is the short name; bound O/I maps to direction_id 0/1).
-    this.routeKey = `${String(ctx.op || "").toUpperCase()}-${ctx.routeId}`;
+    const schedOp =
+      canonicalLivePosOp(ctx.op, ctx.routeId) === "joint"
+        ? "KMB"
+        : String(ctx.op || "").toUpperCase();
+    this.routeKey = `${schedOp}-${ctx.routeId}`;
     this.dir =
       ctx.bound === "I" ? "1" : ctx.bound === "O" ? "0" : null;
     console.info(
@@ -330,13 +458,136 @@ export class BusPositionEngine {
     this.boardHorizonMs = 0;
     this.rawRowsByStop.clear();
     this.tripEtas.clear();
+    this.hasPolled = false;
+  }
+
+  /**
+   * Switch board stop (and optional fetch prefix) without resetting trips.
+   * Joint harbour KMB↔CTB flips pass a new ctx.op here.
+   * @param {{ boardStopIndex?: number, op?: string, stops?: any[], stopDistM?: number[], fetchMore?: boolean, nlbRouteIds?: string[] }} patch
+   */
+  updateBoard(patch = {}) {
+    if (!this.ctx || !this.running) return;
+    if (patch.op) this.ctx.op = patch.op;
+    if (patch.stops) this.ctx.stops = patch.stops;
+    if (patch.stopDistM) this.ctx.stopDistM = patch.stopDistM;
+    if (patch.nlbRouteIds) this.ctx.nlbRouteIds = patch.nlbRouteIds;
+    if (patch.fetchMore != null) this.ctx.fetchMore = patch.fetchMore;
+    if (Number.isInteger(patch.boardStopIndex)) {
+      this.ctx.boardStopIndex = patch.boardStopIndex;
+    }
+    this.syncPatternBoard();
+  }
+
+  /** Recompute each pattern's board stop after updateBoard. */
+  syncPatternBoard() {
+    const ctx = this.ctx;
+    const boardDist = ctx?.stopDistM?.[ctx.boardStopIndex];
+    for (const pd of this.patternDists.values()) {
+      let boardIdx = -1;
+      let boardMatchM = Infinity;
+      if (Number.isFinite(boardDist)) {
+        for (let i = 0; i < pd.distsM.length; i++) {
+          const d = Math.abs(pd.distsM[i] - boardDist);
+          if (d < boardMatchM) {
+            boardMatchM = d;
+            boardIdx = i;
+          }
+        }
+      }
+      pd.boardIdx = boardIdx;
+      pd.boardMatchM = boardMatchM;
+      pd.boardOffSec = boardIdx >= 0 ? pd.offsRows[boardIdx][1] : 0;
+    }
+  }
+
+  hopDurSec(d0, d1, lon, lat) {
+    const dist = Math.abs(d1 - d0);
+    const mult =
+      this.trafficIndex && Number.isFinite(lon)
+        ? this.trafficIndex.multiplierAt(lon, lat)
+        : 1;
+    const t = dist / Math.max(0.5, V_TYP * (mult || 1));
+    return Math.max(MIN_HOP_S, t);
+  }
+
+  /**
+   * Walk backward along ctx.stopDistM from `fromDist` for `remainSec`.
+   * Honors MIN_HOP_S per hop so close stops don't collapse to the same point.
+   */
+  walkBackFromDist(fromDist, remainSec) {
+    const dists = this.ctx?.stopDistM;
+    if (!dists?.length || !Number.isFinite(fromDist)) return Math.max(0, fromDist || 0);
+    let t = Math.max(0, remainSec);
+    let d = fromDist;
+    // Find the stop index at or before fromDist
+    let i = dists.length - 1;
+    while (i > 0 && dists[i] > fromDist + 0.5) i -= 1;
+    while (i > 0 && t > 0) {
+      const dPrev = dists[i - 1];
+      const dCur = dists[i];
+      const stop = this.ctx.stops?.[i];
+      const hop = this.hopDurSec(dPrev, dCur, stop?.lon, stop?.lat);
+      const span = Math.max(1e-3, dCur - dPrev);
+      const fromOnHop = Math.max(0, Math.min(1, (d - dPrev) / span));
+      const timeOnHop = hop * fromOnHop;
+      if (t >= timeOnHop) {
+        t -= timeOnHop;
+        d = dPrev;
+        i -= 1;
+      } else {
+        d = dPrev + span * (fromOnHop - t / hop);
+        t = 0;
+      }
+    }
+    return Math.max(0, d);
+  }
+
+  /**
+   * Along-track spacer: rear vehicle is pushed back so the gap is ≥ CLUMP_MIN_M.
+   * Also cap a marker so it cannot sit on/past the next stop while still in slack.
+   * @param {Array<{ d: number }>} vehicles
+   */
+  antiClump(vehicles) {
+    const ctx = this.ctx;
+    const dists = ctx?.stopDistM || [];
+    const boardDist = ctx?.stopDistM?.[ctx.boardStopIndex] ?? Infinity;
+    const nextStopDist = (() => {
+      const b = ctx?.boardStopIndex ?? -1;
+      if (b >= 0 && b + 1 < dists.length) return dists[b + 1];
+      return Infinity;
+    })();
+    const sorted = [...vehicles].filter((v) => Number.isFinite(v.d));
+    sorted.sort((a, b) => a.d - b.d);
+    for (let i = sorted.length - 1; i > 0; i--) {
+      const fwd = sorted[i];
+      const rear = sorted[i - 1];
+      // Forward = closer to (or past) the board stop
+      const a = fwd.d >= rear.d ? fwd : rear;
+      const b = a === fwd ? rear : fwd;
+      if (a.d - b.d >= CLUMP_MIN_M) continue;
+      b.d = Math.max(0, a.d - CLUMP_MIN_M);
+      if (i >= 2) b.d = Math.max(sorted[i - 2].d + 0.01, b.d);
+    }
+    for (const v of vehicles) {
+      if (!Number.isFinite(v.d)) continue;
+      if (Number.isFinite(nextStopDist) && v.d > boardDist - 0.5) {
+        /* at/after board: leave */
+      } else if (Number.isFinite(nextStopDist) && v.d >= nextStopDist - CLUMP_MIN_M) {
+        v.d = Math.max(0, nextStopDist - CLUMP_MIN_M);
+      }
+    }
   }
 
   /** Load schedules (async, cached) + traffic index once at start. */
   async init() {
     const ctx = this.ctx;
     if (!this.running) return;
-    this.schedules = await this.loadSchedules(String(ctx.op || "").toLowerCase());
+    const loadCo =
+      canonicalLivePosOp(ctx.op, ctx.routeId) === "joint"
+        ? "kmb"
+        : String(ctx.op || "").toLowerCase();
+    this.schedules = await this.loadSchedules(loadCo);
     if (!this.running || this.ctx !== ctx) return;
     if (!this.schedules) {
       console.warn("[buspos] schedules unavailable — ETA-synth only");
@@ -534,6 +785,7 @@ export class BusPositionEngine {
         this.boardHorizonMs = Math.max(0, maxRowT - now + slack);
       }
       this.matchAnchors(ctx, stopEtas, now);
+      this.hasPolled = true;
       this.computePositions(now);
       this.emit(now);
     } catch (e) {
@@ -885,7 +1137,10 @@ export class BusPositionEngine {
         if (ahead > 0 && ahead <= this.boardHorizonMs) continue;
       }
       let d;
-      if (c && c.etaT <= now) {
+      const remain = c ? remainingSec(c.etaT, now) : 0;
+      if (c && remain > 0) {
+        d = this.walkBackFromDist(c.d, remain);
+      } else if (c && remain <= 0) {
         const held = this.tripState.get(trip.id);
         // fetch-more departure rules: the marker is held (or was held) at a
         // stop while a row reads "Now" — the row's stop wins over the hold.
@@ -926,19 +1181,20 @@ export class BusPositionEngine {
           const k = this.patternIdxForDist(pd, c.d);
           const schedArr = k ? trip.startEpoch + (pd.offsRows[k.idx][1]) * 1000 : 0;
           const dev = k ? (c.etaT - schedArr) / 1000 : 0;
-          const stN = { delaySec: dev, arrD: c.d, arrAt: c.etaT, stopIdx: c.stopIdx };
+          const arrAt = c.etaT + NOW_SLACK_MS;
+          const stN = { delaySec: dev, arrD: c.d, arrAt, stopIdx: c.stopIdx };
           // Release when the row is gone — or at the dwell cap even if the feed
           // keeps the row (a stale row must not pin the marker at the stop).
-          if (!this.rowStillListed(c.stopIdx, c.etaT) || now >= c.etaT + DWELL_MAX_MS) {
+          if (!this.rowStillListed(c.stopIdx, c.etaT) || now >= arrAt + DWELL_MAX_MS) {
             stN.dwellEnd = Math.min(
-              Math.max(c.etaT + DWELL_MS, now),
-              c.etaT + DWELL_MAX_MS,
+              Math.max(arrAt + DWELL_MS, now),
+              arrAt + DWELL_MAX_MS,
             );
           }
           this.tripState.set(trip.id, stN);
           const dwellMs = stN.dwellEnd ? stN.dwellEnd - stN.arrAt : DWELL_MAX_MS;
           d =
-            now < c.etaT + dwellMs
+            now < arrAt + dwellMs
               ? c.d
               : this.schedulePos(pd, trip, now - (dev + dwellMs / 1000) * 1000);
         }
@@ -965,6 +1221,16 @@ export class BusPositionEngine {
         d = this.schedulePos(pd, trip, now - st.delaySec * 1000);
       } else {
         d = this.schedulePos(pd, trip, now);
+        const lastD = pd.distsM[pd.distsM.length - 1];
+        // Unmatched trips sitting on the last vertex after a reload look like
+        // every bus spawned at the terminus — hide until they match an ETA.
+        if (
+          Number.isFinite(lastD) &&
+          Math.abs(d - lastD) < 12 &&
+          !this.etaMap.has(trip.id)
+        ) {
+          continue;
+        }
       }
       out.push({
         id: trip.id,
@@ -1021,7 +1287,6 @@ export class BusPositionEngine {
       cands.push({ v, pd, trip, anchorT });
     }
     cands.sort((a, b) => a.anchorT - b.anchorT);
-    const vAnchor = this.anchorSpeed(cands, boardDist); // synth buses only now
     for (let i = 0; i < Math.min(ANCHOR_SLOTS, cands.length); i++) {
       const { v, pd, trip, anchorT } = cands[i];
       // A tighter ETA at another anchor stop (fetched with fetch-more, or
@@ -1037,7 +1302,11 @@ export class BusPositionEngine {
         : trip.startEpoch + pd.boardOffSec * 1000;
       if (schedArr == null) continue;
       const at = nonBoard ? c.etaT : anchorT;
-      v.d = this.schedulePos(pd, trip, now - (at - schedArr));
+      const T = remainingSec(at, now);
+      v.d =
+        T > 0
+          ? this.walkBackFromDist(nonBoard ? c.d : boardDist, T)
+          : this.schedulePos(pd, trip, now - (at - schedArr));
       v.confidence = CONF_ETA;
       v.anchored = true;
     }
@@ -1060,7 +1329,11 @@ export class BusPositionEngine {
     for (const { v, c } of extended.slice(0, EXTRA_ANCHORS)) {
       const schedArr = schedArrAt(v.pd, v.trip, c.d);
       if (schedArr == null) continue;
-      v.d = this.schedulePos(v.pd, v.trip, now - (c.etaT - schedArr));
+      const T = remainingSec(c.etaT, now);
+      v.d =
+        T > 0
+          ? this.walkBackFromDist(c.d, T)
+          : this.schedulePos(v.pd, v.trip, now - (c.etaT - schedArr));
       v.confidence = CONF_ETA;
       v.anchored = true;
     }
@@ -1068,29 +1341,31 @@ export class BusPositionEngine {
     // simulates the stop: it holds at the stop for the feed-listed window
     // (same rule as real trips), then drops (the feed dropped its row anyway).
     for (const s of this.synth) {
-      if (s.etaT <= now) {
-        if (s.arrD < 0) {
-          s.arrD = boardDist;
-          s.arrAt = s.etaT;
-        }
-        const held = this.rowStillListed(ctx.boardStopIndex, s.etaT);
-        if (now < s.arrAt + (held ? DWELL_MAX_MS : DWELL_MS)) {
-          out.push({
-            id: `synth:${s.rank}`,
-            d: s.arrD,
-            confidence: CONF_ETA,
-            anchored: true,
-          });
-        }
+      const T = remainingSec(s.etaT, now);
+      if (T > 0) {
+        out.push({
+          id: `synth:${s.rank}`,
+          d: this.walkBackFromDist(boardDist, T),
+          confidence: CONF_ETA,
+          anchored: true,
+        });
         continue;
       }
-      out.push({
-        id: `synth:${s.rank}`,
-        d: Math.max(0, boardDist - ((s.etaT - now) / 1000) * vAnchor),
-        confidence: CONF_ETA,
-        anchored: true,
-      });
+      if (s.arrD < 0) {
+        s.arrD = boardDist;
+        s.arrAt = s.etaT + NOW_SLACK_MS;
+      }
+      const held = this.rowStillListed(ctx.boardStopIndex, s.etaT);
+      if (now < s.arrAt + (held ? DWELL_MAX_MS : DWELL_MS)) {
+        out.push({
+          id: `synth:${s.rank}`,
+          d: s.arrD,
+          confidence: CONF_ETA,
+          anchored: true,
+        });
+      }
     }
+    this.antiClump(out);
     this.vehicles = out;
   }
 
@@ -1107,7 +1382,7 @@ export class BusPositionEngine {
     const d1 = dists[k + 1];
     const t0 = offs[k][1];
     const t1 = offs[k + 1][1];
-    const vSeg = (d1 - d0) / Math.max(1, t1 - t0);
+    const vSeg = (d1 - d0) / Math.max(MIN_HOP_S, t1 - t0);
     const mid = alongToLonLat(this.ctx.shape.coords, this.ctx.shape.cumM, (d0 + d1) / 2);
     const v = vSeg * (this.trafficIndex && mid ? this.trafficIndex.multiplierAt(mid.lon, mid.lat) : 1);
     // Clamp to [d[k], d[k+1]]: congestion makes the bus crawl and wait at the
@@ -1145,13 +1420,13 @@ export class BusPositionEngine {
     return Math.max(0.5, vNom * mult);
   }
 
-  /** 1 Hz recompute between polls (deterministic schedule model). */
+  /** 1 Hz recompute between polls (schedule + remaining-time walk). */
   tick(now = this.nowFn()) {
     if (!this.running || !this.ctx) return;
     const dt = (now - this.lastTickMs) / 1000;
     this.lastTickMs = now;
     if (dt <= 0 || dt > 30) return;
-    if (!this.schedules || !this.patternDists.size) return;
+    if (!this.hasPolled) return;
     this.computePositions(now);
     this.emit(now);
   }

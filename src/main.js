@@ -142,6 +142,7 @@ import {
   applyVisualStopsFromShape,
   busShapeToPolyline,
 } from "./busShapes.js";
+import { canonicalLivePosOp } from "./busPositionEngine.js";
 import {
   isIndoorMtrInterchangeWalk,
   isFreeMtrInterchangeWalk,
@@ -15108,6 +15109,7 @@ async function renderEtaRouteDetailBody(route, ctx) {
       selectedIndex: idx,
       preserveScroll: true,
     });
+    void busPosSyncState();
   };
 
   panel?.querySelectorAll("[data-eta-stop-idx]").forEach((el) => {
@@ -16626,15 +16628,19 @@ function hexToRgb(hex) {
 function busPosDetailState() {
   const route = etaSelectedForDetails;
   if (!route) return null;
-  const co = String(route.co || "").toLowerCase();
-  if (route.kind !== "bus" || !["kmb", "ctb", "nlb"].includes(co)) return null;
   if (!loadLiveBusPref()) return null;
   if (sidebarPage !== "eta-route") return null;
+  const kind = route.kind;
+  let co = String(route.co || "").toLowerCase();
+  if (kind === "mtr") co = "mtr";
+  else if (kind === "lrt") co = "lrt";
+  else if (kind !== "bus" || !["kmb", "ctb", "nlb"].includes(co)) return null;
   const named = etaSelectedStops.filter((s) => s.name && !s._polylineOnly);
   if (named.length < 2) return null;
   const boardIndex = Math.min(Math.max(0, etaDetailStopIndex || 0), named.length - 1);
-  if (!named[boardIndex]?.stopId) return null;
-  return { route, co, named, boardIndex, fetchMore: loadLiveBusMorePref() };
+  if (!named[boardIndex]?.stopId && kind !== "mtr" && kind !== "lrt") return null;
+  if ((kind === "mtr" || kind === "lrt") && !named[boardIndex]) return null;
+  return { route, co, kind, named, boardIndex, fetchMore: loadLiveBusMorePref() };
 }
 
 /** Cheap signature of the detail state (direction flips change it). */
@@ -16645,13 +16651,12 @@ function busPosCheapSigOf(st) {
   const dir = dirs[di] || dirs[0] || {};
   const bound = String(dir.bound || "O").toUpperCase();
   return [
-    st.co,
+    canonicalLivePosOp(st.co, st.route.id),
     String(st.route.id || ""),
-    bound === "LINE" || bound === "LRT" ? "" : bound,
+    bound === "LINE" ? String(st.kind || "") : bound,
     String(dir?.serviceType ?? dir?.service_type ?? ""),
     String(dir?.routeId || ""),
     st.named.length,
-    st.boardIndex,
     st.fetchMore ? "more" : "",
   ].join("|");
 }
@@ -16672,7 +16677,8 @@ async function busPosBuildCtx(st) {
   if (di >= dirs.length) di = Math.max(0, dirs.length - 1);
   const dir = dirs[di] || dirs[0];
   const bound = String(dir?.bound || "O").toUpperCase();
-  if (bound === "LINE" || bound === "LRT") return null;
+  const isRailKind = st.kind === "mtr" || st.kind === "lrt";
+  if (!isRailKind && (bound === "LINE" || bound === "LRT")) return null;
 
   const { getGtfsBusShape, projectOntoShape, cumulativeMeters } =
     await getBusPosRouteShapesMod();
@@ -16695,25 +16701,51 @@ async function busPosBuildCtx(st) {
   // drops every pattern and the markers never appear.
   /** @type {Array<{ lon: number, lat: number }> | null} */
   let coords = null;
-  try {
-    const override = matchBusShapeOverride(opt);
-    const exact =
-      override &&
-      String(override.route_short_name || "").trim().toUpperCase() ===
-        String(st.route.id || "").trim().toUpperCase();
-    if (exact && override.coordinates?.length >= 2) {
-      coords = override.coordinates
-        .map((c) => ({ lon: Number(c[0]), lat: Number(c[1]) }))
-        .filter((p) => Number.isFinite(p.lon) && Number.isFinite(p.lat));
-      if (coords.length < 2) coords = null;
+  let usedContrib = false;
+  if (isRailKind) {
+    try {
+      const { densifyAlongBasemapRail } = await import("./railSnapper.js");
+      const pts = st.named
+        .filter((s) => Number.isFinite(s.lon) && Number.isFinite(s.lat))
+        .map((s) => ({ lon: s.lon, lat: s.lat, id: s.stopId || s.code }));
+      if (pts.length >= 2) {
+        const poly = await densifyAlongBasemapRail(pts, {
+          mode: st.kind === "lrt" ? "tram" : "subway",
+          route_short_name: st.route.id,
+          route_name: st.route.label || st.route.id,
+          route_id: `${st.kind}-${st.route.id}`,
+        });
+        if (poly?.length >= 2) coords = poly;
+      }
+    } catch (e) {
+      console.warn("[buspos] rail shape", e);
     }
-  } catch (e) {
-    console.warn("[buspos] contributed shape", e);
-  }
-  const usedContrib = !!coords;
-  if (!coords) {
-    const gtfs = await getGtfsBusShape(opt);
-    if (gtfs?.coords?.length >= 2) coords = gtfs.coords;
+    if (!coords) {
+      coords = st.named
+        .filter((s) => Number.isFinite(s.lon) && Number.isFinite(s.lat))
+        .map((s) => ({ lon: s.lon, lat: s.lat }));
+    }
+  } else {
+    try {
+      const override = matchBusShapeOverride(opt);
+      const exact =
+        override &&
+        String(override.route_short_name || "").trim().toUpperCase() ===
+          String(st.route.id || "").trim().toUpperCase();
+      if (exact && override.coordinates?.length >= 2) {
+        coords = override.coordinates
+          .map((c) => ({ lon: Number(c[0]), lat: Number(c[1]) }))
+          .filter((p) => Number.isFinite(p.lon) && Number.isFinite(p.lat));
+        if (coords.length < 2) coords = null;
+        else usedContrib = true;
+      }
+    } catch (e) {
+      console.warn("[buspos] contributed shape", e);
+    }
+    if (!coords) {
+      const gtfs = await getGtfsBusShape(opt);
+      if (gtfs?.coords?.length >= 2) coords = gtfs.coords;
+    }
   }
   if (!coords?.length) {
     console.warn("[buspos] no shape for", st.co, st.route.id, bound);
@@ -16765,13 +16797,12 @@ async function busPosBuildCtx(st) {
     ) ||
     1;
   const sig = [
-    st.co,
+    canonicalLivePosOp(st.co, st.route.id),
     String(st.route.id || ""),
     bound,
     String(serviceType),
     String(dir?.routeId || ""),
     st.named.length,
-    st.boardIndex,
   ].join("|");
 
   return {
@@ -16783,7 +16814,7 @@ async function busPosBuildCtx(st) {
       bound,
       serviceType,
       stops: st.named.map((s, i) => ({
-        stopId: s.stopId,
+        stopId: s.stopId || s.stationCode || s.code || "",
         seq: s.seq ?? i + 1,
         lon: s.lon,
         lat: s.lat,
@@ -16807,7 +16838,27 @@ async function busPosSyncState() {
     busPosSig = "";
     return;
   }
-  if (busPosEngine && cheap === busPosCheapSig) return;
+  if (busPosEngine && cheap === busPosCheapSig) {
+    const ctx = busPosEngine.ctx;
+    const opChanged =
+      String(ctx?.op || "").toLowerCase() !== String(st.co || "").toLowerCase();
+    const boardChanged = ctx?.boardStopIndex !== st.boardIndex;
+    if (boardChanged || opChanged) {
+      busPosEngine.updateBoard({
+        boardStopIndex: st.boardIndex,
+        op: st.co,
+        stops: st.named.map((s, i) => ({
+          stopId: s.stopId || s.stationCode || s.code || "",
+          seq: s.seq ?? i + 1,
+          lon: s.lon,
+          lat: s.lat,
+        })),
+        fetchMore: st.fetchMore,
+      });
+      void busPosEngine.poll();
+    }
+    return;
+  }
   if (busPosSyncing) return;
   busPosSyncing = true;
   try {
