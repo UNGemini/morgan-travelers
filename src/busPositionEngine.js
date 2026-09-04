@@ -94,11 +94,11 @@ const CLUMP_MIN_M = 15;
  * (mid-continuation after an arrival dwell) always emit; the cap applies to
  * the untracked schedule buses, so a bus never blinks out after stopping.
  */
-const MAX_VEHICLES = 12;
+const MAX_VEHICLES = 48;
 /** ETA anchor slots at the selected stop (operator feeds cap at 3). */
 const ANCHOR_SLOTS = 3;
-/** Extra anchored trips from other stops' ETAs (fetch-more / cached rows). */
-const EXTRA_ANCHORS = 2;
+/** Extra anchored trips from other stops' ETAs (ahead/behind the board). */
+const EXTRA_ANCHORS = 16;
 /** A pattern stop is the "board stop" only within this distance (m). */
 const BOARD_MATCH_TOL_M = 300;
 /** ETA ↔ scheduled-arrival matching tolerance at the board stop. */
@@ -709,11 +709,24 @@ export class BusPositionEngine {
     const b = ctx.boardStopIndex;
     if (!Number.isInteger(b) || b < 0 || b >= n) return [];
     const set = new Set([b]);
-    if (!ctx.fetchMore) return [...set];
-    for (const dir of [-1, 1]) {
-      for (const step of [1, 2, 5, 10, 15]) {
-        const idx = b + dir * step;
-        if (idx >= 0 && idx < n) set.add(idx);
+    const rail = ctx.op === "mtr" || ctx.op === "lrt";
+    // Always sample stops AHEAD of the board so vehicles that already
+    // passed still get an ETA pin (Next Train / stop ETA at later stops).
+    const ahead = Math.max(0, n - 1 - b);
+    const aheadStep = rail
+      ? ahead > 10
+        ? 2
+        : 1
+      : Math.max(1, Math.ceil(ahead / 8) || 5);
+    for (let i = b + 1; i < n; i++) {
+      if (i === n - 1 || (i - b) % aheadStep === 0) set.add(i);
+    }
+    if (ctx.fetchMore) {
+      for (const dir of [-1, 1]) {
+        for (const step of [1, 2, 5, 10, 15]) {
+          const idx = b + dir * step;
+          if (idx >= 0 && idx < n) set.add(idx);
+        }
       }
     }
     return [...set].sort((a, b) => a - b);
@@ -861,9 +874,14 @@ export class BusPositionEngine {
         }
       }
     } else {
-      // No schedule: every board-stop ETA is a synthetic, ETA-anchored bus.
-      for (const eta of stopEtas.get(ctx.boardStopIndex) || []) {
-        synthRows.push({ etaT: eta.t, dest: eta.dest });
+      // No schedule (MTR/LRT): every fetched stop's ETAs become synths —
+      // board = approaching, later stops = trains that already passed.
+      for (const [stopIdx, etas] of stopEtas) {
+        const d = ctx.stopDistM?.[stopIdx];
+        if (!Number.isFinite(d)) continue;
+        for (const eta of etas) {
+          synthRows.push({ etaT: eta.t, dest: eta.dest, d });
+        }
       }
     }
     this.synth = this.reidentifySynth(synthRows, now);
@@ -933,9 +951,23 @@ export class BusPositionEngine {
       }
       if (best) {
         taken.add(best.rank);
-        out.push({ rank: best.rank, etaT: row.etaT, dest: row.dest, arrD: -1, arrAt: 0 });
+        out.push({
+          rank: best.rank,
+          etaT: row.etaT,
+          dest: row.dest,
+          arrD: -1,
+          arrAt: 0,
+          d: row.d,
+        });
       } else {
-        out.push({ rank: 0, etaT: row.etaT, dest: row.dest, arrD: -1, arrAt: 0 });
+        out.push({
+          rank: 0,
+          etaT: row.etaT,
+          dest: row.dest,
+          arrD: -1,
+          arrAt: 0,
+          d: row.d,
+        });
       }
     }
     let nextRank = 1;
@@ -1225,12 +1257,16 @@ export class BusPositionEngine {
       } else {
         d = this.schedulePos(pd, trip, now);
         const lastD = pd.distsM[pd.distsM.length - 1];
-        // Unmatched trips sitting on the last vertex after a reload look like
-        // every bus spawned at the terminus — hide until they match an ETA.
+        const boardDist = this.ctx.stopDistM?.[this.ctx.boardStopIndex];
+        // Reload spawn at the terminus: hide only when the user is also at
+        // that terminus. Mid-route, vehicles that already passed (incl. at
+        // dest) stay on the map.
         if (
           Number.isFinite(lastD) &&
           Math.abs(d - lastD) < 12 &&
-          !this.etaMap.has(trip.id)
+          !this.etaMap.has(trip.id) &&
+          Number.isFinite(boardDist) &&
+          Math.abs(boardDist - lastD) < 80
         ) {
           continue;
         }
@@ -1344,11 +1380,12 @@ export class BusPositionEngine {
     // simulates the stop: it holds at the stop for the feed-listed window
     // (same rule as real trips), then drops (the feed dropped its row anyway).
     for (const s of this.synth) {
+      const fromD = Number.isFinite(s.d) ? s.d : boardDist;
       const T = remainingSec(s.etaT, now);
       if (T > 0) {
         out.push({
           id: `synth:${s.rank}`,
-          d: this.walkBackFromDist(boardDist, T),
+          d: this.walkBackFromDist(fromD, T),
           confidence: CONF_ETA,
           anchored: true,
         });
@@ -1450,31 +1487,21 @@ export class BusPositionEngine {
     const coords = ctx.shape.coords;
     const cumM = ctx.shape.cumM;
     const total = cumM?.[cumM.length - 1] || 0;
-    // Anchored (soonest) first, then schedule buses nearest the board stop
-    // (a just-arrived bus sits at the stop). A tracked bus — one continuing
-    // after its arrival dwell — always emits: evicting it would make a bus
-    // blink out mid-route, past the stop it just served.
-    const anchored = [];
-    const sched = [];
-    for (const v of this.vehicles || []) (v.anchored ? anchored : sched).push(v);
+    // Whole route: approaching (behind board) and already-passed (ahead).
+    // Anchored / tracked first, then the rest by along-track order.
     const boardDist = ctx.stopDistM?.[ctx.boardStopIndex] || 0;
     const tracked = (v) => this.tripState.get(v.id)?.arrD >= 0;
-    sched.sort((a, b) => {
-      const ta = tracked(a) ? 0 : 1;
-      const tb = tracked(b) ? 0 : 1;
-      if (ta !== tb) return ta - tb;
-      return Math.abs(a.d - boardDist) - Math.abs(b.d - boardDist);
+    const list = (this.vehicles || []).filter((v) => Number.isFinite(v.d));
+    list.sort((a, b) => {
+      const ra = a.anchored || tracked(a) ? 0 : 1;
+      const rb = b.anchored || tracked(b) ? 0 : 1;
+      if (ra !== rb) return ra - rb;
+      return a.d - b.d;
     });
     const vehicles = [];
-    let used = 0;
-    for (const v of anchored) {
+    for (const v of list) {
+      if (vehicles.length >= MAX_VEHICLES && !v.anchored && !tracked(v)) break;
       vehicles.push(v);
-      used += 1;
-    }
-    for (const v of sched) {
-      if (used >= MAX_VEHICLES && !tracked(v)) break;
-      vehicles.push(v);
-      used += 1;
     }
     // Separate output array — the loop below must not append to the array it
     // iterates (a shared array here used to grow unboundedly → memory blow-up).
