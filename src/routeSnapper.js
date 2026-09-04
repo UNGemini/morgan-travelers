@@ -1365,7 +1365,18 @@ export async function buildTransitPolyline(opt, opts = {}) {
       const gtfs = await getGtfsBusShape(opt, opts);
       if (gtfs?.coords?.length >= 2) {
         const poly = sliceRouteBetweenStops(gtfs.coords, stops);
-        if (poly?.length >= 2) return poly;
+        if (poly?.length >= 2) {
+          if (gtfs.sparse) {
+            try {
+              const dens = await densifyStopsViaOsrm(poly, opts);
+              if (dens?.length >= 2) return dens;
+            } catch (e) {
+              if (e?.name === "AbortError") throw e;
+              console.warn("[routeSnapper] sparse GTFS OSRM densify", e);
+            }
+          }
+          return poly;
+        }
       }
     } catch (e) {
       if (e?.name === "AbortError") throw e;

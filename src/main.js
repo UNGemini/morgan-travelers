@@ -142,7 +142,7 @@ import {
   applyVisualStopsFromShape,
   busShapeToPolyline,
 } from "./busShapes.js";
-import { canonicalLivePosOp } from "./busPositionEngine.js";
+import { canonicalLivePosOp, isJointHarbourRoute } from "./busPositionEngine.js";
 import {
   isIndoorMtrInterchangeWalk,
   isFreeMtrInterchangeWalk,
@@ -931,25 +931,26 @@ function resolveCircularBoardIndex(named, pin) {
  * Mark multi-visit stops on circular routes (same stopId or name).
  * @param {Array<{ stopId?: string, name?: string, nameEn?: string, seq?: number }>} named
  */
+function circularVisitKey(s) {
+  const n = etaDestKey(s?.nameEn || s?.name || "");
+  if (n) return `n:${n}`;
+  const id = String(s?.stopId || "").trim();
+  return id ? `id:${id}` : "";
+}
+
 function annotateCircularVisits(named) {
   if (!named?.length) return named || [];
   /** @type {Map<string, number>} */
   const totals = new Map();
   for (const s of named) {
-    const id = String(s.stopId || "").trim();
-    const key = id
-      ? `id:${id}`
-      : `n:${etaDestKey(s.nameEn || s.name || "")}`;
-    if (!key || key === "n:") continue;
+    const key = circularVisitKey(s);
+    if (!key) continue;
     totals.set(key, (totals.get(key) || 0) + 1);
   }
   /** @type {Map<string, number>} */
   const seen = new Map();
   return named.map((s) => {
-    const id = String(s.stopId || "").trim();
-    const key = id
-      ? `id:${id}`
-      : `n:${etaDestKey(s.nameEn || s.name || "")}`;
+    const key = circularVisitKey(s);
     const total = totals.get(key) || 1;
     if (total <= 1) {
       return { ...s, visitN: 1, visitTotal: 1 };
@@ -1619,6 +1620,32 @@ const kmbRouteStopSeqCache = new Map();
 
 function etaRouteKey(r) {
   return `${r?.kind || ""}|${r?.id || ""}|${r?.co || ""}`;
+}
+
+function isJointBusRoute(r) {
+  const co = String(r?.co || "").toLowerCase();
+  return (
+    r?.kind === "bus" &&
+    (co === "kmb" || co === "ctb" || co === "lwb") &&
+    isJointHarbourRoute(r.id)
+  );
+}
+
+/** Nearby/search: collapse KMB+CTB copies of the same joint route. */
+function etaRouteDedupeKey(r) {
+  if (isJointBusRoute(r)) return `bus|${String(r.id || "").toUpperCase()}|joint`;
+  return etaRouteKey(r);
+}
+
+function jointOpsOf(r) {
+  const ops = Array.isArray(r?.jointOps) ? r.jointOps.map((c) => String(c).toLowerCase()) : [];
+  const co = String(r?.co || "").toLowerCase();
+  const set = new Set(ops.length ? ops : co ? [co] : []);
+  if (isJointBusRoute(r)) {
+    set.add("kmb");
+    set.add("ctb");
+  }
+  return [...set];
 }
 
 function getCardDir(r) {
@@ -5309,6 +5336,8 @@ function promoteRouteStopLayers() {
   } catch {
     /* style not ready */
   }
+  // Live-bus markers must stay above stop dots after a stop-switch redraw.
+  promoteBusPosLayers();
 }
 
 /**
@@ -5365,26 +5394,38 @@ function mtrBoardStopLabel(st) {
  * @param {string} routeId
  * @param {string} [color]
  */
-function setMapRouteBadge(coLabel, routeId, color = "#fff", label = "", kind = "") {
+function setMapRouteBadge(coLabel, routeId, color = "#fff", label = "", kind = "", route = null) {
   const badge = document.getElementById("map-route-badge");
   const coEl = document.getElementById("map-route-badge-co");
   const idEl = document.getElementById("map-route-badge-id");
   if (!badge || !idEl) return;
+  const joint = route && isJointBusRoute(route);
   if (coEl) {
-    coEl.textContent = coLabel || "";
-    coEl.style.color = color || "";
-    coEl.hidden = !coLabel;
-    // Breathing room above the pill is MTR-only: bus/LRT render a plain
-    // route number that already sits well against the basemap.
     coEl.classList.toggle("map-route-badge-co-mtr", kind === "mtr");
+    coEl.classList.toggle("is-joint-cos", !!joint);
+    if (joint) {
+      coEl.hidden = false;
+      coEl.style.color = "";
+      coEl.innerHTML = `<span class="joint-co-kmb">KMB</span><span class="joint-co-ctb">Citybus</span>`;
+    } else {
+      coEl.textContent = coLabel || "";
+      coEl.style.color = color || "";
+      coEl.hidden = !coLabel;
+    }
   }
   if (kind === "mtr") {
     // Coloured pill: localized line name over the English full name
     idEl.innerHTML = mtrLineBadgeHtml(routeId, color, label, "map-route-badge-mtr");
     idEl.style.color = "";
+    idEl.classList.remove("is-joint");
+  } else if (joint) {
+    idEl.textContent = routeId || "";
+    idEl.style.color = "";
+    idEl.classList.add("is-joint");
   } else {
     idEl.textContent = routeId || "";
     idEl.style.color = color || "#fff";
+    idEl.classList.remove("is-joint");
   }
   badge.hidden = !routeId;
   badge.setAttribute("aria-hidden", routeId ? "false" : "true");
@@ -9587,8 +9628,18 @@ function buildEtaRouteCatalog() {
   /** @type {Map<string, EtaRouteEntry>} */
   const map = new Map();
   const add = (e) => {
-    const key = `${e.kind}|${e.id}|${e.co || ""}`;
-    if (!map.has(key)) map.set(key, e);
+    const key = etaRouteDedupeKey(e);
+    const prev = map.get(key);
+    if (prev && isJointBusRoute(e)) {
+      const ops = new Set(jointOpsOf(prev));
+      ops.add(String(e.co || "").toLowerCase());
+      prev.jointOps = [...ops];
+      return;
+    }
+    if (!map.has(key)) {
+      if (isJointBusRoute(e)) e.jointOps = jointOpsOf(e);
+      map.set(key, e);
+    }
   };
 
   for (const line of MTR_ETA_LINES) {
@@ -11919,9 +11970,25 @@ async function browseEtaRoutes(limit = 28, opts = {}) {
     const mergeSeen = new Set();
     const addMerged = (r) => {
       if (!r || !etaKindMatchesFilter(r)) return;
-      const k = etaRouteKey(r);
-      if (mergeSeen.has(k)) return;
+      const k = etaRouteDedupeKey(r);
+      if (mergeSeen.has(k)) {
+        const prev = merged.find((x) => etaRouteDedupeKey(x) === k);
+        if (prev && isJointBusRoute(r)) {
+          const ops = new Set(jointOpsOf(prev));
+          ops.add(String(r.co || "").toLowerCase());
+          prev.jointOps = [...ops];
+          const pm = etaLiveByKey.get(etaRouteKey(prev))?.minutes;
+          const rm = etaLiveByKey.get(etaRouteKey(r))?.minutes;
+          if (rm != null && (pm == null || rm < pm)) {
+            prev.co = r.co;
+            prev.label = r.label || prev.label;
+            prev.nearbyHint = r.nearbyHint || prev.nearbyHint;
+          }
+        }
+        return;
+      }
       mergeSeen.add(k);
+      if (isJointBusRoute(r)) r.jointOps = jointOpsOf(r);
       merged.push(r);
     };
     for (const r of nearKmb.hits) addMerged(r);
@@ -12365,7 +12432,9 @@ function etaRouteCardInnerHtml(r, dir, eta = {}, opts = {}) {
   const routeIdHtml =
     r.kind === "mtr"
       ? mtrLineBadgeHtml(r.id, color, r.label, "eta-card-route-mtr eta-card-route-text")
-      : `<div class="eta-card-route ${safeCssClass(etaCompanyColorClass(r))}" style="color:${safeCssColor(color, "#888888")}">${escapeHtml(r.id)}</div>`;
+      : isJointBusRoute(r)
+        ? `<div class="eta-card-route is-joint" title="${escapeHtml(t("KMB / Citybus"))}">${escapeHtml(r.id)}</div>`
+        : `<div class="eta-card-route ${safeCssClass(etaCompanyColorClass(r))}" style="color:${safeCssColor(color, "#888888")}">${escapeHtml(r.id)}</div>`;
   return `
     <div class="eta-card-main">
       ${routeIdHtml}
@@ -14828,6 +14897,12 @@ async function renderEtaRouteDetailBody(route, ctx) {
           ${etaBranchLabelsHtml(branchPair)}
         </button>`
       : "",
+    isJointBusRoute(route)
+      ? `<button type="button" class="wheels-dir-switch" id="btn-eta-detail-op" aria-label="${escapeHtml(t("Switch operator"))}" title="${escapeHtml(t("KMB / Citybus"))}">
+          <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
+          <span>${escapeHtml(String(route.co || "").toLowerCase() === "ctb" ? t("Citybus") : t("KMB"))}</span>
+        </button>`
+      : "",
   ]
     .filter(Boolean)
     .join("");
@@ -15037,6 +15112,21 @@ async function renderEtaRouteDetailBody(route, ctx) {
           bound: to?.bound || live.bound,
         });
       }
+      void showEtaRouteDetailsPanel();
+    });
+
+  els.etaRouteDetailBody
+    .querySelector("#btn-eta-detail-op")
+    ?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const ops = jointOpsOf(route);
+      if (ops.length < 2) return;
+      const cur = String(route.co || "kmb").toLowerCase();
+      const next = ops[(Math.max(0, ops.indexOf(cur)) + 1) % ops.length];
+      route.co = next;
+      route.label = `${next === "ctb" ? "CTB" : next === "lwb" ? "LWB" : "KMB"} ${route.id}`;
+      route.jointOps = ops;
       void showEtaRouteDetailsPanel();
     });
 
@@ -15333,7 +15423,7 @@ async function showEtaRouteDetailsPanel(opts = {}) {
   if (els.etaRouteDetailHead) {
     els.etaRouteDetailHead.innerHTML = "";
   }
-  setMapRouteBadge(coLabel, route.id, color, route.label, route.kind);
+  setMapRouteBadge(coLabel, route.id, color, route.label, route.kind, route);
   if (els.etaRouteDetailBody) {
     els.etaRouteDetailBody.innerHTML = `<p class="hint wheels-route-loading">${escapeHtml(t("Loading route…"))}</p>`;
   }
@@ -16585,6 +16675,17 @@ const BUS_POS_LAYER_IDS = [
   "bus-pos-radar",
   "bus-pos-dot",
 ];
+
+function promoteBusPosLayers() {
+  if (!map?.getStyle || !busPosLayersOn) return;
+  for (const id of BUS_POS_LAYER_IDS) {
+    try {
+      if (map.getLayer(id)) map.moveLayer(id);
+    } catch {
+      /* style not ready */
+    }
+  }
+}
 
 // Marker cosmetics + animation state (PRD 4.2 marker enhancements):
 // eased glide between emits, route-colored outline/text, white fill, radar

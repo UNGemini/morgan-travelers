@@ -548,8 +548,25 @@ export async function getGtfsBusShape(opt, opts = {}) {
       ? opt.stops
       : [opt?.from, opt?.to].filter(Boolean);
     const shape = pickShape(entry, names, wantDir, stops);
-    const coords = shape ? decodeCoords(shape.c) : null;
+    let coords = shape ? decodeCoords(shape.c) : null;
+    let sparse = false;
+    if (!coords || coords.length < 2) {
+      // Some joint/airport routes (S1) ship stop sequences but no shapes.txt
+      const seq = await getGtfsRouteStopSequence(
+        opt,
+        opt.bound === "I" ? "I" : "O",
+        opts,
+      );
+      const fromSeq = (seq || [])
+        .filter((s) => Number.isFinite(s.lon) && Number.isFinite(s.lat))
+        .map((s) => ({ lon: s.lon, lat: s.lat }));
+      if (fromSeq.length >= 2) {
+        coords = fromSeq;
+        sparse = true;
+      }
+    }
     if (!coords || coords.length < 2) return null;
+    if (coords.length <= (stops?.length || 0) + 2) sparse = true;
 
     // Direction guard: the picked shape must run with the stop order (see
     // orientShapeToStops). Flipping here fixes wrong passed/remaining cuts
@@ -562,9 +579,15 @@ export async function getGtfsBusShape(opt, opts = {}) {
       "→",
       coords.length,
       "pts",
-      shape?.h?.[0] ? `(dir ${shape.h[0]})` : "",
+      sparse ? "(stop-seq)" : shape?.h?.[0] ? `(dir ${shape.h[0]})` : "",
     );
-    return { coords, route_id: ridKey, headsign: shape?.h?.[0], cumM: cumulativeMeters(coords) };
+    return {
+      coords,
+      route_id: ridKey,
+      headsign: shape?.h?.[0],
+      sparse,
+      cumM: cumulativeMeters(coords),
+    };
   } catch (e) {
     if (e?.name === "AbortError") throw e;
     console.warn("[bus-shapes] shape lookup failed, falling back", e);

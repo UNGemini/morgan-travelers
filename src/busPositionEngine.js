@@ -194,6 +194,7 @@ const JOINT_HARBOUR_ROUTES = new Set(
 /** @param {string} routeId */
 export function isJointHarbourRoute(routeId) {
   const raw = String(routeId || "").toUpperCase().replace(/[^0-9A-Z]/g, "");
+  if (raw === "S1" || raw === "NS1") return true;
   if (JOINT_HARBOUR_ROUTES.has(raw)) return true;
   const stripped = raw.replace(/[APXS]$/, "");
   return JOINT_HARBOUR_ROUTES.has(stripped);
