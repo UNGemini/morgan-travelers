@@ -6,8 +6,11 @@
  * only. See licenses/GPL-3.0.txt. The rest of MORGAN Travelers is Apache-2.0.
  *
  * Live Bus Position Engine (PRD 4.2 v2) — schedule-based whole-route tracking.
- * ETA remaining-time walk (Now + 35 s slack, min 30 s hops) places markers
+ * ETA remaining-time walk (Now + 35 s slack, 30 s hop floor) places markers
  * from the board stop; MTR/LRT use the same walk on rail geometry (no GTFS).
+ * Bus hops speed up toward natural travel when the floored min-hop sum
+ * exceeds remaining ETA, and schedule-only ghosts closer than ~½ the route's
+ * max frequency (tightest GTFS/ETA headway) are dropped.
  *
  * Positioning stays Speed + Time = Position: traffic speed (trafficSpeed.js,
  * unchanged) × time from a known reference. The time source is now the GTFS
@@ -85,8 +88,16 @@ const V_TYP = 8.3;
  */
 const NOW_SLACK_S = 35;
 const NOW_SLACK_MS = NOW_SLACK_S * 1000;
-/** Floor on scheduled/estimated travel time between consecutive stops. */
+/** Floor on estimated travel time between consecutive stops (walk-back). */
 const MIN_HOP_S = 30;
+/**
+ * Drop a schedule-only marker if it sits closer than this fraction of the
+ * route's tightest headway to a kept vehicle (ghost from a lagging hop).
+ */
+const GHOST_HEADWAY_FRAC = 0.45;
+/** Plausible headway window (s) — below this is bunching, above is a gap. */
+const HEADWAY_MIN_S = 90;
+const HEADWAY_MAX_S = 40 * 60;
 /** Along-track gap between two markers after walkback (metres). */
 const CLUMP_MIN_M = 15;
 /**
@@ -403,6 +414,10 @@ export class BusPositionEngine {
     this.hasPolled = false;
     /** Latest board-stop feed row's ETA (ms ahead of now) + slack; 0 = unverifiable */
     this.boardHorizonMs = 0;
+    /** Tightest GTFS headway for this route/direction (s); 0 = unknown. */
+    this.gtfsHeadwaySec = 0;
+    /** Effective max frequency (min GTFS / live ETA headway) used for ghosts. */
+    this.headwaySec = 0;
   }
 
   /**
@@ -454,6 +469,8 @@ export class BusPositionEngine {
     this.lastEmit = null;
     this.initPromise = null;
     this.boardHorizonMs = 0;
+    this.gtfsHeadwaySec = 0;
+    this.headwaySec = 0;
     this.rawRowsByStop.clear();
     this.tripEtas.clear();
     this.hasPolled = false;
@@ -500,43 +517,67 @@ export class BusPositionEngine {
     }
   }
 
+  /** Natural (unfloored) travel time between two along-track distances. */
   hopDurSec(d0, d1, lon, lat) {
     const dist = Math.abs(d1 - d0);
     const mult =
       this.trafficIndex && Number.isFinite(lon)
         ? this.trafficIndex.multiplierAt(lon, lat)
         : 1;
-    const t = dist / Math.max(0.5, V_TYP * (mult || 1));
-    return Math.max(MIN_HOP_S, t);
+    return dist / Math.max(0.5, V_TYP * (mult || 1));
   }
 
   /**
    * Walk backward along ctx.stopDistM from `fromDist` for `remainSec`.
-   * Honors MIN_HOP_S per hop so close stops don't collapse to the same point.
+   * Default hop is max(MIN_HOP_S, natural) so close stops don't collapse.
+   * If that floored sum exceeds remaining ETA, hops scale down toward
+   * natural travel (the marker speeds up) instead of lagging near the stop.
    */
   walkBackFromDist(fromDist, remainSec) {
     const dists = this.ctx?.stopDistM;
     if (!dists?.length || !Number.isFinite(fromDist)) return Math.max(0, fromDist || 0);
-    let t = Math.max(0, remainSec);
-    let d = fromDist;
-    // Find the stop index at or before fromDist
+    const tRemain = Math.max(0, remainSec);
+    if (tRemain <= 0) return Math.max(0, fromDist);
     let i = dists.length - 1;
     while (i > 0 && dists[i] > fromDist + 0.5) i -= 1;
-    while (i > 0 && t > 0) {
+    const hops = [];
+    let d = fromDist;
+    let accFloor = 0;
+    while (i > 0 && accFloor < tRemain) {
       const dPrev = dists[i - 1];
       const dCur = dists[i];
       const stop = this.ctx.stops?.[i];
-      const hop = this.hopDurSec(dPrev, dCur, stop?.lon, stop?.lat);
+      const natural = this.hopDurSec(dPrev, dCur, stop?.lon, stop?.lat);
+      const floored = Math.max(MIN_HOP_S, natural);
       const span = Math.max(1e-3, dCur - dPrev);
-      const fromOnHop = Math.max(0, Math.min(1, (d - dPrev) / span));
-      const timeOnHop = hop * fromOnHop;
+      const fromOnHop =
+        hops.length === 0
+          ? Math.max(0, Math.min(1, (d - dPrev) / span))
+          : 1;
+      const floorOnHop = floored * fromOnHop;
+      hops.push({ dPrev, span, fromOnHop, natural, floored, floorOnHop });
+      accFloor += floorOnHop;
+      d = dPrev;
+      i -= 1;
+    }
+    // Speed up when min-hop floors would take longer than the remaining ETA.
+    const scale = accFloor > tRemain && accFloor > 0 ? tRemain / accFloor : 1;
+    d = fromDist;
+    let t = tRemain;
+    for (const h of hops) {
+      const hop = Math.max(h.natural, h.floored * scale);
+      if (hop <= 1e-6) {
+        d = h.dPrev;
+        continue;
+      }
+      const timeOnHop = hop * h.fromOnHop;
       if (t >= timeOnHop) {
         t -= timeOnHop;
-        d = dPrev;
-        i -= 1;
+        d = h.dPrev;
       } else {
-        d = dPrev + span * (fromOnHop - t / hop);
+        d = h.dPrev + h.span * (h.fromOnHop - t / hop);
         t = 0;
+        break;
       }
     }
     return Math.max(0, d);
@@ -578,6 +619,39 @@ export class BusPositionEngine {
     }
   }
 
+  /**
+   * Drop schedule-only (unanchored) markers that sit closer than
+   * GHOST_HEADWAY_FRAC × tightest headway to a kept vehicle. Lagging hops
+   * pile extras on the next real bus; ETA-anchored / dwelling buses stay
+   * even when bunched.
+   */
+  dropGhostsByHeadway(vehicles) {
+    const hw = this.headwaySec;
+    if (!(hw >= HEADWAY_MIN_S) || vehicles.length < 2) return;
+    const minGapM = hw * GHOST_HEADWAY_FRAC * V_TYP;
+    const tracked = (v) => this.tripState.get(v.id)?.arrD >= 0;
+    const keepPri = (v) => v.anchored || tracked(v);
+    const sorted = vehicles.filter((v) => Number.isFinite(v.d)).sort((a, b) => b.d - a.d);
+    const kept = sorted.filter(keepPri);
+    const drop = new Set();
+    for (const v of sorted) {
+      if (keepPri(v)) continue;
+      let ghost = false;
+      for (const k of kept) {
+        if (Math.abs(k.d - v.d) < minGapM) {
+          ghost = true;
+          break;
+        }
+      }
+      if (ghost) drop.add(v);
+      else kept.push(v);
+    }
+    if (!drop.size) return;
+    for (let i = vehicles.length - 1; i >= 0; i--) {
+      if (drop.has(vehicles[i])) vehicles.splice(i, 1);
+    }
+  }
+
   /** Load schedules (async, cached) + traffic index once at start. */
   async init() {
     const ctx = this.ctx;
@@ -597,6 +671,65 @@ export class BusPositionEngine {
       return;
     }
     this.cachePatterns();
+    this.gtfsHeadwaySec = this.computeHeadwaySec();
+    this.headwaySec = this.gtfsHeadwaySec;
+    if (this.headwaySec) {
+      console.info("[buspos] headway", this.routeKey, this.headwaySec, "s");
+    }
+  }
+
+  /** Tightest gap in [HEADWAY_MIN_S, HEADWAY_MAX_S]; 0 if none. */
+  tightestHeadway(diffs) {
+    const ok = diffs.filter((d) => d >= HEADWAY_MIN_S && d <= HEADWAY_MAX_S);
+    return ok.length ? Math.min(...ok) : 0;
+  }
+
+  /**
+   * Tightest plausible headway (max frequency) for this route/direction.
+   * GTFS frequencies first, else the tightest fixed-trip start gap.
+   */
+  computeHeadwaySec() {
+    const route = this.schedules?.routes?.[this.routeKey];
+    if (!route) return 0;
+    const dirNum = this.dir == null ? null : Number(this.dir);
+    const freq = [];
+    for (const f of route.f || []) {
+      const pat = route.p?.[f[0]];
+      if (!pat?.length) continue;
+      if (dirNum != null && Number(pat[0][2]) !== dirNum) continue;
+      const hw = Number(f[3]);
+      if (Number.isFinite(hw)) freq.push(hw);
+    }
+    const fromFreq = this.tightestHeadway(freq);
+    if (fromFreq) return fromFreq;
+    const starts = [];
+    for (const t of route.t || []) {
+      const pat = route.p?.[t[0]];
+      if (!pat?.length) continue;
+      if (dirNum != null && Number(pat[0][2]) !== dirNum) continue;
+      starts.push(Number(t[1]));
+    }
+    starts.sort((a, b) => a - b);
+    const diffs = [];
+    for (let i = 1; i < starts.length; i++) {
+      diffs.push(starts[i] - starts[i - 1]);
+    }
+    return this.tightestHeadway(diffs);
+  }
+
+  /**
+   * Tighten headway from consecutive board-stop ETAs (live max frequency).
+   * Never widens the GTFS value — a sparse 3-row feed is not a timetable.
+   */
+  observeEtaHeadway(etas) {
+    if (!etas || etas.length < 2) return;
+    const diffs = [];
+    for (let i = 1; i < etas.length; i++) {
+      diffs.push((etas[i].t - etas[i - 1].t) / 1000);
+    }
+    const hw = this.tightestHeadway(diffs);
+    if (!hw) return;
+    this.headwaySec = this.headwaySec ? Math.min(this.headwaySec, hw) : hw;
   }
 
   /** Baseline refresh of the traffic index (5-min TTL cache inside). */
@@ -799,6 +932,11 @@ export class BusPositionEngine {
         const maxRowT = boardRows[boardRows.length - 1].t;
         const slack = boardRows.length >= 3 ? 0 : PHANTOM_SLACK_MS;
         this.boardHorizonMs = Math.max(0, maxRowT - now + slack);
+      }
+      const rail = ctx.op === "mtr" || ctx.op === "lrt";
+      if (!rail) {
+        this.headwaySec = this.gtfsHeadwaySec || 0;
+        this.observeEtaHeadway(boardRows);
       }
       this.matchAnchors(ctx, stopEtas, now);
       this.hasPolled = true;
@@ -1406,6 +1544,8 @@ export class BusPositionEngine {
       }
     }
     this.antiClump(out);
+    const rail = ctx.op === "mtr" || ctx.op === "lrt";
+    if (!rail) this.dropGhostsByHeadway(out);
     this.vehicles = out;
   }
 
@@ -1422,7 +1562,7 @@ export class BusPositionEngine {
     const d1 = dists[k + 1];
     const t0 = offs[k][1];
     const t1 = offs[k + 1][1];
-    const vSeg = (d1 - d0) / Math.max(MIN_HOP_S, t1 - t0);
+    const vSeg = (d1 - d0) / Math.max(1, t1 - t0);
     const mid = alongToLonLat(this.ctx.shape.coords, this.ctx.shape.cumM, (d0 + d1) / 2);
     const v = vSeg * (this.trafficIndex && mid ? this.trafficIndex.multiplierAt(mid.lon, mid.lat) : 1);
     // Clamp to [d[k], d[k+1]]: congestion makes the bus crawl and wait at the
