@@ -1365,7 +1365,7 @@ export async function buildTransitPolyline(opt, opts = {}) {
       const gtfs = await getGtfsBusShape(opt, opts);
       if (gtfs?.coords?.length >= 2) {
         const poly = sliceRouteBetweenStops(gtfs.coords, stops);
-        if (poly?.length >= 2 && polylineCoversStops(poly, stops)) {
+        if (poly?.length >= 2 && polylineCoversStops(poly, stops, gtfs.coords)) {
           if (gtfs.sparse) {
             try {
               const dens = await densifyStopsViaOsrm(poly, opts);
@@ -1400,19 +1400,50 @@ export async function buildTransitPolyline(opt, opts = {}) {
   return stops.map((s) => ({ lon: s.lon, lat: s.lat }));
 }
 
-/** True when most stops sit on the polyline (reject a short/wrong GTFS slice). */
-function polylineCoversStops(poly, stops, maxErrM = 140) {
-  if (!poly?.length || !stops?.length) return false;
-  let ok = 0;
-  let n = 0;
-  for (const s of stops) {
-    if (!Number.isFinite(s?.lon) || !Number.isFinite(s?.lat)) continue;
-    n += 1;
-    const p = nearestPointOnRoute(poly, s);
-    if (p && p.error <= maxErrM) ok += 1;
+function isClosedLoop(pts, maxM = 150) {
+  if (!pts?.length || pts.length < 4) return false;
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  if (
+    !Number.isFinite(a?.lon) ||
+    !Number.isFinite(a?.lat) ||
+    !Number.isFinite(b?.lon) ||
+    !Number.isFinite(b?.lat)
+  ) {
+    return false;
   }
-  if (n < 2) return poly.length >= 2;
-  return ok / n >= 0.72;
+  return haversineM(a.lat, a.lon, b.lat, b.lon) < maxM;
+}
+
+/**
+ * Accept a GTFS slice unless it is a short fragment that misses the stops
+ * (S64C inbound stub). Closed loops (S64C AM) always keep the full circuit —
+ * cargo stops can sit off the GTFS line; rejecting them dropped the loop
+ * and painted zoom chords.
+ */
+function polylineCoversStops(poly, stops, fullCoords = null) {
+  if (!poly?.length || !stops?.length) return false;
+  const usable = stops.filter(
+    (s) => Number.isFinite(s?.lon) && Number.isFinite(s?.lat),
+  );
+  if (usable.length < 2) return poly.length >= 2;
+  if (isClosedLoop(poly) && isClosedLoop(usable) && poly.length >= 8) {
+    return true;
+  }
+  let ok = 0;
+  for (const s of usable) {
+    const p = nearestPointOnRoute(poly, s);
+    if (p && p.error <= 180) ok += 1;
+  }
+  if (ok / usable.length >= 0.72) return true;
+  if (
+    fullCoords &&
+    isClosedLoop(fullCoords) &&
+    fullCoords.length > poly.length * 1.5
+  ) {
+    return false;
+  }
+  return ok / usable.length >= 0.55;
 }
 
 // ── internals ────────────────────────────────────────────────────────────────
