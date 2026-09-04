@@ -2393,7 +2393,7 @@ function stopListIsLoop(stops) {
   ) {
     return false;
   }
-  return haversineMEta(a.lat, a.lon, b.lat, b.lon) < 80;
+  return haversineMEta(a.lat, a.lon, b.lat, b.lon) < 150;
 }
 
 /**

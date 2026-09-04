@@ -170,7 +170,7 @@ export function sliceRouteBetweenStops(route, orderedStops) {
   const isLoop =
     !!start &&
     !!end &&
-    haversineM(start.lat, start.lon, end.lat, end.lon) < 80;
+    haversineM(start.lat, start.lon, end.lat, end.lon) < 150;
   const first = orderedStops[0];
   const last = orderedStops[orderedStops.length - 1];
   const circularTrip =
@@ -178,7 +178,7 @@ export function sliceRouteBetweenStops(route, orderedStops) {
     orderedStops.length >= 4 &&
     !!first &&
     !!last &&
-    haversineM(first.lat, first.lon, last.lat, last.lon) < 80;
+    haversineM(first.lat, first.lon, last.lat, last.lon) < 150;
   if (circularTrip) {
     const cum = cumulativeDistances(route);
     const total = cum[cum.length - 1] || 0;

@@ -384,6 +384,9 @@ function distM(a, b) {
   );
 }
 
+/** Terminus bays at the same stop can sit >80 m apart (S64C Yat Tung). */
+const LOOP_CLOSE_M = 150;
+
 /**
  * How well a decoded polyline covers an ordered stop list (monotonic).
  * Circular routes (S64C): the same stop sits at both ends of the loop, so
@@ -415,15 +418,15 @@ function fitShapeToStops(coords, stops) {
   const total = cum.length ? cum[cum.length - 1] : 0;
   const start = coords[0];
   const end = coords[coords.length - 1];
-  const loop = distM(start, end) < 80;
+  const loop = distM(start, end) < LOOP_CLOSE_M;
   const circularStops =
-    loop && stops.length >= 4 && distM(stops[0], stops[stops.length - 1]) < 80;
+    stops.length >= 4 && distM(stops[0], stops[stops.length - 1]) < LOOP_CLOSE_M;
   let span =
     total > 1 && firstAlong != null && lastAlong != null
       ? Math.abs(lastAlong - firstAlong) / total
       : 0;
   // First+last both snapped to the same terminus on a loop → full circuit
-  if (circularStops && span < 0.15) span = 1;
+  if (loop && circularStops && span < 0.15) span = 1;
   return {
     meanErr: sum / n,
     coverage: ok / n,
@@ -460,17 +463,28 @@ function pickShape(routeEntry, names, wantDir = null, stops = null) {
     const ll = stopLonLat(s);
     if (ll) usable.push(ll);
   }
+  const circularStops =
+    usable.length >= 4 && distM(usable[0], usable[usable.length - 1]) < LOOP_CLOSE_M;
 
   let best = null;
   let bestScore = -Infinity;
   for (const s of shapes) {
     let score = 0;
     if (wantDir != null && String(s.d) === String(wantDir)) score += 50;
-    for (const h of s.h || []) {
-      const hs = String(h).toLowerCase();
-      if (to && hs && (hs.includes(to) || to.includes(hs))) score += 20;
-      else if (from && hs && (hs.includes(from) || from.includes(hs)))
-        score += 8;
+    const heads = s.h || [];
+    if (circularStops) {
+      // Loop trips start and end at the same terminus. Dest/from both read
+      // "Yat Tung" and would otherwise pick the inbound stub (S64C AM).
+      for (const h of heads) {
+        if (/circular|loop|↺|循環|循环/i.test(String(h))) score += 20;
+      }
+    } else {
+      for (const h of heads) {
+        const hs = String(h).toLowerCase();
+        if (to && hs && (hs.includes(to) || to.includes(hs))) score += 20;
+        else if (from && hs && (hs.includes(from) || from.includes(hs)))
+          score += 8;
+      }
     }
     if (usable.length >= 3) {
       const coords = decodeCoords(s.c);
@@ -481,6 +495,10 @@ function pickShape(routeEntry, names, wantDir = null, stops = null) {
         score += fit.coverage * 80;
         score -= Math.min(80, fit.meanErr / 8);
         score += fit.span * 25;
+        if (circularStops) {
+          if (fit.loop) score += 50;
+          else score -= 40;
+        }
       }
     }
     if (score > bestScore) {
