@@ -5356,17 +5356,52 @@ function stopRadiusExpr() {
   ];
 }
 
+/** Stroke width so the line still covers the road from overview to street. */
+function routeLineWidthExpr(kind) {
+  const walk = kind === "casing" ? [4, 5.5, 7, 9] : [2.2, 3.2, 4, 5];
+  const transit = kind === "casing" ? [6, 8, 12, 16] : [3, 4.5, 7, 10];
+  const at = (i) => [
+    "case",
+    ["==", ["get", "walk_style"], "indoor"],
+    walk[i],
+    ["==", ["get", "walk_style"], "free"],
+    walk[i],
+    ["==", ["get", "kind"], "walk"],
+    walk[i],
+    transit[i],
+  ];
+  return [
+    "interpolate",
+    ["linear"],
+    ["zoom"],
+    11,
+    at(0),
+    14,
+    at(1),
+    16,
+    at(2),
+    18,
+    at(3),
+  ];
+}
+
 function ensureRouteLayers() {
   if (!map.getSource("route-line")) {
     map.addSource("route-line", {
       type: "geojson",
+      // Keep every GTFS/OSRM vertex at all zooms — default tolerance chords
+      // the line off the road when you zoom in or out.
       data: { type: "FeatureCollection", features: [] },
+      tolerance: 0,
+      maxzoom: 22,
     });
   }
   if (!map.getSource("route-stops")) {
     map.addSource("route-stops", {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
+      tolerance: 0,
+      maxzoom: 22,
     });
   }
 
@@ -5377,7 +5412,7 @@ function ensureRouteLayers() {
       source: "route-line",
       paint: {
         "line-color": "#000000",
-        "line-width": 8,
+        "line-width": routeLineWidthExpr("casing"),
         "line-opacity": 0.45,
       },
       layout: { "line-cap": "round", "line-join": "round" },
@@ -5400,14 +5435,7 @@ function ensureRouteLayers() {
           // Passed features carry passed_color — opaque white-mixed route colour
           ["coalesce", ["get", "passed_color"], ["coalesce", ["get", "color"], "#c0aefc"]],
         ],
-        "line-width": [
-          "case",
-          ["==", ["get", "walk_style"], "indoor"],
-          3.5,
-          ["==", ["get", "walk_style"], "free"],
-          3.5,
-          4,
-        ],
+        "line-width": routeLineWidthExpr("main"),
         "line-opacity": [
           "case",
           ["==", ["get", "passed"], true],
@@ -5501,6 +5529,14 @@ function ensureRouteLayers() {
         1,
         0.95,
       ]);
+      map.setPaintProperty("route-line-main", "line-width", routeLineWidthExpr("main"));
+    }
+    if (map.getLayer("route-line-casing")) {
+      map.setPaintProperty(
+        "route-line-casing",
+        "line-width",
+        routeLineWidthExpr("casing"),
+      );
     }
     if (map.getLayer("route-stops-circle")) {
       map.setPaintProperty("route-stops-circle", "circle-radius", stopRadiusExpr());
