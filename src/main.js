@@ -1700,6 +1700,8 @@ function resolveCardDirIndex(r, dirs) {
   const nearby = etaNearbyDirsByKey.get(key);
   if (nearby?.length) {
     const pref = nearby[0];
+    const byDest = etaMatchDepartureSlotIndex(dirs, pref);
+    if (byDest >= 0) return byDest;
     const b = String(pref?.bound || "").toUpperCase();
     if (b) {
       const byNear = dirs.findIndex(
@@ -1783,25 +1785,51 @@ function syncDirChoiceToLive(r, di, dirs) {
  * @param {EtaRouteEntry} entry
  * @param {EtaNearbyDirSlot[]} scoredSlots  any order
  */
-function commitNearbyDirSlots(routeKey, entry, scoredSlots) {
+async function commitNearbyDirSlots(routeKey, entry, scoredSlots) {
   if (!scoredSlots?.length) return;
+  const od = etaUniqueDirections(etaRouteDirectionsFromOd(entry) || []);
+  const departureSwitch = etaHasDepartureSwitch(od);
+  // Seed AM/PM (or extra OD) shells so Nearby can pick by time even when
+  // only one bound has a live row at the nearest stop.
+  let raw = [...scoredSlots];
+  if (departureSwitch) {
+    const have = new Set(raw.map((s) => etaDestBoundKey(s)));
+    for (const d of od) {
+      const k = etaDestBoundKey(d);
+      if (!k || have.has(k)) continue;
+      raw.push({
+        bound: d.bound,
+        dest: d.dest || "",
+        destZh: d.destZh || "",
+        minutes: null,
+        stopLabel: d.orig || "",
+        stopId: "",
+        distM: Infinity,
+        circular: d.circular,
+        variant: d.variant,
+        serviceType: d.serviceType,
+      });
+      have.add(k);
+    }
+    await Promise.all(od.map((d) => hydrateDirSchedule(entry, d)));
+  }
   // MTR/LRT only: prefer slots that go *away* (dest ≠ board terminus)
   const isRail = entry?.kind === "mtr" || entry?.kind === "lrt";
   const awaySlots = isRail
-    ? scoredSlots.filter(
+    ? raw.filter(
         (s) =>
           !s.stopLabel ||
           !s.dest ||
           !etaStationsMatch(s.destZh || s.dest, s.stopLabel),
       )
-    : scoredSlots;
-  const pool = awaySlots.length ? awaySlots : scoredSlots;
+    : raw;
+  const pool = awaySlots.length ? awaySlots : raw;
   const preferred = sortSlotsGoingAway(pool)[0];
   /** @type {EtaNearbyDirSlot[]} */
-  // Dedupe by bound|branch (not bound alone — EAL/TKL have 2× O and 2× I)
+  // Dedupe by dest+bound for AM/PM variants; bound|branch for EAL/TKL.
   const byKey = new Map();
-  for (const s of scoredSlots) {
-    byKey.set(etaDirSlotKey(s), s);
+  for (const s of raw) {
+    byKey.set(departureSwitch ? etaDestBoundKey(s) : etaDirSlotKey(s), s);
   }
   const ordered = [...byKey.values()].sort((a, b) => {
     const ba = String(a.bound || "").toUpperCase();
@@ -1815,9 +1843,12 @@ function commitNearbyDirSlots(routeKey, entry, scoredSlots) {
     return String(a.branch || "").localeCompare(String(b.branch || ""));
   });
   etaNearbyDirsByKey.set(routeKey, ordered);
-  // Prefer away-bound index when that bound exists in ordered
   let prefIdx = 0;
-  if (preferred) {
+  if (departureSwitch) {
+    const want = od[etaPreferredDepartureIndex(od)] || od[0];
+    const i = etaMatchDepartureSlotIndex(ordered, want);
+    prefIdx = i >= 0 ? i : etaPreferredDepartureIndex(od);
+  } else if (preferred) {
     const prefKey = etaDirSlotKey(preferred);
     const i = ordered.findIndex((s) => etaDirSlotKey(s) === prefKey);
     if (i >= 0) prefIdx = i;
@@ -1861,10 +1892,14 @@ function applyNearbyDirLive(r, opts = {}) {
   const wantBound = cardDirWantBound(r, list);
   const wantBranch = String(wantDir?.branch || "").toUpperCase();
 
-  // Prefer exact bound|branch, then bound + dest, then bound alone
+  // Prefer exact bound|branch, then dest (AM/PM), then bound alone
   let slot =
     (wantKey && slots.find((s) => etaDirSlotKey(s) === wantKey)) ||
     null;
+  if (!slot && wantDir && etaHasDepartureSwitch(list)) {
+    const i = etaMatchDepartureSlotIndex(slots, wantDir);
+    if (i >= 0) slot = slots[i];
+  }
   if (!slot && wantBound) {
     slot =
       slots.find((s) => {
@@ -1895,7 +1930,7 @@ function applyNearbyDirLive(r, opts = {}) {
     stopNameTc: slot.stopNameTc || "",
     dest: slot.dest,
     destZh: slot.destZh,
-    bound: slot.bound || want,
+    bound: slot.bound || wantBound,
     stopId: slot.stopId,
     // Live minutes from operator feeds — not headway schedule
     scheduled: slot.minutes == null,
@@ -2217,7 +2252,10 @@ async function refreshCardLiveEta(r, opts = {}) {
       else slots = [...slots, slot];
       // Ensure every real OD direction exists as a slot (shell for unfetched)
       const odDirs = etaUniqueDirections(etaRouteDirectionsFromOd(r));
-      if (odDirs.length >= 2 && etaHasRealOpposite(odDirs)) {
+      if (
+        odDirs.length >= 2 &&
+        (etaHasRealOpposite(odDirs) || etaHasDepartureSwitch(odDirs))
+      ) {
         const have = new Set(slots.map((s) => etaDirSlotKey(s)));
         for (const d of odDirs) {
           const k = etaDirSlotKey(d);
@@ -10248,17 +10286,63 @@ function etaPreferredDepartureIndex(dirs, now = new Date()) {
   if (!etaHasDepartureSwitch(dirs)) return 0;
   const hk = getHongKongParts(now);
   const mins = (hk.hour || 0) * 60 + (hk.minute || 0);
+  const inServiceToday = (d) => Number(d?.last) !== -1;
   for (let i = 0; i < dirs.length; i++) {
+    if (!inServiceToday(dirs[i])) continue;
     const first = Number(dirs[i].first);
     const last = Number(dirs[i].last);
-    if (Number.isFinite(first) && Number.isFinite(last) && mins >= first && mins <= last) {
+    if (
+      Number.isFinite(first) &&
+      Number.isFinite(last) &&
+      last >= 0 &&
+      mins >= first &&
+      mins <= last
+    ) {
       return i;
     }
   }
-  const loop = dirs.findIndex(etaIsCircularDir);
+  let next = -1;
+  let nextStart = Infinity;
+  for (let i = 0; i < dirs.length; i++) {
+    if (!inServiceToday(dirs[i])) continue;
+    const first = Number(dirs[i].first);
+    if (Number.isFinite(first) && first > mins && first < nextStart) {
+      nextStart = first;
+      next = i;
+    }
+  }
+  if (next >= 0) return next;
+  const loop = dirs.findIndex((d) => etaIsCircularDir(d) && inServiceToday(d));
+  const pm = dirs.findIndex((d, i) => i !== loop && inServiceToday(d));
   if (mins < 12 * 60 && loop >= 0) return loop;
-  const pm = dirs.findIndex((d, i) => i !== loop);
-  return mins >= 12 * 60 && pm >= 0 ? pm : Math.max(0, loop);
+  if (pm >= 0) return pm;
+  return Math.max(0, loop);
+}
+
+/** Bound + dest — AM/PM variants can share O/I. */
+function etaDestBoundKey(d) {
+  const b = String(d?.bound || "").toUpperCase();
+  const dest = etaDestKey(d?.destZh || d?.dest);
+  return dest && dest !== "—" ? `${b}|${dest}` : b || "x";
+}
+
+function etaMatchDepartureSlotIndex(slots, want) {
+  if (!slots?.length || !want) return -1;
+  const destK = etaDestKey(want.destZh || want.dest);
+  if (destK && destK !== "—") {
+    const byDest = slots.findIndex(
+      (s) => etaDestKey(s.destZh || s.dest) === destK,
+    );
+    if (byDest >= 0) return byDest;
+  }
+  const b = String(want.bound || "").toUpperCase();
+  if (b) {
+    const byBound = slots.findIndex(
+      (s) => String(s.bound || "").toUpperCase() === b,
+    );
+    if (byBound >= 0) return byBound;
+  }
+  return -1;
 }
 
 /**
@@ -10615,7 +10699,12 @@ function etaRouteDirections(r, opts = {}) {
           stopId: s.stopId,
         })),
       );
-      if (mapped.length >= 2 && etaHasRealOpposite(mapped)) return mapped;
+      if (
+        mapped.length >= 2 &&
+        (etaHasRealOpposite(mapped) || etaHasDepartureSwitch(mapped))
+      ) {
+        return mapped;
+      }
     }
   }
 
@@ -11235,7 +11324,7 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
           }
         }
         const slots = [...pack.byBound.values()];
-        commitNearbyDirSlots(k, entry, slots);
+        await commitNearbyDirSlots(k, entry, slots);
       } else if (pack.nearStops[0]) {
         const n = pack.nearStops[0];
         entry.nearbyHint = `${n.name} · ${Math.round(n.d)} m`;
@@ -11271,7 +11360,7 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
         // Without geo termini, keep catalog order (O first)
         awayScore: i === 0 ? 1 : 0,
       }));
-      commitNearbyDirSlots(k, pack.entry, slots);
+      await commitNearbyDirSlots(k, pack.entry, slots);
     }
   }
 
@@ -11317,6 +11406,7 @@ async function fetchNearbyMultiOpHits(geo, limit = 24) {
 async function fetchNearbyKmbEtaHits(geo, limit = 16) {
   const stops = await ensureKmbStops();
   if (!stops.length) return { hits: [], hint: "No stop data" };
+  await ensureKmbRouteBounds();
 
   // More stops so opposite-direction bays can be found
   const ranked = stops
@@ -11348,14 +11438,15 @@ async function fetchNearbyKmbEtaHits(geo, limit = 16) {
         if (!res.ok) return;
         const j = await res.json();
         const rows = Array.isArray(j.data) ? j.data : [];
-        // Best ETA per route|bound at this stop
+        // Best ETA per route|bound|dest at this stop (S64C AM vs PM share a bound)
         /** @type {Map<string, { row: any, mins: number | null }>} */
         const best = new Map();
         for (const row of rows) {
           const route = String(row.route || "").toUpperCase();
           if (!route) continue;
           const dir = String(row.dir || "O").toUpperCase();
-          const key = `${route}|${dir}`;
+          const destK = etaDestKey(row.dest_en || row.dest_tc);
+          const key = `${route}|${dir}|${destK}`;
           const mins = waitMinutesFromIso(row.eta);
           const prev = best.get(key);
           if (
@@ -11398,8 +11489,9 @@ async function fetchNearbyKmbEtaHits(geo, limit = 16) {
             pack = { entry, byBound: new Map() };
             byRoute.set(rk, pack);
           }
-          const prev = pack.byBound.get(bound);
-          // Prefer closer stop for this bound; tie-break sooner ETA
+          const slotKey = etaDestBoundKey(slot);
+          const prev = pack.byBound.get(slotKey);
+          // Prefer closer stop for this dest+bound; tie-break sooner ETA
           if (
             !prev ||
             d < prev.distM - 5 ||
@@ -11407,7 +11499,7 @@ async function fetchNearbyKmbEtaHits(geo, limit = 16) {
               mins != null &&
               (prev.minutes == null || mins < prev.minutes))
           ) {
-            pack.byBound.set(bound, slot);
+            pack.byBound.set(slotKey, slot);
           }
         }
       } catch {
@@ -11415,6 +11507,77 @@ async function fetchNearbyKmbEtaHits(geo, limit = 16) {
       }
     }),
   );
+
+  // Time-based AM/PM variants (S64C) even when the live feed has dropped
+  // the off-window trip: if a nearby stop is on the in-service routing, show it.
+  if (kmbRouteBoundsMap) {
+    const inject = [];
+    for (const [rid] of kmbRouteBoundsMap) {
+      if (!/^S\d/i.test(rid) && !/circular|循環|↺/i.test(rid)) continue;
+      const entry = {
+        id: rid,
+        label: `KMB ${rid}`,
+        kind: "bus",
+        co: "kmb",
+      };
+      if (!etaKindMatchesFilter(entry)) continue;
+      const rk = etaRouteKey(entry);
+      if (byRoute.has(rk)) continue;
+      const dirs = etaRouteDirectionsFromOd(entry);
+      if (!etaHasDepartureSwitch(dirs)) continue;
+      inject.push({ rk, entry, dirs });
+    }
+    await Promise.all(
+      inject.slice(0, 24).map(async ({ rk, entry, dirs }) => {
+        await Promise.all(dirs.map((d) => hydrateDirSchedule(entry, d)));
+        const pref = dirs[etaPreferredDepartureIndex(dirs)] || dirs[0];
+        let hit = null;
+        for (const d of [pref, ...dirs]) {
+          const dirOrder =
+            String(d.bound || "O").toUpperCase() === "I"
+              ? ["inbound", "outbound"]
+              : ["outbound", "inbound"];
+          let seq = [];
+          for (const direction of dirOrder) {
+            seq = await fetchKmbRouteStopList(
+              entry.id,
+              direction,
+              d.serviceType,
+            );
+            if (seq.length >= 2) break;
+          }
+          if (seq.length < 2) continue;
+          const ids = new Set(seq.map((s) => String(s.stopId)));
+          hit = ranked.find((x) => ids.has(String(x.s.stop)));
+          if (hit) break;
+        }
+        if (!hit) return;
+        const slot = {
+          bound: pref.bound || "O",
+          dest: pref.dest || "",
+          destZh: pref.destZh || "",
+          minutes: null,
+          stopLabel: etaStopNameLabel(hit.s),
+          stopNameEn: hit.s.name_en || "",
+          stopNameTc: hit.s.name_tc || "",
+          stopId: String(hit.s.stop || ""),
+          distM: hit.d,
+          stopLat: hit.s.lat,
+          stopLon: hit.s.lon,
+          circular: pref.circular,
+          variant: pref.variant,
+          serviceType: pref.serviceType,
+        };
+        byRoute.set(rk, {
+          entry: {
+            ...entry,
+            nearbyHint: `${slot.stopLabel} · ${Math.round(hit.d)} m`,
+          },
+          byBound: new Map([[etaDestBoundKey(slot), slot]]),
+        });
+      }),
+    );
+  }
 
   // Score directions: prefer terminus farther from user (going away)
   /** @type {EtaRouteEntry[]} */
@@ -11436,7 +11599,7 @@ async function fetchNearbyKmbEtaHits(geo, limit = 16) {
       );
 
       // Store O/I order + set card dir to going-away bound (not reordered list)
-      commitNearbyDirSlots(rk, pack.entry, slots);
+      await commitNearbyDirSlots(rk, pack.entry, slots);
       hits.push(pack.entry);
     }),
   );
@@ -11799,7 +11962,7 @@ async function fetchNearbyMtrBusEtaHits(geo, limit = 12) {
         }
       }
       const slots = [...pack.byBound.values()];
-      if (slots.length) commitNearbyDirSlots(rk, pack.entry, slots);
+      if (slots.length) await commitNearbyDirSlots(rk, pack.entry, slots);
     }),
   );
 
