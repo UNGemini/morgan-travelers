@@ -1375,18 +1375,19 @@ export async function buildTransitPolyline(opt, opts = {}) {
         }
         if (poly?.length >= 2) {
           // Keep the GTFS corridor (S64C AM loop / PM inbound). OSRM on Chek
-          // Lap Kok hops the Link Road and breaks PM. Only sparse stop-seq
-          // shapes (e.g. S1) need road densify.
+          // Lap Kok hops the Link Road. Sparse stop-seq shapes (S1) still
+          // densify via OSRM; everyone else interpolates along the operator
+          // line so zooming does not collapse to stop chords.
           if (gtfs.sparse) {
             try {
               const dens = await densifyStopsViaOsrm(poly, opts);
-              if (dens?.length >= 2) return dens;
+              if (dens?.length >= 2) return densifyAlongPolyline(dens);
             } catch (e) {
               if (e?.name === "AbortError") throw e;
               console.warn("[routeSnapper] sparse GTFS OSRM densify", e);
             }
           }
-          return poly;
+          return densifyAlongPolyline(poly);
         }
       }
     } catch (e) {
@@ -1409,6 +1410,31 @@ export async function buildTransitPolyline(opt, opts = {}) {
   }
 
   return stops.map((s) => ({ lon: s.lon, lat: s.lat }));
+}
+
+/**
+ * Extra vertices along an existing polyline (no reroute). GTFS hops are
+ * ~80–120 m; without this, zoom-in looks like stop chords. S64C PM uses
+ * this on the inbound shape — not OSRM.
+ */
+function densifyAlongPolyline(poly, maxStepM = 22) {
+  if (!poly?.length || poly.length < 2) return poly || [];
+  /** @type {LngLat[]} */
+  const out = [{ lon: poly[0].lon, lat: poly[0].lat }];
+  for (let i = 1; i < poly.length; i++) {
+    const a = out[out.length - 1];
+    const b = poly[i];
+    const d = haversineM(a.lat, a.lon, b.lat, b.lon);
+    const n = Number.isFinite(d) && d > maxStepM ? Math.ceil(d / maxStepM) : 1;
+    for (let k = 1; k <= n; k++) {
+      const f = k / n;
+      out.push({
+        lon: a.lon + (b.lon - a.lon) * f,
+        lat: a.lat + (b.lat - a.lat) * f,
+      });
+    }
+  }
+  return out;
 }
 
 function isClosedLoop(pts, maxM = 150) {
