@@ -13474,6 +13474,9 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
   } catch {
     /* ignore */
   }
+  // Progress redraw just pulled the route/stops to the top — put live buses
+  // back above them (stop-tap used to bury the markers under the line).
+  promoteBusPosLayers();
 
   if (opts.fit && coords.length >= 2) {
     fitMapToRouteCoords(coords, { maxZoom: 15, duration: 900 });
@@ -16677,7 +16680,7 @@ const BUS_POS_LAYER_IDS = [
 ];
 
 function promoteBusPosLayers() {
-  if (!map?.getStyle || !busPosLayersOn) return;
+  if (!map?.getStyle) return;
   for (const id of BUS_POS_LAYER_IDS) {
     try {
       if (map.getLayer(id)) map.moveLayer(id);
