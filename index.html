@@ -245,7 +245,8 @@
           </header>
           <div class="sheet-body contribute-body">
             <p class="hint">
-              <strong>1.</strong> Choose operator + route → <strong>Load path</strong>
+              <strong>1.</strong> Search a route → pick a real direction
+              (not a fixed Inbound/Outbound/Circular) → <strong>Load path</strong>
               (merged official stops + OSRM densify).<br />
               <strong>2.</strong> Edit path turns (hollow green) and/or
               <em>visual stop pins</em> (orange). Official stop coords stay fixed
@@ -331,30 +332,34 @@
                 <option value="OTHER">Other / joint</option>
               </select>
 
-              <div class="contrib-row-2">
-                <div>
-                  <label class="loc-label" for="contrib-route">Route / line</label>
-                  <input
-                    id="contrib-route"
-                    class="loc-input"
-                    type="text"
-                    placeholder="38 · S1 · TWL · AEL · 505 · 1"
-                    autocomplete="off"
-                    spellcheck="false"
-                  />
-                </div>
-                <div>
-                  <label class="loc-label" for="contrib-direction">Direction</label>
-                  <select id="contrib-direction" class="loc-input contrib-select">
-                    <option value="O">Outbound / O / UP / seq 1</option>
-                    <option value="I">Inbound / I / DOWN / seq 2</option>
-                    <option value="circular">Circular</option>
-                  </select>
-                </div>
+              <div class="contrib-search-wrap">
+                <label class="loc-label" for="contrib-route-search">Search route</label>
+                <input
+                  id="contrib-route-search"
+                  class="loc-input"
+                  type="search"
+                  placeholder="S64C · 38 · TWL · 505"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <ul
+                  id="contrib-route-suggest"
+                  class="loc-suggest contrib-route-suggest"
+                  hidden
+                  role="listbox"
+                ></ul>
+                <input id="contrib-route" type="hidden" value="" />
+              </div>
+              <div>
+                <label class="loc-label" for="contrib-direction">Direction</label>
+                <select id="contrib-direction" class="loc-input contrib-select" disabled>
+                  <option value="">Search a route first</option>
+                </select>
+                <p id="contrib-dir-count" class="hint contrib-keys-hint" style="margin-top: 4px"></p>
               </div>
               <p class="hint contrib-keys-hint" style="margin-top: 0">
-                Bus: route no. · MTR: line code (TWL, ISL, TCL…) · AEL · LRT: route no.
-                (505) · GMB: route code (auto region search)
+                Search shows how many directions the route actually has (loop, inbound,
+                special departures) instead of a fixed Circular / In / Out list.
               </p>
 
               <button type="button" id="contrib-load-path" class="btn" data-acrylic>

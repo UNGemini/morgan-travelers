@@ -56,6 +56,7 @@ import {
   saveDepartTime,
   formatDepartTimeLabel,
   formatServiceClock,
+  getHongKongParts,
   isDepartTimeHm,
   parseDepartTimeHm,
   hongKongHmString,
@@ -1681,11 +1682,13 @@ function setCardDir(r, i) {
  */
 function resolveCardDirIndex(r, dirs) {
   if (!dirs?.length) return 0;
-  const card = getCardDir(r);
-  if (card >= 0 && card < dirs.length) return card;
+  const key = etaRouteKey(r);
+  if (etaCardDirIndex.has(key)) {
+    const card = getCardDir(r);
+    if (card >= 0 && card < dirs.length) return card;
+  }
 
   // Fallbacks only when card index is out of range (e.g. one-way filtered)
-  const key = etaRouteKey(r);
   const live = etaLiveByKey.get(key);
   const wantBound = String(live?.bound || "").toUpperCase();
   if (wantBound && wantBound !== "LINE" && wantBound !== "LRT") {
@@ -1696,7 +1699,7 @@ function resolveCardDirIndex(r, dirs) {
   }
   const nearby = etaNearbyDirsByKey.get(key);
   if (nearby?.length) {
-    const pref = nearby[Math.min(card, nearby.length - 1)] || nearby[0];
+    const pref = nearby[0];
     const b = String(pref?.bound || "").toUpperCase();
     if (b) {
       const byNear = dirs.findIndex(
@@ -1705,7 +1708,8 @@ function resolveCardDirIndex(r, dirs) {
       if (byNear >= 0) return byNear;
     }
   }
-  return Math.min(Math.max(0, card), dirs.length - 1);
+  if (etaHasDepartureSwitch(dirs)) return etaPreferredDepartureIndex(dirs);
+  return 0;
 }
 
 /**
@@ -1917,6 +1921,63 @@ const etaCardLiveFetchGen = new Map();
  *   force — always network-fetch (Opposite); ignore cached minutes for other bound
  * @returns {Promise<boolean>} true if live minutes were written
  */
+/** Cached GTFS frequency window per route|bound|kind. */
+const scheduleWindowCache = new Map();
+
+/**
+ * Attach first/last/headway/maxPerHour from GTFS frequencies so timetable
+ * slots stop at last bus and honour the hourly cap (not a midnight grid).
+ * @param {EtaRouteEntry} r
+ * @param {object} dir
+ */
+async function hydrateDirSchedule(r, dir) {
+  if (!r || !dir) return dir;
+  const co = String(r.co || "").toLowerCase();
+  const loadCo = co === "lwb" || (r.kind === "bus" && !co) ? "kmb" : co;
+  if (!["kmb", "ctb", "nlb"].includes(loadCo)) return dir;
+  if (r.kind === "mtr" || r.kind === "lrt" || r.kind === "mtr_bus") return dir;
+  const kind =
+    dir.variant || (etaIsCircularDir(dir) ? "loop" : "oneway");
+  const cacheKey = `${loadCo}|${String(r.id || "").toUpperCase()}|${dir.bound || ""}|${kind}`;
+  if (scheduleWindowCache.has(cacheKey)) {
+    const w = scheduleWindowCache.get(cacheKey);
+    if (w) Object.assign(dir, w);
+    return dir;
+  }
+  try {
+    const { loadOperatorSchedules, scheduleServiceWindow } = await import(
+      "./busSchedules.js"
+    );
+    const sched = await loadOperatorSchedules(loadCo);
+    const rid = `${loadCo.toUpperCase()}-${r.id}`;
+    const w = scheduleServiceWindow(sched, rid, dir.bound, Date.now(), { kind });
+    let patch = w
+      ? {
+          first: w.firstMins,
+          last: w.lastMins,
+          headwayMins: w.headwayMins,
+          maxPerHour: w.maxPerHour,
+          overnight: w.overnight,
+        }
+      : {};
+    if (!w && (kind === "loop" || kind === "oneway")) {
+      const other = kind === "loop" ? "oneway" : "loop";
+      const w2 = scheduleServiceWindow(sched, rid, dir.bound, Date.now(), {
+        kind: other,
+      });
+      // Other departure is in the GTFS calendar today; this one is not
+      // (S64C Sunday afternoon).
+      if (w2) patch = { first: 0, last: -1 };
+    }
+    scheduleWindowCache.set(cacheKey, patch);
+    Object.assign(dir, patch);
+  } catch (e) {
+    console.warn("[eta] schedule window", e);
+    scheduleWindowCache.set(cacheKey, {});
+  }
+  return dir;
+}
+
 async function refreshCardLiveEta(r, opts = {}) {
   if (!r) return false;
   const key = etaRouteKey(r);
@@ -1927,6 +1988,7 @@ async function refreshCardLiveEta(r, opts = {}) {
   const dirs = etaRouteDirections(r, { full: true });
   const di = resolveCardDirIndex(r, dirs);
   const dir = dirs[di] || dirs[0] || { dest: r.label, bound: "O" };
+  await hydrateDirSchedule(r, dir);
   const bound = String(dir.bound || "O").toUpperCase();
 
   // 1) Nearby multi-bound cache (KMB/CTB/MTR Bus nearby) — only if bound matches
@@ -2305,9 +2367,9 @@ async function loadKmbRouteStopsRobust(routeId, bound = "O", serviceType = null)
  * @param {"inbound"|"outbound"} direction
  * @returns {Promise<Array<{ stop: string, seq: number, lat: number, lon: number }>>}
  */
-async function ensureKmbRouteStopSeq(routeId, direction) {
+async function ensureKmbRouteStopSeq(routeId, direction, serviceType = null) {
   const dir = direction === "inbound" ? "inbound" : "outbound";
-  for (const st of kmbServiceTypesToTry(null)) {
+  for (const st of kmbServiceTypesToTry(serviceType)) {
     const full = await fetchKmbRouteStopList(routeId, dir, st);
     const withCoords = full.filter(
       (s) => Number.isFinite(s.lat) && Number.isFinite(s.lon),
@@ -9825,16 +9887,21 @@ async function ensureKmbRouteBounds() {
       }
       for (const [k, arr] of map) {
         arr.sort((a, b) => Number(a.service_type) - Number(b.service_type));
-        const byBound = new Map();
+        // Keep distinct orig→dest (S64C AM loop vs PM HACTL), not one row per bound.
+        const seen = new Set();
+        const uniq = [];
         for (const x of arr) {
-          if (!byBound.has(x.bound)) byBound.set(x.bound, x);
+          const orig = etaDestKey(x.orig_en || x.orig_tc);
+          const dest = etaDestKey(x.dest_en || x.dest_tc);
+          const key = `${x.bound}|${orig}|${dest}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          uniq.push(x);
         }
         const ordered = [];
-        if (byBound.has("O")) ordered.push(byBound.get("O"));
-        if (byBound.has("I")) ordered.push(byBound.get("I"));
-        for (const [b, x] of byBound) {
-          if (b !== "O" && b !== "I") ordered.push(x);
-        }
+        for (const x of uniq) if (x.bound === "O") ordered.push(x);
+        for (const x of uniq) if (x.bound === "I") ordered.push(x);
+        for (const x of uniq) if (x.bound !== "O" && x.bound !== "I") ordered.push(x);
         map.set(k, ordered);
       }
       console.info("[eta] KMB route bounds", map.size);
@@ -9956,14 +10023,24 @@ function etaRouteDirectionsFromOd(r) {
   if (isKmbFamily && co !== "gmb" && co !== "ctb" && co !== "nlb") {
     const bounds = kmbRouteBoundsMap?.get(rid);
     if (bounds?.length) {
-      return bounds.map((b) => ({
-        dest: b.dest_en || b.dest_tc || "—",
-        destZh: b.dest_tc || "",
-        bound: b.bound,
-        orig: b.orig_en || b.orig_tc || "",
-        // Peak / circular variants (S64X st=3) need the correct service type
-        serviceType: b.service_type || "1",
-      }));
+      return bounds.map((b) => {
+        const dest = b.dest_en || b.dest_tc || "—";
+        const orig = b.orig_en || b.orig_tc || "";
+        const circular =
+          /circular|循環|循环|↺/i.test(`${dest} ${b.dest_tc || ""}`) ||
+          (orig && dest && etaStationsMatch(orig, dest));
+        return {
+          dest,
+          destZh: b.dest_tc || "",
+          orig,
+          origZh: b.orig_tc || "",
+          bound: b.bound,
+          // Peak / circular variants (S64X st=3) need the correct service type
+          serviceType: b.service_type || "1",
+          circular,
+          variant: circular ? "loop" : "oneway",
+        };
+      });
     }
   }
 
@@ -10111,6 +10188,79 @@ function etaHasRealOpposite(dirs) {
   return true;
 }
 
+/** Circular / loop departure (S64C AM Yat Tung ↺ Cargo). */
+function etaIsCircularDir(d) {
+  if (!d) return false;
+  if (d.circular || d.variant === "loop") return true;
+  const blob = `${d.dest || ""} ${d.destZh || ""} ${d.orig || ""}`;
+  if (/↺|circular|循環|循环/i.test(blob)) return true;
+  return !!(d.orig && d.dest && etaStationsMatch(d.orig, d.dest));
+}
+
+/**
+ * AM/PM (or special) departures that are not a simple reverse of the same trip.
+ * S64C: loop vs HACTL inbound share a corridor but are not Opposite.
+ */
+function etaHasDepartureSwitch(dirs) {
+  if (!dirs || dirs.length < 2) return false;
+  if (dirs.some(etaIsCircularDir)) return true;
+  const bounds = new Set(
+    dirs.map((d) => String(d.bound || "").toUpperCase()).filter(Boolean),
+  );
+  if (bounds.size === 1) return true;
+  if (dirs.length === 2) {
+    const a = dirs[0];
+    const b = dirs[1];
+    const swapped =
+      etaStationsMatch(a?.orig, b?.dest) && etaStationsMatch(a?.dest, b?.orig);
+    if (!swapped) return true;
+  }
+  return false;
+}
+
+function etaNextDepartureIndex(di, dirs) {
+  if (!dirs?.length) return 0;
+  return (Math.min(Math.max(0, di), dirs.length - 1) + 1) % dirs.length;
+}
+
+function etaDeparturePeriod(dir) {
+  const first = Number(dir?.first);
+  if (Number.isFinite(first)) return first < 12 * 60 ? "AM" : "PM";
+  if (etaIsCircularDir(dir)) return "AM";
+  return "PM";
+}
+
+function etaDepartureLabel(dir) {
+  const orig = localizeDirLabel(dir, "orig") || dir?.orig || "";
+  const dest = localizeDirLabel(dir, "dest") || dir?.destZh || dir?.dest || "";
+  const destClean = String(dest)
+    .replace(/\s*\((circular|循環|循环)\)\s*/gi, "")
+    .trim();
+  if (etaIsCircularDir(dir) && orig && destClean) {
+    return `${orig} ↺ ${destClean}`;
+  }
+  if (orig && destClean) return `${orig} → ${destClean}`;
+  return destClean || orig || "—";
+}
+
+function etaPreferredDepartureIndex(dirs, now = new Date()) {
+  if (!dirs?.length) return 0;
+  if (!etaHasDepartureSwitch(dirs)) return 0;
+  const hk = getHongKongParts(now);
+  const mins = (hk.hour || 0) * 60 + (hk.minute || 0);
+  for (let i = 0; i < dirs.length; i++) {
+    const first = Number(dirs[i].first);
+    const last = Number(dirs[i].last);
+    if (Number.isFinite(first) && Number.isFinite(last) && mins >= first && mins <= last) {
+      return i;
+    }
+  }
+  const loop = dirs.findIndex(etaIsCircularDir);
+  if (mins < 12 * 60 && loop >= 0) return loop;
+  const pm = dirs.findIndex((d, i) => i !== loop);
+  return mins >= 12 * 60 && pm >= 0 ? pm : Math.max(0, loop);
+}
+
 /**
  * Opposite = reverse bound only (O↔I), never cycle branches.
  * E.g. “To Tsuen Wan” → “To Central”. Branches use Switch branch.
@@ -10246,6 +10396,7 @@ function etaPanelDestLabel(dirs, di) {
  * @param {{ bound?: string, branch?: string, dest?: string, destZh?: string } | null | undefined} dir
  */
 function etaDirectionDisplayLabel(dirs, dir) {
+  if (etaHasDepartureSwitch(dirs) && dir) return etaDepartureLabel(dir);
   const base = localizeDirLabel(dir, "dest");
   if (!dirs?.length || !dir) return base;
   const di = dirs.findIndex(
@@ -10375,8 +10526,15 @@ async function filterDirsWithRealStops(route, dirs) {
         co === "lwb" ||
         (route.kind === "bus" && !co)
       ) {
-        const seq = await ensureKmbRouteStopSeq(rid, direction);
-        if (seq.length >= 2) out.push(d);
+        const seq = await ensureKmbRouteStopSeq(rid, direction, d.serviceType);
+        if (seq.length >= 2) {
+          out.push(d);
+          continue;
+        }
+        // AM/PM variants may publish the stop list on the other KMB bound.
+        const other = direction === "inbound" ? "outbound" : "inbound";
+        const seq2 = await ensureKmbRouteStopSeq(rid, other, d.serviceType);
+        if (seq2.length >= 2) out.push(d);
         continue;
       }
       if (co === "nlb") {
@@ -10411,8 +10569,11 @@ function etaDirSlotKey(d) {
   const branch = String(d?.branch || "").toUpperCase();
   if (branch) return `${b}|${branch}`;
   const dest = etaDestKey(d?.destZh || d?.dest);
-  if (dest && dest !== "—") return `d:${dest}|${b || "x"}`;
-  return b || "x";
+  const orig = etaDestKey(d?.orig || d?.origZh);
+  const st = String(d?.serviceType || d?.service_type || "");
+  if (orig && dest && orig !== dest) return `od:${orig}>${dest}|${b || "x"}|${st}`;
+  if (dest && dest !== "—") return `d:${dest}|${b || "x"}|${st}`;
+  return `${b || "x"}|${st}`;
 }
 
 function etaUniqueDirections(dirs) {
@@ -10460,8 +10621,11 @@ function etaRouteDirections(r, opts = {}) {
 
   const od = etaUniqueDirections(etaRouteDirectionsFromOd(r));
   // Never invent a reverse O↔I from a single OD row — one-way / circular
-  // routes were incorrectly showing Opposite.
-  if (od.length >= 2 && etaHasRealOpposite(od)) return od;
+  // routes were incorrectly showing Opposite. Keep AM/PM departure variants
+  // (S64C loop vs HACTL inbound) even when they share a bound.
+  if (od.length >= 2 && (etaHasRealOpposite(od) || etaHasDepartureSwitch(od))) {
+    return od;
+  }
   if (od.length >= 1) return od.slice(0, 1);
 
   // One-way / no OD: single nearby slot is fine
@@ -12363,6 +12527,7 @@ function etaRouteCardInnerHtml(r, dir, eta = {}, opts = {}) {
         headwayMins: dir.headwayMins || undefined,
         first: dir.first != null ? dir.first : undefined,
         last: dir.last != null ? dir.last : undefined,
+        maxPerHour: dir.maxPerHour != null ? dir.maxPerHour : undefined,
         overnight: dir.overnight || undefined,
       });
       if (slots[0]) {
@@ -12487,15 +12652,27 @@ function etaDirectionDotsHtml(activeDir = 0) {
  */
 function etaCardDotsHtml(r, dirs, activeDir, opts = {}) {
   const di = Math.min(Math.max(0, activeDir), Math.max(0, dirs.length - 1));
+  const depSwitch = etaHasDepartureSwitch(dirs);
   const opp = etaOppositeDirIndex(di, dirs);
   const oppositeHtml =
-    opts.hideOpposite || !etaHasRealOpposite(dirs) || opp === di
+    opts.hideOpposite || depSwitch
       ? ""
-      : `<button type="button" class="wheels-dir-switch eta-card-dir-switch" data-route-key="${escapeHtml(etaRouteKey(r))}" data-action="opposite" aria-label="${escapeHtml(t("Switch direction"))}">
+      : !etaHasRealOpposite(dirs) || opp === di
+        ? ""
+        : `<button type="button" class="wheels-dir-switch eta-card-dir-switch" data-route-key="${escapeHtml(etaRouteKey(r))}" data-action="opposite" aria-label="${escapeHtml(t("Switch direction"))}">
           <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
           <span>${escapeHtml(t("Opposite"))}</span>
           ${etaDirectionDotsHtml(di)}
         </button>`;
+  const nextDep = depSwitch ? dirs[etaNextDepartureIndex(di, dirs)] : null;
+  const departureHtml =
+    !opts.hideOpposite && depSwitch && nextDep
+      ? `<button type="button" class="wheels-dir-switch eta-card-dir-switch" data-route-key="${escapeHtml(etaRouteKey(r))}" data-action="departure" aria-label="${escapeHtml(t("Switch Departure"))}" title="${escapeHtml(etaDepartureLabel(nextDep))}">
+          <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
+          <span>${escapeHtml(t("Switch Departure"))}</span>
+          ${etaDirectionDotsHtml(di)}
+        </button>`
+      : "";
 
   const branchSibs = etaBranchSiblingIndices(dirs, di);
   const canBranch = branchSibs.length >= 2;
@@ -12513,7 +12690,7 @@ function etaCardDotsHtml(r, dirs, activeDir, opts = {}) {
         </button>`
     : "";
 
-  const controls = [oppositeHtml, branchHtml].filter(Boolean);
+  const controls = [departureHtml, oppositeHtml, branchHtml].filter(Boolean);
   if (!controls.length) return "";
   return `<div class="eta-card-dir-switches">${controls.join("")}</div>`;
 }
@@ -12834,8 +13011,11 @@ function bindEtaRouteCardEvents(li) {
         const branchSibs = etaBranchSiblingIndices(dirs, cur);
         if (branchSibs.length < 2) return;
         next = etaNextBranchIndex(cur, dirs);
+      } else if (action === "departure") {
+        if (!etaHasDepartureSwitch(dirs)) return;
+        next = etaNextDepartureIndex(cur, dirs);
       } else {
-        if (!etaHasRealOpposite(dirs)) return;
+        if (!etaHasRealOpposite(dirs) || etaHasDepartureSwitch(dirs)) return;
         // Opposite = reverse only (To Tsuen Wan → To Central), not branch cycle
         next = etaOppositeDirIndex(cur, dirs);
       }
@@ -13831,6 +14011,7 @@ function etaRouteAsOption(route, stops, dir = {}, boardStop = null) {
     headwayMins: dir.headwayMins || undefined,
     first: dir.first != null ? dir.first : undefined,
     last: dir.last != null ? dir.last : undefined,
+    maxPerHour: dir.maxPerHour != null ? dir.maxPerHour : undefined,
     overnight: dir.overnight || undefined,
     from: from || {
       stop_name: dir.orig || "",
@@ -14885,10 +15066,11 @@ async function renderEtaRouteDetailBody(route, ctx) {
     : [];
 
   const oppDi = etaOppositeDirIndex(di, dirs);
+  const canDeparture = etaHasDepartureSwitch(dirs) && dirs.length >= 2;
   // Route detail keeps Opposite everywhere: at a first station it flips to
   // the reverse bound and boards at that direction's first station (see the
   // #btn-eta-detail-dir handler). List cards do the terminus hiding.
-  const canOpposite = etaHasRealOpposite(dirs) && oppDi !== di;
+  const canOpposite = !canDeparture && etaHasRealOpposite(dirs) && oppDi !== di;
   const branchSibs = etaBranchSiblingIndices(dirs, di);
   const canBranch = branchSibs.length >= 2;
   const nextBr = canBranch ? dirs[etaNextBranchIndex(di, dirs)] : null;
@@ -14897,7 +15079,15 @@ async function renderEtaRouteDetailBody(route, ctx) {
   // (the current branch) — see rt-route-to below.
   const panelDest = etaPanelDestLabel(dirs, di) || dest;
 
+  const nextDepDir = canDeparture ? dirs[etaNextDepartureIndex(di, dirs)] : null;
   const dirSwitchButtons = [
+    canDeparture
+      ? `<button type="button" class="wheels-dir-switch" id="btn-eta-detail-dir" data-action="departure" aria-label="${escapeHtml(t("Switch Departure"))}" title="${escapeHtml(etaDepartureLabel(nextDepDir || {}))}">
+          <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
+          <span>${escapeHtml(t("Switch Departure"))}</span>
+          ${etaDirectionDotsHtml(di)}
+        </button>`
+      : "",
     canOpposite
       ? `<button type="button" class="wheels-dir-switch" id="btn-eta-detail-dir" aria-label="${escapeHtml(t("Switch direction"))}">
           <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
@@ -14944,7 +15134,7 @@ async function renderEtaRouteDetailBody(route, ctx) {
       icon: modeIcon,
       bodyHtml: `<div class="rt-transit-head">
         <span class="rt-route-id">${escapeHtml(route.id)}</span>
-        <span class="rt-route-to">${escapeHtml(localizeDirLabel(dir, "dest") || dest)}</span>
+        <span class="rt-route-to">${escapeHtml(etaHasDepartureSwitch(dirs) ? etaDepartureLabel(dir) : (localizeDirLabel(dir, "dest") || dest))}</span>
       </div>`,
     });
     // Bus section fares: board here → terminus (TD section; index-map if zh names)
@@ -15062,8 +15252,13 @@ async function renderEtaRouteDetailBody(route, ctx) {
       e.preventDefault();
       e.stopPropagation();
       if (!dirs || dirs.length < 2) return;
-      // Opposite = reverse only (To Tsuen Wan → To Central)
-      const next = etaOppositeDirIndex(di, dirs);
+      const asDeparture =
+        e.currentTarget?.getAttribute("data-action") === "departure" ||
+        etaHasDepartureSwitch(dirs);
+      // Opposite = reverse only; Switch Departure cycles AM/PM variants.
+      const next = asDeparture
+        ? etaNextDepartureIndex(di, dirs)
+        : etaOppositeDirIndex(di, dirs);
       if (next === di) return;
       const to = dirs[next];
       if (route.kind === "mtr" && to?.branch) {
@@ -15482,6 +15677,7 @@ async function showEtaRouteDetailsPanel(opts = {}) {
   // (list cards filter same-station dests separately)
   let dirs = etaRouteDirections(route, { full: true });
   dirs = await filterDirsWithRealStops(route, dirs);
+  await Promise.all(dirs.map((d) => hydrateDirSchedule(route, d)));
   if (gen !== etaShapeGen) return;
   // Respect Opposite / list card dir — do not overwrite from live bound
   let di = resolveCardDirIndex(route, dirs);
@@ -16313,6 +16509,42 @@ try {
 const pathContributor = createPathContributor({
   map,
   showToast,
+  searchRoutes: async (q) => {
+    try {
+      await ensureRbsRouteData();
+    } catch {
+      /* catalog still has franchised buses */
+    }
+    try {
+      await ensureKmbRouteBounds();
+    } catch {
+      /* directions filled later */
+    }
+    return searchEtaRoutes(q, 12);
+  },
+  routeDirections: async (r) => {
+    if (!r) return [];
+    const co = String(r.co || "").toLowerCase();
+    try {
+      if (co === "kmb" || co === "lwb" || (r.kind === "bus" && !co)) {
+        await ensureKmbRouteBounds();
+      }
+      if (co === "ctb") await ensureCtbRouteBound(r.id);
+      if (co === "nlb") await ensureNlbRouteBounds();
+      if (co === "gmb") await ensureGmbRouteDirections(r.id);
+      if (r.kind === "lrt") await ensureLrtRouteData();
+      if (r.kind === "mtr_bus") await ensureMtrBusData();
+    } catch {
+      /* still try OD table */
+    }
+    let dirs = etaRouteDirections(r, { full: true });
+    try {
+      dirs = await filterDirsWithRealStops(r, dirs);
+    } catch {
+      /* keep OD */
+    }
+    return dirs;
+  },
   clearRoutePath: () => {
     try {
       clearRouteGeometry();

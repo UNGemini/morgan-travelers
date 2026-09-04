@@ -3641,6 +3641,19 @@ body.contrib-edit-stops .contrib-map-hint .material-symbols-outlined {
   gap: 8px;
 }
 
+.contrib-search-wrap {
+  position: relative;
+}
+
+.contrib-route-suggest {
+  position: absolute;
+  z-index: 8;
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow: auto;
+}
+
 .contrib-status {
   margin: 0;
   font-size: 0.72rem;

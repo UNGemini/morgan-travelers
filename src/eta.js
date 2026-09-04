@@ -550,17 +550,51 @@ export function resolveSlotClock(slot, now = new Date()) {
   return clockFromWaitMins(slot.waitMins, now);
 }
 
+/** HH:MM → minutes after midnight (null if unparseable). */
+function clockToMinsOfDay(clock) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(clock || "").trim());
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/**
+ * Combine published frequency with an hourly cap (TD “every 8–12 min,
+ * max 8/hr”). Never denser than 60/maxPerHour.
+ * @param {number} headwayMins
+ * @param {number} [maxPerHour]
+ */
+export function effectiveHeadwayMins(headwayMins, maxPerHour) {
+  let hw = Number(headwayMins);
+  if (!Number.isFinite(hw) || hw <= 0) hw = 12;
+  const cap = Number(maxPerHour);
+  if (Number.isFinite(cap) && cap >= 1) {
+    hw = Math.max(hw, 60 / cap);
+  }
+  return Math.max(2, Math.min(60, hw));
+}
+
+/** True when clock minutes are still at or before last departure (last may >1440). */
+function clockAtOrBeforeLast(clockMins, lastMins) {
+  if (!Number.isFinite(clockMins) || !Number.isFinite(lastMins)) return true;
+  if (lastMins > 24 * 60) {
+    return clockMins <= lastMins - 24 * 60 || clockMins >= 20 * 60;
+  }
+  return clockMins <= lastMins + 0.5;
+}
+
 /**
  * Expand one scheduled board into up to `count` departures using headway.
+ * Stops at `last` (minutes after midnight) and uses maxPerHour as a density cap.
  * @param {EtaSlot} first
- * @param {{ count?: number, headwayMins?: number, dest?: string }} [opts]
+ * @param {{ count?: number, headwayMins?: number, dest?: string, last?: number, maxPerHour?: number }} [opts]
  * @returns {EtaSlot[]}
  */
 export function expandTimetableSlots(first, opts = {}) {
   if (!first) return [];
   const count = Math.max(1, Math.min(6, opts.count ?? 3));
-  const headway = Math.max(2, Math.min(60, opts.headwayMins ?? 12));
+  const headway = effectiveHeadwayMins(opts.headwayMins ?? 12, opts.maxPerHour);
   const dest = opts.dest ?? first.dest ?? "";
+  const lastMins = Number(opts.last);
   /** @type {EtaSlot[]} */
   const out = [];
   const baseWait =
@@ -578,6 +612,10 @@ export function expandTimetableSlots(first, opts = {}) {
       (baseClock && addMinutesToClock(baseClock, i * headway)) ||
       clockFromWaitMins(waitMins) ||
       null;
+    if (Number.isFinite(lastMins)) {
+      const cm = clockToMinsOfDay(clock);
+      if (cm != null && !clockAtOrBeforeLast(cm, lastMins)) break;
+    }
     out.push({
       waitMins,
       etaIso: first.etaIso && i === 0 ? first.etaIso : null,
@@ -701,11 +739,13 @@ export function scheduledSlotsFromPlanLeg(
 ) {
   const first = scheduledSlotFromPlanLeg(opt, plan, legIdx, now);
   if (!first) return [];
-  const headway = defaultHeadwayMins(opt);
+  const headway = effectiveHeadwayMins(defaultHeadwayMins(opt), opt?.maxPerHour);
   return expandTimetableSlots(first, {
     count,
     headwayMins: headway,
     dest: first.dest,
+    last: opt?.last,
+    maxPerHour: opt?.maxPerHour,
   });
 }
 
@@ -743,17 +783,27 @@ export function headwayTimetableSlots(opts = {}, now = new Date()) {
   ) {
     return [];
   }
-  const headway = Math.max(
-    2,
-    Math.min(60, opts.headwayMins ?? defaultHeadwayMins({ mode: opts.mode }, opts.operator)),
+  const headway = effectiveHeadwayMins(
+    opts.headwayMins ?? defaultHeadwayMins({ mode: opts.mode }, opts.operator),
+    opts.maxPerHour,
   );
   const count = Math.max(1, Math.min(6, opts.count ?? 3));
   const hk = getHongKongParts(now);
   const nowMins = hk.hour * 60 + hk.minute;
-  // Next departure on an even headway grid from midnight
-  const phase = nowMins % headway;
-  const firstWait = phase === 0 ? 0 : headway - phase;
-  const firstClockMins = (nowMins + firstWait) % (24 * 60);
+  const first = Number(opts.first);
+  const last = Number(opts.last);
+  // Align to first departure + k·headway (not a midnight grid). Frequency
+  // + max buses/hour + last departure are the three timetable constraints.
+  const origin = Number.isFinite(first) ? first : 0;
+  let next = origin;
+  if (next < nowMins - 0.25) {
+    const k = Math.ceil((nowMins - origin) / headway);
+    next = origin + Math.max(0, k) * headway;
+  }
+  if (next < nowMins - 0.25) next += headway;
+  if (Number.isFinite(last) && next > last + 0.5) return [];
+  const firstWait = Math.max(0, Math.round(next - nowMins));
+  const firstClockMins = ((nowMins + firstWait) % (24 * 60) + 24 * 60) % (24 * 60);
   const clock = `${String(Math.floor(firstClockMins / 60)).padStart(2, "0")}:${String(firstClockMins % 60).padStart(2, "0")}`;
   return expandTimetableSlots(
     {
@@ -762,7 +812,13 @@ export function headwayTimetableSlots(opts = {}, now = new Date()) {
       dest: opts.dest || "",
       scheduled: true,
     },
-    { count, headwayMins: headway, dest: opts.dest || "" },
+    {
+      count,
+      headwayMins: headway,
+      dest: opts.dest || "",
+      last: Number.isFinite(last) ? last : undefined,
+      maxPerHour: opts.maxPerHour,
+    },
   );
 }
 
@@ -2039,7 +2095,10 @@ export function withScheduledFallback(result, opt, plan = null, legIndex = 0) {
   const now = new Date();
   // RBS passes a real headway from the TD GTFS data; everyone else falls
   // back to the operator default.
-  const headway = opt?.headwayMins ?? defaultHeadwayMins(opt, result?.operator);
+  const headway = effectiveHeadwayMins(
+    opt?.headwayMins ?? defaultHeadwayMins(opt, result?.operator),
+    opt?.maxPerHour,
+  );
   const routeCode = String(
     routeShort(opt) || result?.route || opt?.route_short_name || "",
   );
@@ -2095,12 +2154,16 @@ export function withScheduledFallback(result, opt, plan = null, legIndex = 0) {
       count: 3,
       headwayMins: headway,
       dest: sched[0].dest,
+      last: opt?.last,
+      maxPerHour: opt?.maxPerHour,
     });
   } else if (sched.length === 2 && inService) {
     const extra = expandTimetableSlots(sched[1], {
       count: 2,
       headwayMins: headway,
       dest: sched[0].dest,
+      last: opt?.last,
+      maxPerHour: opt?.maxPerHour,
     }).slice(1);
     sched = [...sched, ...extra];
   }
@@ -2120,7 +2183,13 @@ export function withScheduledFallback(result, opt, plan = null, legIndex = 0) {
         dest: last.dest || "",
         scheduled: true,
       },
-      { count: 3, headwayMins: headway, dest: last.dest || "" },
+      {
+        count: 3,
+        headwayMins: headway,
+        dest: last.dest || "",
+        last: opt?.last,
+        maxPerHour: opt?.maxPerHour,
+      },
     );
   }
 
@@ -2137,6 +2206,10 @@ export function withScheduledFallback(result, opt, plan = null, legIndex = 0) {
         route: routeCode,
         count: 3,
         headwayMins: headway,
+        first: opt?.first,
+        last: opt?.last,
+        maxPerHour: opt?.maxPerHour,
+        overnight: opt?.overnight,
         force: true, // already gated by inService
       },
       now,
@@ -2162,6 +2235,10 @@ export function withScheduledFallback(result, opt, plan = null, legIndex = 0) {
         (lastClock && addMinutesToClock(lastClock, headway)) ||
         clockFromWaitMins(w) ||
         undefined;
+      if (Number.isFinite(Number(opt?.last))) {
+        const cm = clockToMinsOfDay(clock);
+        if (cm != null && !clockAtOrBeforeLast(cm, Number(opt.last))) break;
+      }
       merged.push({
         waitMins: w,
         clock,

@@ -93,7 +93,7 @@ export async function loadCalculatedRoutePath(agency, route, direction, opts = {
   const r = String(route || "").trim().toUpperCase();
   if (!ag || !r) throw new Error(t("Operator and route required"));
 
-  const raw = await fetchRouteStops(ag, r, direction);
+  const raw = await fetchRouteStops(ag, r, direction, opts);
   if (raw.length < 2) {
     throw new Error(
       t("No stops found for {ag} {r} ({dir})", { ag, r, dir: direction || t("default") }),
@@ -334,11 +334,12 @@ export async function loadCalculatedRoutePath(agency, route, direction, opts = {
  * @param {string} ag
  * @param {string} route
  * @param {string} direction
+ * @param {{ serviceType?: string|number }} [opts]
  */
-async function fetchRouteStops(ag, route, direction) {
+async function fetchRouteStops(ag, route, direction, opts = {}) {
   if (ag === "KMB" || ag === "LWB" || ag === "MTRBUS") {
     // MTR Bus often shares KMB open-data route tables
-    return fetchKmbStops(route, direction);
+    return fetchKmbStops(route, direction, opts.serviceType);
   }
   if (ag === "CTB" || ag === "NWFB") {
     return fetchCtbStops(route, direction);
@@ -660,15 +661,30 @@ function parseCsvLine(line) {
   return out;
 }
 
-async function fetchKmbStops(route, direction) {
+async function fetchKmbStops(route, direction, serviceType = null) {
   const bound = normalizeBound(direction, "kmb");
-  const data = await fetchJson(`${ETA}/kmb/route-stop`);
-  const rows = (data?.data || []).filter(
-    (x) =>
-      String(x.route || "").toUpperCase() === route &&
-      String(x.bound || "").toUpperCase() === bound,
-  );
-  rows.sort((a, b) => Number(a.seq) - Number(b.seq));
+  const dirPath = bound === "I" ? "inbound" : "outbound";
+  const types = [];
+  const st = Number(serviceType);
+  if (Number.isFinite(st) && st >= 1) types.push(st);
+  for (const n of [1, 2, 3, 4, 5, 6]) if (!types.includes(n)) types.push(n);
+  let rows = [];
+  for (const stype of types) {
+    try {
+      const data = await fetchJson(
+        `${ETA}/kmb/route-stop/${encodeURIComponent(route)}/${dirPath}/${stype}`,
+      );
+      const got = (data?.data || [])
+        .slice()
+        .sort((a, b) => Number(a.seq) - Number(b.seq));
+      if (got.length >= 2) {
+        rows = got;
+        break;
+      }
+    } catch {
+      /* try next service type */
+    }
+  }
   if (!rows.length) return [];
 
   // Stop master list
@@ -762,7 +778,8 @@ async function fetchNlbStops(route) {
  * @param {"kmb"|"ctb"} kind
  */
 function normalizeBound(direction, kind) {
-  const d = String(direction || "").toLowerCase().trim();
+  const raw = String(direction || "").trim();
+  const d = raw.split("|")[0].toLowerCase();
   if (kind === "kmb") {
     if (d === "i" || d === "inbound" || d.includes("in")) return "I";
     return "O";
@@ -779,6 +796,8 @@ function normalizeBound(direction, kind) {
  *   showToast?: (msg: string, ms?: number) => void,
  *   getSelectedPlanRoute?: () => object | null,
  *   getSelectedPlanPolyline?: () => number[][] | null,
+ *   searchRoutes?: (q: string) => Promise<any[]> | any[],
+ *   routeDirections?: (route: any) => Promise<any[]> | any[],
  * }} ctx
  */
 export function createPathContributor(ctx) {
@@ -787,6 +806,8 @@ export function createPathContributor(ctx) {
     showToast = () => {},
     getSelectedPlanRoute,
     getSelectedPlanPolyline,
+    searchRoutes = async () => [],
+    routeDirections = async () => [],
     /** Clear trip/ETA route path on the map when entering contribute */
     clearRoutePath = () => {},
   } = ctx;
@@ -830,6 +851,9 @@ export function createPathContributor(ctx) {
     btnOpen: document.getElementById("btn-contribute-path"),
     agency: document.getElementById("contrib-agency"),
     route: document.getElementById("contrib-route"),
+    routeSearch: document.getElementById("contrib-route-search"),
+    routeSuggest: document.getElementById("contrib-route-suggest"),
+    dirCount: document.getElementById("contrib-dir-count"),
     from: document.getElementById("contrib-from"),
     to: document.getElementById("contrib-to"),
     direction: document.getElementById("contrib-direction"),
@@ -2810,12 +2834,134 @@ export function createPathContributor(ctx) {
     }
   }
 
+  function parseDirValue(raw) {
+    const s = String(raw || "");
+    const [bound, serviceType] = s.split("|");
+    return { bound: bound || "O", serviceType: serviceType || "" };
+  }
+
+  function dirOptionLabel(d) {
+    const orig = d.orig || d.origZh || "";
+    const dest = d.destZh || d.dest || "";
+    const destClean = String(dest).replace(/\s*\((circular|循環|循环)\)\s*/gi, "").trim();
+    const circular =
+      d.circular ||
+      d.variant === "loop" ||
+      /↺|circular|循環|循环/i.test(`${dest} ${orig}`);
+    if (circular && orig && destClean) return `${orig} ↺ ${destClean}`;
+    if (orig && destClean) return `${orig} → ${destClean}`;
+    return destClean || orig || d.bound || t("Direction");
+  }
+
+  async function applyRouteHit(hit) {
+    if (!hit) return;
+    const co = String(hit.co || hit.kind || "").toUpperCase();
+    const kind = String(hit.kind || "").toLowerCase();
+    let ag = "KMB";
+    if (kind === "mtr") ag = hit.id === "AEL" ? "AEL" : "MTR";
+    else if (kind === "lrt") ag = "LRT";
+    else if (kind === "mtr_bus") ag = "MTRBUS";
+    else if (co === "CTB") ag = "CTB";
+    else if (co === "NLB") ag = "NLB";
+    else if (co === "GMB") ag = "GMB";
+    else if (co === "KMB" || co === "LWB") ag = "KMB";
+    if (els.agency) {
+      const opt = [...(els.agency.options || [])].find(
+        (o) => String(o.value).toUpperCase() === ag,
+      );
+      if (opt) els.agency.value = opt.value;
+    }
+    if (els.route) els.route.value = String(hit.id || "");
+    if (els.routeSearch) {
+      els.routeSearch.value = `${hit.id || ""} ${hit.label || ""}`.trim();
+    }
+    hideSuggest();
+    await fillDirectionsForRoute(hit);
+  }
+
+  async function fillDirectionsForRoute(hit) {
+    if (!els.direction) return;
+    els.direction.innerHTML = `<option value="">${t("Loading directions…")}</option>`;
+    els.direction.disabled = true;
+    let dirs = [];
+    try {
+      dirs = (await routeDirections(hit)) || [];
+    } catch (e) {
+      console.warn("[contribute] directions", e);
+    }
+    if (!dirs.length) {
+      els.direction.innerHTML = `<option value="O">${t("Outbound / O / UP / seq 1")}</option>
+        <option value="I">${t("Inbound / I / DOWN / seq 2")}</option>`;
+      els.direction.disabled = false;
+      if (els.dirCount) els.dirCount.textContent = "";
+      return;
+    }
+    els.direction.innerHTML = dirs
+      .map((d, i) => {
+        const bound = String(d.bound || "O").toUpperCase() || "O";
+        const st = d.serviceType || d.service_type || "";
+        const val = st ? `${bound}|${st}` : bound;
+        return `<option value="${val}" ${i === 0 ? "selected" : ""}>${dirOptionLabel(d)}</option>`;
+      })
+      .join("");
+    els.direction.disabled = false;
+    if (els.dirCount) {
+      els.dirCount.textContent = t("{n} directions on this route", { n: dirs.length });
+    }
+  }
+
+  function hideSuggest() {
+    if (!els.routeSuggest) return;
+    els.routeSuggest.hidden = true;
+    els.routeSuggest.innerHTML = "";
+  }
+
+  let searchTimer = 0;
+  async function onRouteSearchInput() {
+    const q = String(els.routeSearch?.value || "").trim();
+    if (els.route && !q) els.route.value = "";
+    if (q.length < 1) {
+      hideSuggest();
+      return;
+    }
+    clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(async () => {
+      let hits = [];
+      try {
+        hits = (await searchRoutes(q)) || [];
+      } catch (e) {
+        console.warn("[contribute] search", e);
+      }
+      if (!els.routeSuggest) return;
+      if (!hits.length) {
+        els.routeSuggest.innerHTML = `<li class="loc-suggest-empty">${t("No routes match “{q}”", { q })}</li>`;
+        els.routeSuggest.hidden = false;
+        return;
+      }
+      els.routeSuggest.innerHTML = hits
+        .slice(0, 12)
+        .map((h, i) => {
+          const label = `${h.id || ""} · ${h.label || h.co || ""}`.trim();
+          return `<li><button type="button" class="loc-suggest-item" data-hit="${i}" role="option">${label}</button></li>`;
+        })
+        .join("");
+      els.routeSuggest.hidden = false;
+      els.routeSuggest.querySelectorAll("button[data-hit]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const i = Number(btn.getAttribute("data-hit"));
+          void applyRouteHit(hits[i]);
+        });
+      });
+    }, 160);
+  }
+
   async function loadPathFromSearch() {
     const agency = String(els.agency?.value || "").trim();
     const route = String(els.route?.value || "").trim();
-    const direction = String(els.direction?.value || "").trim();
+    const parsed = parseDirValue(els.direction?.value);
+    const direction = parsed.bound;
     if (!agency || !route) {
-      showToast(t("Select operator and enter route number first"), 2200);
+      showToast(t("Search and pick a route first"), 2200);
       return;
     }
     if (loadAbort) loadAbort.abort();
@@ -2825,6 +2971,7 @@ export function createPathContributor(ctx) {
     try {
       const result = await loadCalculatedRoutePath(agency, route, direction, {
         signal: loadAbort.signal,
+        serviceType: parsed.serviceType || undefined,
       });
       clearPathHistoryStacks();
       selectedIdx.clear();
@@ -2898,6 +3045,9 @@ export function createPathContributor(ctx) {
       if (opt) els.agency.value = opt.value;
     }
     if (els.route && r.route_short_name) els.route.value = r.route_short_name;
+    if (els.routeSearch && r.route_short_name) {
+      els.routeSearch.value = String(r.route_short_name);
+    }
     if (els.from && r.from) els.from.value = r.from;
     if (els.to && r.to) els.to.value = r.to;
 
@@ -3198,6 +3348,17 @@ export function createPathContributor(ctx) {
   });
   els.btnFromPlan?.addEventListener("click", () => fillFromPlan());
   els.btnLoad?.addEventListener("click", () => void loadPathFromSearch());
+  els.routeSearch?.addEventListener("input", () => void onRouteSearchInput());
+  els.routeSearch?.addEventListener("focus", () => {
+    if (els.routeSuggest && els.routeSuggest.childElementCount) {
+      els.routeSuggest.hidden = false;
+    }
+  });
+  document.addEventListener("click", (e) => {
+    if (!els.routeSuggest || els.routeSuggest.hidden) return;
+    if (e.target === els.routeSearch || els.routeSuggest.contains(e.target)) return;
+    hideSuggest();
+  });
 
   els.btnDownload?.addEventListener("click", () => {
     const draft = buildDraft();

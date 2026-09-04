@@ -189,3 +189,121 @@ export function enumerateTrips(schedules, routeId, dir, nowEpoch = Date.now()) {
   out.sort((a, b) => a.startEpoch - b.startEpoch);
   return out;
 }
+
+/** Last departure in a frequency band (GTFS: last start ≤ end). */
+function lastDepartSec(startSec, endSec, headwaySec) {
+  const hw = Math.max(1, Number(headwaySec) || 1);
+  const start = Number(startSec);
+  const end = Number(endSec);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return start;
+  return start + Math.floor((end - start) / hw) * hw;
+}
+
+function patternKind(pat) {
+  if (!pat?.length) return "oneway";
+  return Number(pat[0][0]) === Number(pat[pat.length - 1][0]) ? "loop" : "oneway";
+}
+
+/**
+ * Frequency + hourly cap + last departure for timetable predictions.
+ * `hint.kind` "loop" | "oneway" picks S64C-style AM circular vs PM inbound
+ * when both GTFS patterns share direction_id 0.
+ *
+ * @param {any} schedules
+ * @param {string} routeId e.g. "KMB-S64C"
+ * @param {string|number|null} dir "0"|"1"|"O"|"I"|null
+ * @param {number} [nowEpoch]
+ * @param {{ kind?: "loop"|"oneway" }} [hint]
+ * @returns {{
+ *   firstMins: number,
+ *   lastMins: number,
+ *   headwayMins: number,
+ *   maxPerHour: number,
+ *   inService: boolean,
+ *   overnight: boolean,
+ * } | null}
+ */
+export function scheduleServiceWindow(
+  schedules,
+  routeId,
+  dir,
+  nowEpoch = Date.now(),
+  hint = {},
+) {
+  const route = schedules?.routes?.[String(routeId)];
+  if (!route?.p?.length) return null;
+  const rawDir = dir == null || dir === "" ? null : String(dir).toUpperCase();
+  const dirNum =
+    rawDir == null
+      ? null
+      : rawDir === "I" || rawDir === "1" || rawDir === "INBOUND"
+        ? 1
+        : rawDir === "O" || rawDir === "0" || rawDir === "OUTBOUND"
+          ? 0
+          : Number.isFinite(Number(rawDir))
+            ? Number(rawDir)
+            : null;
+  const wantKind = hint.kind === "loop" || hint.kind === "oneway" ? hint.kind : null;
+  const h = hktNow(nowEpoch);
+  const hasDir =
+    dirNum != null &&
+    (route.p || []).some((p) => p?.length && Number(p[0][2]) === dirNum);
+
+  const keepPat = (pat) => {
+    if (!pat?.length) return false;
+    const pDir = Number(pat[0][2]);
+    const kind = patternKind(pat);
+    if (wantKind === "loop") return kind === "loop";
+    if (wantKind === "oneway" && kind === "loop") return false;
+    if (hasDir && dirNum != null && pDir !== dirNum) return false;
+    return true;
+  };
+
+  /** @type {Array<{ start: number, last: number, hw: number }>} */
+  const bands = [];
+  for (const f of route.f || []) {
+    const pat = route.p[f[0]];
+    if (!keepPat(pat)) continue;
+    if (!serviceActive(schedules.svc?.[f[4]], h.dayNum, h.weekday)) continue;
+    const hw = Math.max(1, Number(f[3]) || 1);
+    bands.push({
+      start: Number(f[1]),
+      last: lastDepartSec(f[1], f[2], hw),
+      hw,
+    });
+  }
+  for (const t of route.t || []) {
+    const pat = route.p[t[0]];
+    if (!keepPat(pat)) continue;
+    if (!serviceActive(schedules.svc?.[t[2]], h.dayNum, h.weekday)) continue;
+    const start = Number(t[1]);
+    if (!Number.isFinite(start)) continue;
+    bands.push({ start, last: start, hw: 0 });
+  }
+  if (!bands.length) return null;
+  bands.sort((a, b) => a.start - b.start);
+  const firstSec = bands[0].start;
+  const lastSec = Math.max(...bands.map((b) => b.last));
+  const nowSec = h.secOfDay;
+  // Current band, else the next one later today (for headway of upcoming trips).
+  let cur =
+    bands.find((b) => nowSec >= b.start - 60 && nowSec <= b.last + 120) ||
+    bands.find((b) => b.start >= nowSec) ||
+    bands[bands.length - 1];
+  const hw = cur.hw > 0 ? cur.hw : (() => {
+    const withHw = bands.filter((b) => b.hw > 0);
+    return withHw.length ? Math.min(...withHw.map((b) => b.hw)) : 12 * 60;
+  })();
+  const maxPerHour = Math.max(1, Math.round(3600 / hw));
+  const inService = bands.some(
+    (b) => nowSec >= b.start - 60 && nowSec <= b.last + 120,
+  );
+  return {
+    firstMins: firstSec / 60,
+    lastMins: lastSec / 60,
+    headwayMins: Math.max(2, Math.round(hw / 60)),
+    maxPerHour,
+    inService,
+    overnight: lastSec >= 24 * 3600 || firstSec >= 22 * 3600,
+  };
+}
