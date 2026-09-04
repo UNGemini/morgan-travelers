@@ -11768,6 +11768,22 @@ async function attachNearbyMtrLiveEtas(hits, geo, lineNear) {
       // Prefer station already chosen for this line in browse
       const { best } = nearestMtrStationForLine(line, geo, lineNear);
       if (!best?.code) return;
+      const dirs = etaRouteDirections(r, { full: true });
+      const di = resolveCardDirIndex(r, dirs);
+      const codes = mtrLineCodesInOrder(
+        line,
+        dirs[di]?.bound || "O",
+        dirs[di]?.branch || null,
+      );
+      const boardCode = String(best.code || "").toUpperCase();
+      const bi = codes.indexOf(boardCode);
+      const alightCode =
+        bi >= 0 && codes.length >= 2
+          ? bi >= codes.length - 1
+            ? codes[0]
+            : codes[codes.length - 1]
+          : codes[codes.length - 1] || "";
+      const alightLab = alightCode ? mtrStationLabel(alightCode) : null;
       const opt = {
         kind: "mtr",
         etaKind: "mtr",
@@ -11788,6 +11804,17 @@ async function attachNearbyMtrLiveEtas(hits, geo, lineNear) {
           lon: best.lon,
           location: { lat: best.lat, lon: best.lon },
         },
+        to: alightCode
+          ? {
+              stop_id: `MTR-${alightCode}`,
+              id: `MTR-${alightCode}`,
+              stop_name: alightLab?.en || alightCode,
+              name: alightLab?.en || alightCode,
+              station_code: alightCode,
+              stationCode: alightCode,
+              code: alightCode,
+            }
+          : undefined,
       };
       try {
         const result = await fetchBoardEta(opt);

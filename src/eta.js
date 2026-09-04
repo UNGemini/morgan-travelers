@@ -1541,6 +1541,43 @@ function ensureMtrPlatformsGeo() {
 }
 
 /**
+ * Destination clause of a platform label — the text after "to" / "往" / "from",
+ * not the line name. "Platform 2 Tung Chung Line to Hong Kong" → "Hong Kong"
+ * so dest "Tung Chung" cannot match the other direction via "Tung Chung Line"
+ * (Sunny Bay 1 vs 2, Kowloon 3 vs 4).
+ * @param {{ name_en?: string, name_zh?: string }} p
+ */
+function platformDestClause(p) {
+  const en = String(p?.name_en || "");
+  const zh = String(p?.name_zh || "");
+  const parts = [];
+  const toEn = /\bto\s+(.+)$/i.exec(en);
+  const toZh = /往(.+)$/.exec(zh);
+  if (toEn) parts.push(toEn[1].trim());
+  if (toZh) parts.push(toZh[1].trim());
+  const fromEn = /\bfrom\s+(.+)$/i.exec(en);
+  const fromZh = /從(.+?)(?:抵|$)/.exec(zh);
+  if (fromEn) parts.push(fromEn[1].trim());
+  if (fromZh) parts.push(fromZh[1].trim());
+  return parts;
+}
+
+function platformServesDests(p, dests) {
+  const clauses = platformDestClause(p);
+  const hay = (
+    clauses.length
+      ? clauses.join(" | ")
+      : `${p?.name_en || ""} ${p?.name_zh || ""}`
+  ).toLowerCase();
+  for (const d of dests) {
+    const needle = String(d || "").trim().toLowerCase();
+    if (needle.length < 2) continue;
+    if (hay.includes(needle)) return true;
+  }
+  return false;
+}
+
+/**
  * Static platform numbers for a line/station when the live API omits `plat`
  * (or returns no trains at all, e.g. outside service hours). Matches
  * platforms.geojson features by station code + line name + destination names
@@ -1590,11 +1627,7 @@ async function mtrPlatformsForLineStation(line, sta, trains, alightCode) {
     const refs = new Set();
     for (const ft of pool) {
       const p = ft.properties || {};
-      const named = [...dests].some(
-        (d) =>
-          (p.name_en || "").includes(d) || (p.name_zh || "").includes(d),
-      );
-      if (!named) continue;
+      if (!platformServesDests(p, dests)) continue;
       const ref = String(p.ref ?? "").trim();
       if (!ref || ref === "0") continue;
       refs.add(ref);
