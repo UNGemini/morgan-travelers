@@ -1364,15 +1364,32 @@ export async function buildTransitPolyline(opt, opts = {}) {
       const { getGtfsBusShape } = await import("./routeShapes.js");
       const gtfs = await getGtfsBusShape(opt, opts);
       if (gtfs?.coords?.length >= 2) {
-        const poly = sliceRouteBetweenStops(gtfs.coords, stops);
-        if (poly?.length >= 2 && polylineCoversStops(poly, stops, gtfs.coords)) {
-          if (gtfs.sparse) {
+        let poly = sliceRouteBetweenStops(gtfs.coords, stops);
+        if (!polylineCoversStops(poly, stops, gtfs.coords)) {
+          // Slice collapsed (same terminus) — try the unsliced corridor
+          if (polylineCoversStops(gtfs.coords, stops)) {
+            poly = gtfs.coords.map((p) => ({ lon: p.lon, lat: p.lat }));
+          } else {
+            poly = null;
+          }
+        }
+        if (poly?.length >= 2) {
+          const loop = isClosedLoop(poly);
+          // Sparse shapes and one-way corridors (S64C PM) densify onto roads
+          // so zooming does not turn ~100 m GTFS hops into chords. Closed
+          // loops (S64C AM) keep the operator polyline — OSRM detours the island.
+          if (gtfs.sparse || !loop) {
             try {
-              const dens = await densifyStopsViaOsrm(poly, opts);
-              if (dens?.length >= 2) return dens;
+              const dens = await densifyCorridorViaOsrm(poly, opts);
+              if (
+                dens?.length >= 2 &&
+                polylineCoversStops(dens, stops)
+              ) {
+                return dens;
+              }
             } catch (e) {
               if (e?.name === "AbortError") throw e;
-              console.warn("[routeSnapper] sparse GTFS OSRM densify", e);
+              console.warn("[routeSnapper] GTFS corridor OSRM densify", e);
             }
           }
           return poly;
@@ -1398,6 +1415,38 @@ export async function buildTransitPolyline(opt, opts = {}) {
   }
 
   return stops.map((s) => ({ lon: s.lon, lat: s.lat }));
+}
+
+/** Even samples along a polyline (keeps ends). */
+function sampleAlongPolyline(poly, maxN) {
+  if (!poly?.length) return [];
+  if (poly.length <= maxN) return poly.map((p) => ({ lon: p.lon, lat: p.lat }));
+  const cum = cumulativeDistances(poly);
+  const total = cum[cum.length - 1] || 0;
+  if (total < 1) return poly.map((p) => ({ lon: p.lon, lat: p.lat }));
+  const out = [];
+  let i = 0;
+  for (let k = 0; k < maxN; k++) {
+    const t = (k / (maxN - 1)) * total;
+    while (i < cum.length - 2 && cum[i + 1] < t) i += 1;
+    const a = poly[i];
+    const b = poly[i + 1] || a;
+    const span = Math.max(1e-3, (cum[i + 1] ?? cum[i]) - cum[i]);
+    const f = Math.max(0, Math.min(1, (t - cum[i]) / span));
+    out.push({
+      lon: a.lon + (b.lon - a.lon) * f,
+      lat: a.lat + (b.lat - a.lat) * f,
+    });
+  }
+  return out;
+}
+
+/** Hug roads along an existing GTFS corridor (not the raw stop list). */
+async function densifyCorridorViaOsrm(poly, opts = {}) {
+  const waypoints = sampleAlongPolyline(poly, 28);
+  if (waypoints.length < 2) return poly;
+  const dens = await densifyStopsViaOsrm(waypoints, opts);
+  return dens?.length >= 2 ? dens : poly;
 }
 
 function isClosedLoop(pts, maxM = 150) {

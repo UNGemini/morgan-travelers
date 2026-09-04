@@ -498,6 +498,9 @@ function pickShape(routeEntry, names, wantDir = null, stops = null) {
         if (circularStops) {
           if (fit.loop) score += 50;
           else score -= 40;
+        } else if (fit.loop) {
+          // S64C PM (HACTL → Yat Tung): do not use the cargo circuit
+          score -= 45;
         }
       }
     }
