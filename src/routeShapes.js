@@ -367,6 +367,71 @@ async function resolveShapeData(opt, signal) {
   return { data, entry, ridKey };
 }
 
+/** @param {{ lon?: number, lat?: number, location?: { lon?: number, lat?: number } }} s */
+function stopLonLat(s) {
+  const lon = Number(s?.lon ?? s?.location?.lon);
+  const lat = Number(s?.lat ?? s?.location?.lat);
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+  return { lon, lat };
+}
+
+function distM(a, b) {
+  if (!a || !b) return Infinity;
+  const dLat = (a.lat - b.lat) * (Math.PI / 180);
+  const dLon = (a.lon - b.lon) * (Math.PI / 180);
+  return (
+    6371000 * Math.hypot(dLat, dLon * Math.cos((a.lat * Math.PI) / 180))
+  );
+}
+
+/**
+ * How well a decoded polyline covers an ordered stop list (monotonic).
+ * Circular routes (S64C): the same stop sits at both ends of the loop, so
+ * a short inbound fragment can match the dest headsign but miss the cargo
+ * loop — coverage/span catch that.
+ * @param {LngLat[]} coords
+ * @param {LngLat[]} stops
+ */
+function fitShapeToStops(coords, stops) {
+  const OK_M = 80;
+  let searchFrom = 0;
+  let sum = 0;
+  let n = 0;
+  let ok = 0;
+  let firstAlong = null;
+  let lastAlong = null;
+  for (const s of stops) {
+    const p = projectOntoShape(coords, s.lon, s.lat, searchFrom);
+    if (!p) continue;
+    n += 1;
+    sum += p.d;
+    if (p.d <= OK_M) ok += 1;
+    searchFrom = p.segEnd;
+    if (firstAlong == null) firstAlong = p.alongM;
+    lastAlong = p.alongM;
+  }
+  if (!n) return { meanErr: Infinity, coverage: 0, span: 0, loop: false };
+  const cum = cumulativeMeters(coords);
+  const total = cum.length ? cum[cum.length - 1] : 0;
+  const start = coords[0];
+  const end = coords[coords.length - 1];
+  const loop = distM(start, end) < 80;
+  const circularStops =
+    loop && stops.length >= 4 && distM(stops[0], stops[stops.length - 1]) < 80;
+  let span =
+    total > 1 && firstAlong != null && lastAlong != null
+      ? Math.abs(lastAlong - firstAlong) / total
+      : 0;
+  // First+last both snapped to the same terminus on a loop → full circuit
+  if (circularStops && span < 0.15) span = 1;
+  return {
+    meanErr: sum / n,
+    coverage: ok / n,
+    span,
+    loop,
+  };
+}
+
 /**
  * Best shape for a bus leg. Direction-aware: when the wanted GTFS direction
  * is known (ETA bound O/I or explicit direction_id), shapes of that direction
@@ -374,19 +439,30 @@ async function resolveShapeData(opt, signal) {
  * picked corridor always matches the stop list. Headsign (terminal) matching
  * on the destination, then origin, stays as tiebreak / fallback for legs
  * without a known direction (e.g. trip-plan options).
+ *
+ * When several shapes share a direction (S64C circular vs inbound fragment,
+ * both direction_id 0), score the decoded geometry against the stop list so
+ * a dest-name substring cannot pick the short wrong polyline.
  * @param {any} routeEntry
  * @param {{ from?: string, to?: string }} names
  * @param {string|null} [wantDir] "0" | "1" | null
+ * @param {Array<{ lon?: number, lat?: number, location?: { lon?: number, lat?: number } }>} [stops]
  */
-function pickShape(routeEntry, names, wantDir = null) {
+function pickShape(routeEntry, names, wantDir = null, stops = null) {
   const shapes = routeEntry?.shapes;
   if (!Array.isArray(shapes) || !shapes.length) return null;
   const to = String(names?.to || "").toLowerCase();
   const from = String(names?.from || "").toLowerCase();
   if (shapes.length === 1) return shapes[0];
 
+  const usable = [];
+  for (const s of stops || []) {
+    const ll = stopLonLat(s);
+    if (ll) usable.push(ll);
+  }
+
   let best = null;
-  let bestScore = -1;
+  let bestScore = -Infinity;
   for (const s of shapes) {
     let score = 0;
     if (wantDir != null && String(s.d) === String(wantDir)) score += 50;
@@ -395,6 +471,17 @@ function pickShape(routeEntry, names, wantDir = null) {
       if (to && hs && (hs.includes(to) || to.includes(hs))) score += 20;
       else if (from && hs && (hs.includes(from) || from.includes(hs)))
         score += 8;
+    }
+    if (usable.length >= 3) {
+      const coords = decodeCoords(s.c);
+      if (coords?.length >= 2) {
+        const fwd = fitShapeToStops(coords, usable);
+        const rev = fitShapeToStops([...coords].reverse(), usable);
+        const fit = rev.meanErr < fwd.meanErr * 0.8 ? rev : fwd;
+        score += fit.coverage * 80;
+        score -= Math.min(80, fit.meanErr / 8);
+        score += fit.span * 25;
+      }
     }
     if (score > bestScore) {
       bestScore = score;
@@ -456,16 +543,17 @@ export async function getGtfsBusShape(opt, opts = {}) {
         "",
       from: opt?.from?.stop_name || opt?.from?.name || "",
     };
-    const shape = pickShape(entry, names, wantDir);
+    // Direction guard + multi-shape pick both need the stop list first.
+    const stops = Array.isArray(opt?.stops) && opt.stops.length >= 3
+      ? opt.stops
+      : [opt?.from, opt?.to].filter(Boolean);
+    const shape = pickShape(entry, names, wantDir, stops);
     const coords = shape ? decodeCoords(shape.c) : null;
     if (!coords || coords.length < 2) return null;
 
     // Direction guard: the picked shape must run with the stop order (see
     // orientShapeToStops). Flipping here fixes wrong passed/remaining cuts
     // on the ETA map and keeps trip-plan slices in travel order.
-    const stops = Array.isArray(opt?.stops) && opt.stops.length >= 3
-      ? opt.stops
-      : [opt?.from, opt?.to].filter(Boolean);
     orientShapeToStops(coords, stops);
 
     console.info(

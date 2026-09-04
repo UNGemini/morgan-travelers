@@ -165,6 +165,30 @@ export function sliceRouteBetweenStops(route, orderedStops) {
 
   const d0 = projected[0].distanceAlong;
   const d1 = projected[projected.length - 1].distanceAlong;
+  const start = route[0];
+  const end = route[route.length - 1];
+  const isLoop =
+    !!start &&
+    !!end &&
+    haversineM(start.lat, start.lon, end.lat, end.lon) < 80;
+  const first = orderedStops[0];
+  const last = orderedStops[orderedStops.length - 1];
+  const circularTrip =
+    isLoop &&
+    orderedStops.length >= 4 &&
+    !!first &&
+    !!last &&
+    haversineM(first.lat, first.lon, last.lat, last.lon) < 80;
+  if (circularTrip) {
+    const cum = cumulativeDistances(route);
+    const total = cum[cum.length - 1] || 0;
+    const span = Math.abs(d1 - d0);
+    // First and last are the same terminus — a min/max slice would be a
+    // stub (or empty) and the map would fall back to stop chords (S64C).
+    if (total > 400 && span < total * 0.15) {
+      return route.map((p) => ({ lon: p.lon, lat: p.lat }));
+    }
+  }
   const from = Math.min(d0, d1);
   const to = Math.max(d0, d1);
   const slice = sliceByDistance(route, from, to);
