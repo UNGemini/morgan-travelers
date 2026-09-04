@@ -395,7 +395,7 @@ export function isOvernightRouteCode(route) {
  */
 const MTR_LINE_LAST_TRAIN_MINS = {
   AEL: 24 * 60 + 48, // 00:48 Hong Kong → AsiaWorld-Expo
-  DRL: 24 * 60 + 10, // 00:10 Disneyland Resort → Sunny Bay
+  DRL: 24 * 60 + 45, // 00:45 Sunny Bay → Disneyland
   TCL: 24 * 60 + 48, // 00:48 Hong Kong → Tung Chung
   TML: 24 * 60 + 35, // 00:35 Wu Kai Sha → Tuen Mun
   EAL: 24 * 60 + 45, // 00:45 Admiralty → Lo Wu
@@ -406,18 +406,41 @@ const MTR_LINE_LAST_TRAIN_MINS = {
   TKL: 24 * 60 + 45, // 00:45 North Point → Po Lam
 };
 
+/** First departure (HK minutes after midnight). DRL starts later than the rest. */
+const MTR_LINE_FIRST_TRAIN_MINS = {
+  DRL: 6 * 60 + 10, // 06:10 Sunny Bay → Disneyland
+};
+
 /** Stop MTR schedule predictions this many minutes before the last departure. */
 const MTR_LAST_TRAIN_PREDICT_MINS = 15;
 
 /**
- * After-midnight cutoff for MTR schedule predictions: a few minutes before
- * each line's last 3 trains depart. Unknown lines fall back to 01:00.
+ * First / last minutes for invented MTR timetable slots. `last` may exceed
+ * 1440 when the last train is after midnight.
  * @param {string} [route]
  */
-function mtrPredictionEndMins(route) {
-  const last = MTR_LINE_LAST_TRAIN_MINS[String(route || "").toUpperCase()];
-  if (last == null) return 1 * 60;
-  return (last - MTR_LAST_TRAIN_PREDICT_MINS + 24 * 60) % (24 * 60);
+function mtrServiceWindowMins(route) {
+  const r = String(route || "").toUpperCase();
+  const first = MTR_LINE_FIRST_TRAIN_MINS[r] ?? 5 * 60 + 30;
+  const lastRaw = MTR_LINE_LAST_TRAIN_MINS[r] ?? 24 * 60 + 60;
+  return { first, last: lastRaw - MTR_LAST_TRAIN_PREDICT_MINS };
+}
+
+/**
+ * Clock-of-day `mins` inside [first, last]. `last` may be >1440 (after midnight)
+ * or < first (overnight wrap on a 0–1439 clock). Same-day last (e.g. DRL 00:45
+ * − 15 min → 00:30 stored as 1470, or a 23:xx cutoff) must NOT use
+ * `mins >= first || mins <= last` — that is true all day.
+ */
+function inFirstLastWindow(mins, first, last) {
+  if (!Number.isFinite(first) || !Number.isFinite(last)) return true;
+  if (last > 24 * 60) {
+    return (mins >= first && mins <= last) || mins <= last - 24 * 60;
+  }
+  if (last < first) {
+    return mins >= first || mins <= last;
+  }
+  return mins >= first && mins <= last;
 }
 
 /**
@@ -453,11 +476,7 @@ export function isTypicalServiceWindow(opts = {}, now = new Date()) {
   const first = Number(opts.first);
   const last = Number(opts.last);
   if (Number.isFinite(first) && Number.isFinite(last)) {
-    // last may exceed 1440 (departures after midnight)
-    return (
-      (mins >= first && mins <= last) ||
-      (last > 24 * 60 && mins <= last - 24 * 60)
-    );
+    return inFirstLastWindow(mins, first, last);
   }
   if (opts.overnight === true) {
     // Overnight: late evening through early morning
@@ -469,16 +488,17 @@ export function isTypicalServiceWindow(opts = {}, now = new Date()) {
     return mins >= 23 * 60 || mins <= 6 * 60 + 30;
   }
 
-  // Standard day service: from 05:30 through 01:15 next calendar day
+  // MTR heavy rail: per-line first / last (DRL 06:10–00:45). A same-day
+  // last must use AND, not OR — DRL used to stay “in service” 24h.
+  if (String(opts.mode || "").toLowerCase() === "subway") {
+    const w = mtrServiceWindowMins(route);
+    return inFirstLastWindow(mins, w.first, w.last);
+  }
+
+  // Standard day bus: from 05:30 through 01:15 next calendar day
   const dayStart = 5 * 60 + 30;
   const afterMidnightEnd = 1 * 60 + 15;
-  // MTR heavy rail: stop schedule predictions a few minutes before each
-  // line's last 3 trains depart (per-line last-departure table above).
-  const end =
-    String(opts.mode || "").toLowerCase() === "subway"
-      ? mtrPredictionEndMins(route)
-      : afterMidnightEnd;
-  return mins >= dayStart || mins <= end;
+  return inFirstLastWindow(mins, dayStart, 24 * 60 + afterMidnightEnd);
 }
 
 /**
