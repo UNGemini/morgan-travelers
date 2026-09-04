@@ -307,3 +307,59 @@ export function scheduleServiceWindow(
     overnight: lastSec >= 24 * 3600 || firstSec >= 22 * 3600,
   };
 }
+
+function scheduleDirNum(dir) {
+  const rawDir = dir == null || dir === "" ? null : String(dir).toUpperCase();
+  if (rawDir == null) return null;
+  if (rawDir === "I" || rawDir === "1" || rawDir === "INBOUND") return 1;
+  if (rawDir === "O" || rawDir === "0" || rawDir === "OUTBOUND") return 0;
+  return Number.isFinite(Number(rawDir)) ? Number(rawDir) : null;
+}
+
+/**
+ * Stop coordinates for one schedule pattern (AM loop vs PM inbound).
+ * The shapes pack only stores one `st` sequence (S64C circular); this reads
+ * the matching GTFS pattern so Switch Departure can swap the stop list.
+ *
+ * @param {any} schedules
+ * @param {string} routeId e.g. "KMB-S64C"
+ * @param {string|number|null} dir
+ * @param {{ kind?: "loop"|"oneway" }} [hint]
+ * @returns {Array<{ seq: number, lon: number, lat: number }>}
+ */
+export function schedulePatternStops(schedules, routeId, dir, hint = {}) {
+  const route = schedules?.routes?.[String(routeId)];
+  if (!route?.p?.length) return [];
+  const dirNum = scheduleDirNum(dir);
+  const wantKind = hint.kind === "loop" || hint.kind === "oneway" ? hint.kind : null;
+  const hasDir =
+    dirNum != null &&
+    (route.p || []).some((p) => p?.length && Number(p[0][2]) === dirNum);
+
+  let best = null;
+  for (const pat of route.p) {
+    if (!pat?.length) continue;
+    const pDir = Number(pat[0][2]);
+    const kind = patternKind(pat);
+    if (wantKind === "loop") {
+      if (kind !== "loop") continue;
+    } else if (wantKind === "oneway") {
+      if (kind === "loop") continue;
+      if (hasDir && dirNum != null && pDir !== dirNum) continue;
+    } else if (hasDir && dirNum != null && pDir !== dirNum) {
+      continue;
+    }
+    if (!best || pat.length > best.length) best = pat;
+  }
+  if (!best) return [];
+  const out = [];
+  for (let i = 0; i < best.length; i++) {
+    const st = schedules.stops?.[best[i][0]];
+    if (!st || st.length < 2) continue;
+    const lon = Number(st[0]) / 1e5;
+    const lat = Number(st[1]) / 1e5;
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+    out.push({ seq: i + 1, lon, lat });
+  }
+  return out;
+}

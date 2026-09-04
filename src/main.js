@@ -2381,6 +2381,95 @@ async function fetchKmbRouteStopList(routeId, direction, serviceType = 1) {
  * @param {string} [bound] O|I
  * @param {number | string | null} [serviceType]
  */
+function stopListIsLoop(stops) {
+  if (!stops?.length || stops.length < 4) return false;
+  const a = stops[0];
+  const b = stops[stops.length - 1];
+  if (
+    !Number.isFinite(a?.lat) ||
+    !Number.isFinite(a?.lon) ||
+    !Number.isFinite(b?.lat) ||
+    !Number.isFinite(b?.lon)
+  ) {
+    return false;
+  }
+  return haversineMEta(a.lat, a.lon, b.lat, b.lon) < 80;
+}
+
+/**
+ * KMB stop list for one departure variant — exact service type, then the
+ * first list whose loop/one-way shape matches the variant (do not fall
+ * through from PM HACTL to the AM circular).
+ */
+async function loadKmbRouteStopsExact(routeId, dir) {
+  const b = String(dir?.bound || "O").toUpperCase();
+  const wantLoop = etaIsCircularDir(dir) || dir?.variant === "loop";
+  const dirOrder =
+    b === "I" || b === "INBOUND" || b === "2"
+      ? /** @type {const} */ (["inbound", "outbound"])
+      : /** @type {const} */ (["outbound", "inbound"]);
+  const types = kmbServiceTypesToTry(dir?.serviceType ?? dir?.service_type);
+  let fallback = [];
+  for (const direction of dirOrder) {
+    for (const st of types) {
+      const stops = await fetchKmbRouteStopList(routeId, direction, st);
+      if (stops.length < 2) continue;
+      if (stopListIsLoop(stops) === wantLoop) return stops;
+      if (!fallback.length) fallback = stops;
+    }
+  }
+  return wantLoop ? fallback : [];
+}
+
+async function loadScheduleVariantStops(route, dir) {
+  const co = String(route?.co || "kmb").toLowerCase();
+  const loadCo = co === "lwb" || (route?.kind === "bus" && !co) ? "kmb" : co;
+  if (!["kmb", "ctb", "nlb"].includes(loadCo)) return [];
+  try {
+    const { loadOperatorSchedules, schedulePatternStops } = await import(
+      "./busSchedules.js"
+    );
+    const sched = await loadOperatorSchedules(loadCo);
+    const kind =
+      dir?.variant || (etaIsCircularDir(dir) ? "loop" : "oneway");
+    const coords = schedulePatternStops(
+      sched,
+      `${loadCo.toUpperCase()}-${route.id}`,
+      dir?.bound,
+      { kind },
+    );
+    if (coords.length < 2) return [];
+    if (loadCo === "kmb") await ensureKmbStops();
+    const master = loadCo === "kmb" ? kmbStopsCache || [] : [];
+    return coords.map((c, i) => {
+      let best = null;
+      let bestD = 55;
+      for (const s of master) {
+        const lat = Number(s.lat);
+        const lon = Number(s.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        const d = haversineMEta(c.lat, c.lon, lat, lon);
+        if (d < bestD) {
+          bestD = d;
+          best = s;
+        }
+      }
+      return {
+        seq: c.seq || i + 1,
+        name: best ? best.name_tc || best.name_en || `Stop ${i + 1}` : `Stop ${i + 1}`,
+        nameEn: best?.name_en || "",
+        nameTc: best?.name_tc || "",
+        stopId: best?.stop || `sched-${route.id}-${i}`,
+        lon: c.lon,
+        lat: c.lat,
+      };
+    });
+  } catch (e) {
+    console.warn("[eta] schedule variant stops", e);
+    return [];
+  }
+}
+
 async function loadKmbRouteStopsRobust(routeId, bound = "O", serviceType = null) {
   const b = String(bound || "O").toUpperCase();
   // Circular / airport feeders often only publish outbound; always fall back
@@ -14258,12 +14347,32 @@ async function loadEtaRouteStops(route) {
   let bound = String(dir?.bound || "O").toUpperCase();
   if (bound === "LINE" || bound === "LRT") bound = "O";
   const co = String(route.co || "").toLowerCase();
+  const departureSwitch = etaHasDepartureSwitch(dirs);
+
+  // AM/PM variants (S64C) share a GTFS bound and the shapes pack only stores
+  // the circular `st` list — pick the matching KMB service type / schedule
+  // pattern so Switch Departure actually swaps the stop list.
+  if (
+    departureSwitch &&
+    (co === "kmb" || co === "lwb" || (route.kind === "bus" && !co))
+  ) {
+    if (!skipLiveEta) {
+      const exact = await loadKmbRouteStopsExact(route.id, dir);
+      if (exact.length >= 2) return exact;
+    }
+    const fromSched = await loadScheduleVariantStops(route, dir);
+    if (fromSched.length >= 2) return fromSched;
+  }
 
   // Downloaded GTFS first — paints markers when the PWA is opened already
   // offline. Do not wait on live /eta hosts: navigator.onLine is often still
   // true on a cold start, and those fetches hang. ETA ids strip the GTFS prefix.
   const downloaded = await loadDownloadedBusStops(route, bound, co);
-  if (downloaded.length >= 2) return downloaded;
+  if (downloaded.length >= 2) {
+    if (!departureSwitch) return downloaded;
+    const wantLoop = etaIsCircularDir(dir) || dir?.variant === "loop";
+    if (stopListIsLoop(downloaded) === wantLoop) return downloaded;
+  }
 
   // Load official stop sequence from operator APIs first (names + ETA ids).
   // Offline: skip live ETA hosts and use the downloaded GTFS / local copies.
@@ -14332,12 +14441,14 @@ async function loadEtaRouteStops(route) {
               String(b.bound || "").toUpperCase() === "O",
           )?.service_type ??
         null;
-      const stops = await loadKmbRouteStopsRobust(
-        route.id,
-        bound,
-        serviceType,
-      );
+      const stops = departureSwitch
+        ? await loadKmbRouteStopsExact(route.id, dir)
+        : await loadKmbRouteStopsRobust(route.id, bound, serviceType);
       if (stops.length >= 2) return stops;
+      if (departureSwitch) {
+        const fromSched = await loadScheduleVariantStops(route, dir);
+        if (fromSched.length >= 2) return fromSched;
+      }
       console.warn(
         "[eta] KMB stops empty for",
         route.id,
