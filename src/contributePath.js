@@ -1191,7 +1191,6 @@ export function createPathContributor(ctx) {
         type: "geojson",
         data: emptyFc(),
         tolerance: 0,
-        maxzoom: 22,
       });
     }
     if (!map.getSource("contrib-stops")) {
@@ -1208,19 +1207,7 @@ export function createPathContributor(ctx) {
         filter: ["==", ["get", "kind"], "line"],
         paint: {
           "line-color": "#7dcea0",
-          "line-width": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            11,
-            3.5,
-            14,
-            5,
-            17,
-            7,
-            19,
-            10,
-          ],
+          "line-width": 5,
           "line-opacity": 0.92,
         },
         layout: { "line-cap": "round", "line-join": "round" },

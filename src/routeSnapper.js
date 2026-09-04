@@ -1365,7 +1365,7 @@ export async function buildTransitPolyline(opt, opts = {}) {
       const gtfs = await getGtfsBusShape(opt, opts);
       if (gtfs?.coords?.length >= 2) {
         const poly = sliceRouteBetweenStops(gtfs.coords, stops);
-        if (poly?.length >= 2) {
+        if (poly?.length >= 2 && polylineCoversStops(poly, stops)) {
           if (gtfs.sparse) {
             try {
               const dens = await densifyStopsViaOsrm(poly, opts);
@@ -1398,6 +1398,21 @@ export async function buildTransitPolyline(opt, opts = {}) {
   }
 
   return stops.map((s) => ({ lon: s.lon, lat: s.lat }));
+}
+
+/** True when most stops sit on the polyline (reject a short/wrong GTFS slice). */
+function polylineCoversStops(poly, stops, maxErrM = 140) {
+  if (!poly?.length || !stops?.length) return false;
+  let ok = 0;
+  let n = 0;
+  for (const s of stops) {
+    if (!Number.isFinite(s?.lon) || !Number.isFinite(s?.lat)) continue;
+    n += 1;
+    const p = nearestPointOnRoute(poly, s);
+    if (p && p.error <= maxErrM) ok += 1;
+  }
+  if (n < 2) return poly.length >= 2;
+  return ok / n >= 0.72;
 }
 
 // ── internals ────────────────────────────────────────────────────────────────
