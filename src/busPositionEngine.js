@@ -232,10 +232,12 @@ function remainingSec(etaT, now) {
 async function defaultFetchRows(ctx, stop) {
   const { fetchJson, getRawEtaRows, stripOperatorStopId } = await import("./eta.js");
   const op = String(ctx.op || "").toLowerCase();
-  const cached = getRawEtaRows(op, ctx.routeShort, ctx.serviceType, stop.stopId);
-  if (cached) return cached;
+  if (op !== "mtr" && op !== "lrt") {
+    const cached = getRawEtaRows(op, ctx.routeShort, ctx.serviceType, stop.stopId);
+    if (cached) return cached;
+  }
   const sid = stripOperatorStopId(stop.stopId) || String(stop.stopId || "");
-  if (!sid) return [];
+  if (!sid && op !== "mtr" && op !== "lrt") return [];
   if (op === "kmb") {
     const data = await fetchJson(
       `/eta/kmb/eta/${encodeURIComponent(sid)}/${encodeURIComponent(ctx.routeShort)}/${encodeURIComponent(ctx.serviceType || 1)}`,
@@ -266,7 +268,7 @@ async function defaultFetchRows(ctx, stop) {
   }
   if (op === "mtr") {
     const line = String(ctx.routeShort || "");
-    const sta = sid;
+    const sta = sid || stripOperatorStopId(stop.stopId) || "";
     if (!line || !sta) return [];
     const data = await fetchJson(
       `/eta/mtr/getSchedule.php?line=${encodeURIComponent(line)}&sta=${encodeURIComponent(sta)}`,
@@ -275,22 +277,17 @@ async function defaultFetchRows(ctx, stop) {
     const block = data?.data?.[key] || data?.data?.[sta] || {};
     const bound = String(ctx.bound || "O").toUpperCase();
     const dirKey = bound === "I" ? "DOWN" : "UP";
-    const trains = Array.isArray(block[dirKey])
-      ? block[dirKey]
+    const primary = Array.isArray(block[dirKey]) ? block[dirKey] : [];
+    const trains = primary.length
+      ? primary
       : [...(block.UP || []), ...(block.DOWN || [])];
     const now = Date.now();
     return (trains || []).map((t) => {
-      const wait =
-        t.ttnt != null && t.ttnt !== "" ? Math.max(0, Number(t.ttnt)) : 0;
-      let iso;
-      try {
-        iso = t.time
-          ? new Date(String(t.time).replace(" ", "T") + "+08:00").toISOString()
-          : new Date(now + wait * 60_000).toISOString();
-      } catch {
-        iso = new Date(now + wait * 60_000).toISOString();
-      }
-      return { eta: iso, dest_en: t.dest || "", dir: bound };
+      const wait = Number(t.ttnt);
+      const etaMs = Number.isFinite(wait)
+        ? now + Math.max(0, wait) * 60_000
+        : now;
+      return { eta: new Date(etaMs).toISOString(), dest_en: t.dest || "" };
     });
   }
   if (op === "lrt") {
@@ -477,6 +474,7 @@ export class BusPositionEngine {
     if (Number.isInteger(patch.boardStopIndex)) {
       this.ctx.boardStopIndex = patch.boardStopIndex;
     }
+    if (patch.shape?.coords?.length >= 2) this.ctx.shape = patch.shape;
     this.syncPatternBoard();
   }
 
@@ -588,6 +586,10 @@ export class BusPositionEngine {
       canonicalLivePosOp(ctx.op, ctx.routeId) === "joint"
         ? "kmb"
         : String(ctx.op || "").toLowerCase();
+    if (loadCo === "mtr" || loadCo === "lrt") {
+      this.schedules = null;
+      return;
+    }
     this.schedules = await this.loadSchedules(loadCo);
     if (!this.running || this.ctx !== ctx) return;
     if (!this.schedules) {

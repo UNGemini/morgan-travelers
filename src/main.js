@@ -14504,6 +14504,7 @@ async function paintEtaRouteOnMap(route, stops, opts = {}) {
     }
   }
   applyEtaRouteProgressOnMap(boardIndex, { fit: doFit });
+  busPosAdoptMapGeom();
 }
 
 /**
@@ -15578,6 +15579,7 @@ async function showEtaRouteDetailsPanel(opts = {}) {
     selectedIndex,
     preserveScroll: false,
   });
+  void busPosSyncState();
 }
 
 /**
@@ -16698,6 +16700,40 @@ function promoteBusPosLayers() {
   }
 }
 
+/** After the ETA path is painted, hand the polyline to the live-pos engine
+ *  (rail densify lives only in paint — don't run it twice). */
+function busPosAdoptMapGeom() {
+  if (!busPosEngine?.running || !etaMapGeomCache?.coords?.length) return;
+  const st = busPosDetailState();
+  if (!st) return;
+  const coords = etaMapGeomCache.coords
+    .map((c) => ({ lon: Number(c[0]), lat: Number(c[1]) }))
+    .filter((p) => Number.isFinite(p.lon) && Number.isFinite(p.lat));
+  if (coords.length < 2 || !busPosProjectOntoShape) return;
+  const stopDistM = [];
+  let searchFrom = 0;
+  for (const s of st.named) {
+    if (!Number.isFinite(s.lon) || !Number.isFinite(s.lat)) {
+      stopDistM.push(NaN);
+      continue;
+    }
+    const p = busPosProjectOntoShape(coords, s.lon, s.lat, searchFrom);
+    if (!p) {
+      stopDistM.push(NaN);
+      continue;
+    }
+    stopDistM.push(p.alongM);
+    searchFrom = p.segEnd;
+  }
+  const cumM = [0];
+  for (let i = 1; i < coords.length; i++) {
+    cumM.push(cumM[i - 1] + busPosDistM(coords[i - 1].lon, coords[i - 1].lat, coords[i].lon, coords[i].lat));
+  }
+  const shape = { coords, cumM };
+  busPosShape = shape;
+  busPosEngine.updateBoard({ stopDistM, shape });
+}
+
 // Marker cosmetics + animation state (PRD 4.2 marker enhancements):
 // eased glide between emits, route-colored outline/text, white fill, radar
 // pulse. All values are (re)set when the engine (re)starts for a route.
@@ -16818,24 +16854,16 @@ async function busPosBuildCtx(st) {
   let coords = null;
   let usedContrib = false;
   if (isRailKind) {
-    try {
-      const { densifyAlongBasemapRail } = await import("./railSnapper.js");
-      const pts = st.named
-        .filter((s) => Number.isFinite(s.lon) && Number.isFinite(s.lat))
-        .map((s) => ({ lon: s.lon, lat: s.lat, id: s.stopId || s.code }));
-      if (pts.length >= 2) {
-        const poly = await densifyAlongBasemapRail(pts, {
-          mode: st.kind === "lrt" ? "tram" : "subway",
-          route_short_name: st.route.id,
-          route_name: st.route.label || st.route.id,
-          route_id: `${st.kind}-${st.route.id}`,
-        });
-        if (poly?.length >= 2) coords = poly;
-      }
-    } catch (e) {
-      console.warn("[buspos] rail shape", e);
+    // Do NOT densify rails here — paintEtaRouteOnMap already snaps to the
+    // basemap. A second densify raced the path draw and left MTR/LRT with
+    // no line. Reuse the painted polyline, else stop chords until paint lands.
+    const cached = etaMapGeomCache?.coords;
+    if (cached?.length >= 2) {
+      coords = cached
+        .map((c) => ({ lon: Number(c[0]), lat: Number(c[1]) }))
+        .filter((p) => Number.isFinite(p.lon) && Number.isFinite(p.lat));
     }
-    if (!coords) {
+    if (!coords || coords.length < 2) {
       coords = st.named
         .filter((s) => Number.isFinite(s.lon) && Number.isFinite(s.lat))
         .map((s) => ({ lon: s.lon, lat: s.lat }));
