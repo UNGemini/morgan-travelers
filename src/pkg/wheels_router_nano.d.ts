@@ -7,6 +7,8 @@ export class WasmRouter {
     constructor(data: Uint8Array);
     plan(request: any): any;
     plan_viz(request: any): any;
+    road_route(request: any): any;
+    snap(request: any): any;
     stats(): any;
 }
 
@@ -18,9 +20,13 @@ export interface InitOutput {
     readonly wasmrouter_new: (a: number, b: number) => [number, number, number];
     readonly wasmrouter_plan: (a: number, b: any) => [number, number, number];
     readonly wasmrouter_plan_viz: (a: number, b: any) => [number, number, number];
+    readonly wasmrouter_road_route: (a: number, b: any) => [number, number, number];
+    readonly wasmrouter_snap: (a: number, b: any) => [number, number, number];
     readonly wasmrouter_stats: (a: number) => [number, number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_exn_store: (a: number) => void;
+    readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_start: () => void;

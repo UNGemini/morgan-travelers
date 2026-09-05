@@ -18,6 +18,7 @@ import {
 } from "./busShapes.js";
 import {
   densifyStopsViaOsrm,
+  localRoute,
   pathControlWaypoints,
   projectStops,
   followRoadsPath,
@@ -2824,20 +2825,28 @@ export function createPathContributor(ctx) {
             n: sections.length,
           }),
         );
-        // Control waypoints trace the edited line — OSRM re-routes the
-        // corridor through them. This is a re-route, not a vertex snap.
+        // Control waypoints trace the edited line — re-route the corridor
+        // through them. This is a re-route, not a vertex snap. The local
+        // WASM street graph goes first (instant + offline, blocker-aware);
+        // OSRM is the backup when a leg can't be routed locally.
         const waypoints = pathControlWaypoints(
           sub.map((c) => ({ lon: c[0], lat: c[1] })),
         );
-        const routed = await densifyStopsViaOsrm(waypoints, {
-          signal: loadAbort.signal,
-          avoidPoints: avoid,
-        });
-        // All-chord fallback (OSRM unavailable / nothing gained) — skip
-        // rather than flattening the user's line to straight chords
-        if (!routed || routed.length <= waypoints.length) continue;
-        /** @type {number[][]} */
-        const seg = routed.map((p) => [p.lon, p.lat]);
+        let seg = null;
+        const localRouted = await localRoute(waypoints, avoid, 12000);
+        if (localRouted && localRouted.path.length > waypoints.length) {
+          seg = localRouted.path.map((p) => [p.lon, p.lat]);
+        }
+        if (!seg) {
+          const routed = await densifyStopsViaOsrm(waypoints, {
+            signal: loadAbort.signal,
+            avoidPoints: avoid,
+          });
+          // All-chord fallback (OSRM unavailable / nothing gained) — skip
+          // rather than flattening the user's line to straight chords
+          if (!routed || routed.length <= waypoints.length) continue;
+          seg = routed.map((p) => [p.lon, p.lat]);
+        }
         // Keep both section anchors exactly so the splice blends in
         seg[0] = sub[0];
         seg[seg.length - 1] = sub[sub.length - 1];

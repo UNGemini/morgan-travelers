@@ -202,6 +202,25 @@ export function getRouterStats(): RouterStats | null {
   return routerInstance.stats() as RouterStats;
 }
 
+/** The loaded WASM router instance (or null before init succeeds). */
+export function getWasmRouter(): InstanceType<typeof WasmRouter> | null {
+  return routerInstance;
+}
+
+/**
+ * Ensure the WASM router is loaded (local road snap/route + trip planning).
+ * Non-throwing: returns false when the graph can't be fetched / parsed.
+ */
+export async function ensureRouterReady(): Promise<boolean> {
+  if (routerInstance) return true;
+  try {
+    await initRouter();
+    return routerInstance !== null;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Fetches the binary routing graph and initializes the WASM RAPTOR engine.
  */

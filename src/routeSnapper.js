@@ -9,7 +9,56 @@
  */
 
 import { detectMtrLineCode } from "./mtrColors.js";
+import { ensureRouterReady, getWasmRouter } from "./router.ts";
 import { t } from "./lang.js";
+
+// ── Local road engine (WASM walk/street graph) ───────────────────────────
+// Primary road snap/route source: the WASM street graph is fully local +
+// offline and blocker-aware. The online OSRM proxy stays as the backup
+// whenever the local engine can't answer (graph missing / leg unroutable).
+
+let localRoadTried = false;
+async function localRoad() {
+  if (!localRoadTried) {
+    localRoadTried = true;
+    await ensureRouterReady();
+  }
+  return getWasmRouter();
+}
+
+/** Local street-graph snap, or null when the local engine can't answer. */
+async function localSnap(p) {
+  const router = await localRoad();
+  if (!router?.snap) return null;
+  try {
+    const out = router.snap({ lat: p.lat, lon: p.lon, maxM: FOLLOW_NEAREST_MAX_M });
+    if (!out?.ok) return null;
+    return { lon: out.lon, lat: out.lat, distM: Number(out.distM) || 0 };
+  } catch {
+    return null;
+  }
+}
+
+/** Local road route through waypoints honouring blockers, or null. */
+export async function localRoute(waypoints, avoid, maxLegM = 4000) {
+  const router = await localRoad();
+  if (!router?.road_route) return null;
+  try {
+    const out = router.road_route({
+      waypoints: waypoints.map((p) => [p.lat, p.lon]),
+      avoid: (avoid || []).map((p) => [p.lon, p.lat]),
+      avoidRadiusM: 40,
+      maxLegM: Math.round(maxLegM),
+    });
+    if (!out?.ok || !Array.isArray(out.path) || out.path.length < 2) return null;
+    return {
+      path: out.path.map(([lat, lon]) => ({ lon, lat })),
+      meters: Number(out.meters) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * @typedef {{ lon: number, lat: number }} LngLat
@@ -373,6 +422,8 @@ export async function followRoadsPath(coords, opts = {}) {
 
   const maxDrift = opts.maxDriftM ?? FOLLOW_MAX_DRIFT_M;
   const signal = opts.signal;
+  // Local street-graph engine: primary snap/route source (OSRM = backup)
+  const localEngine = await localRoad();
   const snapOnly = Array.isArray(opts.snapIndices)
     ? new Set(opts.snapIndices.map((n) => Number(n)).filter((n) => n >= 0))
     : null;
@@ -407,6 +458,36 @@ export async function followRoadsPath(coords, opts = {}) {
         };
       }
       const isEnd = i === 0 || i === pts.length - 1;
+      // Local street-graph snap first — instant + offline; OSRM is backup
+      if (localEngine) {
+        const s = await localSnap(p);
+        if (s) {
+          const drift = s.distM;
+          const lim = isEnd ? Math.min(25, maxDrift) : maxDrift;
+          if (drift <= lim) {
+            if (nearAvoid({ lon: s.lon, lat: s.lat }) && !nearAvoid(p, 28)) {
+              return {
+                lon: p.lon,
+                lat: p.lat,
+                snapped: false,
+                raw: true,
+                driftM: drift,
+                reason: "blocker",
+              };
+            }
+            return { lon: s.lon, lat: s.lat, snapped: true, raw: false, driftM: drift };
+          }
+          return {
+            lon: p.lon,
+            lat: p.lat,
+            snapped: false,
+            raw: true,
+            driftM: drift,
+            reason: "drift",
+          };
+        }
+        // local couldn't snap — fall through to OSRM nearest
+      }
       try {
         const n = await osrmNearest(p, signal);
         if (
@@ -519,25 +600,49 @@ export async function followRoadsPath(coords, opts = {}) {
       /** @type {LngLat[]} */
       let mids = null;
       let segMethod = null;
-      try {
-        const dens = await densifySegmentIfOsrmOk(
-          job.aSnap,
-          job.bSnap,
-          pts[job.i],
-          pts[job.i + 1],
-          {
-            signal,
-            maxDrift,
-            nearestConcurrency: FOLLOW_INNER_NEAREST_CONCURRENCY,
-          },
+
+      // 1) Local street-graph route — instant + offline (blocker-aware);
+      // length sanity mirrors the OSRM corridor check (no wild detours)
+      if (localEngine) {
+        const chordM = haversineM(
+          pts[job.i].lat,
+          pts[job.i].lon,
+          pts[job.i + 1].lat,
+          pts[job.i + 1].lon,
         );
-        if (dens) {
-          mids = dens.mids;
-          segMethod = dens.method;
+        const lp = await localRoute(
+          [pts[job.i], pts[job.i + 1]],
+          avoid,
+          Math.min(20000, Math.round(chordM * 2.5 + 500)),
+        );
+        if (lp && lp.meters < chordM * 3.2 + 400 && lp.meters > chordM * 0.85) {
+          mids = thinPathMids(lp.path.slice(1, -1), FOLLOW_MAX_INSERT_PER_SEG);
+          segMethod = "local";
         }
-      } catch (e) {
-        if (e?.name === "AbortError" || e?.name === "OsrmDown") throw e;
-        mids = null;
+      }
+
+      // 2) OSRM backup: map-match the snapped ends / nearest-sample
+      if (!mids?.length) {
+        try {
+          const dens = await densifySegmentIfOsrmOk(
+            job.aSnap,
+            job.bSnap,
+            pts[job.i],
+            pts[job.i + 1],
+            {
+              signal,
+              maxDrift,
+              nearestConcurrency: FOLLOW_INNER_NEAREST_CONCURRENCY,
+            },
+          );
+          if (dens) {
+            mids = dens.mids;
+            segMethod = dens.method;
+          }
+        } catch (e) {
+          if (e?.name === "AbortError" || e?.name === "OsrmDown") throw e;
+          mids = null;
+        }
       }
 
       if (mids?.length) {
