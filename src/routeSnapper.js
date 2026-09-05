@@ -1637,16 +1637,18 @@ async function snapGtfsCorridorViaOsrm(poly, opts = {}) {
     // S64 main circular: leave GTFS alone. Hop-fill only S64C-scale shapes.
     if (seedLen > 16_000 || poly.length > 180) return null;
     try {
-      const filled = await fillGtfsHopsViaOsrm(poly, opts.signal, 48);
-      if (
-        filled &&
-        filled.length >= 2 &&
-        osrmCorridorPlausible(filled, poly, seedLen)
-      ) {
+      // Per-hop checks already reject Link Road. Do not require the
+      // whole path to pass corridor-plausible — one fat cargo hop
+      // used to discard the Yu Tung / Shun Tung fills too.
+      const filled = await fillGtfsHopsViaOsrm(poly, opts.signal, 80);
+      if (filled?.length >= 2) {
+        if (lngLatBbox(poly).minLon > 113.9 && filled.some(pointOnHzmbWest)) {
+          return null;
+        }
         return filled;
       }
     } catch (e) {
-      if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
+      if (e?.name === "AbortError") throw e;
     }
     return null;
   }
@@ -1726,7 +1728,7 @@ async function fillGtfsHopsViaOsrm(poly, signal, minHopM) {
   }
   if (!jobs.length) return poly.map((p) => ({ lon: p.lon, lat: p.lat }));
 
-  const routed = await mapPool(jobs, 4, async (job) => {
+  const routed = await mapPool(jobs, 3, async (job) => {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     let path = null;
     try {
@@ -1734,14 +1736,15 @@ async function fillGtfsHopsViaOsrm(poly, signal, minHopM) {
         radiusesM: 60,
       });
     } catch (e) {
-      if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
+      // A single slow hop must not abort the Yu Tung / roundabout fills.
+      if (e?.name === "AbortError") throw e;
       path = null;
     }
     if (!path || path.length < 2) return null;
     if (!osrmHopPlausible(job.a, job.b, path)) return null;
-    if (maxLateralDeviationM(path, job.a, job.b) > 110) return null;
+    if (maxLateralDeviationM(path, job.a, job.b) > 130) return null;
     const len = pathLengthM(path);
-    if (len > job.chord * 2.6 + 220) return null;
+    if (len > job.chord * 2.8 + 280) return null;
     return path;
   });
 
