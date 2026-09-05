@@ -80,6 +80,7 @@ import {
   loadOperatorSchedules,
   enumerateTrips,
 } from "./busSchedules.js";
+import { MTR_PATTERNS } from "./data/mtrRuntime.js";
 
 /** Typical bus speed for synthetic/fallback anchoring (m/s, ~30 km/h). */
 const V_TYP = 8.3;
@@ -87,6 +88,8 @@ const V_TYP = 8.3;
 const RAIL_V_MAX = 22;
 /** Floor on a rail hop so two platforms in one station don't collapse. */
 const RAIL_MIN_HOP_S = 20;
+/** Fetch-more: extra MTR stations when the gap from the last fetch is this far. */
+const RAIL_FETCH_GAP_M = 3500;
 /**
  * Extra seconds after a minute-rounded "Now" before the marker is treated
  * as at the stop (traffic lights). Inside the 25–45 s band.
@@ -236,6 +239,84 @@ export function canonicalLivePosOp(co, routeId) {
 /** Seconds still to go until we treat the ETA as physically at the stop. */
 function remainingSec(etaT, now) {
   return Math.max(0, (etaT + NOW_SLACK_MS - now) / 1000);
+}
+
+function mtrStopCode(stop) {
+  return String(stop?.stopId || stop?.stationCode || "")
+    .replace(/^MTR-/i, "")
+    .toUpperCase()
+    .slice(-3);
+}
+
+function hkServiceMins(now) {
+  const s = new Date(now).toLocaleString("en-GB", {
+    timeZone: "Asia/Hong_Kong",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const m = /(\d{1,2}):(\d{2})/.exec(s);
+  let mins = m ? Number(m[1]) * 60 + Number(m[2]) : 12 * 60;
+  if (mins < 3 * 60) mins += 24 * 60;
+  return mins;
+}
+
+function hmToMin(hm) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(hm || ""));
+  if (!m) return null;
+  let h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h >= 24) return 24 * 60 + min;
+  return h * 60 + min;
+}
+
+function pickMtrPattern(ctx) {
+  const line = String(ctx.routeShort || "").toUpperCase();
+  const pats = MTR_PATTERNS.filter((p) => p.line === line);
+  if (!pats.length) return null;
+  const last = mtrStopCode(ctx.stops?.[ctx.stops.length - 1]);
+  const first = mtrStopCode(ctx.stops?.[0]);
+  const want = String(ctx.headsign || "").toUpperCase();
+  let best = pats[0];
+  let bestS = -1;
+  for (const p of pats) {
+    const codes = p.codes || [];
+    let s = 0;
+    if (last && codes[codes.length - 1] === last) s += 6;
+    else if (last && codes.includes(last)) s += 2;
+    if (first && codes[0] === first) s += 3;
+    else if (first && codes.includes(first)) s += 1;
+    const hs = String(p.headsign || "").toUpperCase();
+    if (want && hs && (hs.includes(want) || want.includes(hs))) s += 4;
+    if (s > bestS) {
+      bestS = s;
+      best = p;
+    }
+  }
+  return best;
+}
+
+/** Headway + last-train cap for MTR (no GTFS trips). */
+function mtrHeadwayInfo(ctx, now) {
+  const pat = pickMtrPattern(ctx);
+  const mins = hkServiceMins(now);
+  const bands = pat?.bands || [];
+  let hw = 240;
+  let lastMins = 25 * 60;
+  for (const b of bands) {
+    const a = hmToMin(b.start);
+    let z = hmToMin(b.end);
+    if (a == null || z == null) continue;
+    if (z <= a) z += 24 * 60;
+    if (mins >= a && mins < z) {
+      hw = Math.max(60, Number(b.hw) || 240);
+      lastMins = z;
+      break;
+    }
+  }
+  if (!bands.length) hw = 240;
+  const maxPerHour = Math.max(1, Math.round(3600 / hw));
+  return { hw, maxPerHour, lastMins, pat };
 }
 
 /** Metro cruise used to match the same train across successive stations. */
@@ -548,7 +629,7 @@ export class BusPositionEngine {
   /**
    * Switch board stop (and optional fetch prefix) without resetting trips.
    * Joint harbour KMB↔CTB flips pass a new ctx.op here.
-   * @param {{ boardStopIndex?: number, op?: string, stops?: any[], stopDistM?: number[], fetchMore?: boolean, nlbRouteIds?: string[] }} patch
+   * @param {{ boardStopIndex?: number, op?: string, stops?: any[], stopDistM?: number[], fetchMore?: boolean, nlbRouteIds?: string[], headsign?: string, shape?: any }} patch
    */
   updateBoard(patch = {}) {
     if (!this.ctx || !this.running) return;
@@ -557,6 +638,7 @@ export class BusPositionEngine {
     if (patch.stopDistM) this.ctx.stopDistM = patch.stopDistM;
     if (patch.nlbRouteIds) this.ctx.nlbRouteIds = patch.nlbRouteIds;
     if (patch.fetchMore != null) this.ctx.fetchMore = patch.fetchMore;
+    if (patch.headsign != null) this.ctx.headsign = patch.headsign;
     if (Number.isInteger(patch.boardStopIndex)) {
       this.ctx.boardStopIndex = patch.boardStopIndex;
     }
@@ -946,10 +1028,11 @@ export class BusPositionEngine {
   }
 
   /**
-   * Stop indices whose ETA rows anchor the estimate. The board stop is always
-   * included; with ctx.fetchMore also the nearest stops (±1, ±2) and every
-   * 5th stop (±5, ±10, ±15) on both sides — behind (passed) and ahead
-   * (future) along the route.
+   * Stop indices whose ETA rows anchor the estimate.
+   * Bus + fetchMore: nearest (±1, ±2) and every 5th stop.
+   * MTR + fetchMore: stations ≥ RAIL_FETCH_GAP_M apart, plus origin & last
+   *   (TCL/TML/AEL hops are kilometres, not 5-stop index steps).
+   * MTR without fetchMore: board only — extras come from frequency + last train.
    */
   anchorStopIndices(ctx) {
     const n = ctx.stops?.length || 0;
@@ -957,12 +1040,33 @@ export class BusPositionEngine {
     if (!Number.isInteger(b) || b < 0 || b >= n) return [];
     const set = new Set([b]);
     const rail = ctx.op === "mtr" || ctx.op === "lrt";
-    // Always sample stops AHEAD of the board so vehicles that already
-    // passed still get an ETA pin (Next Train / stop ETA at later stops).
+    const dists = ctx.stopDistM || [];
+    if (rail) {
+      if (ctx.fetchMore) {
+        set.add(n - 1);
+        if (b > 0) set.add(0);
+        const gapWalk = (from, to, step) => {
+          let last = from;
+          for (let i = from + step; step > 0 ? i <= to : i >= to; i += step) {
+            const d0 = dists[last];
+            const d1 = dists[i];
+            const gap =
+              Number.isFinite(d0) && Number.isFinite(d1)
+                ? Math.abs(d1 - d0)
+                : 0;
+            if (gap >= RAIL_FETCH_GAP_M || i === to) {
+              set.add(i);
+              last = i;
+            }
+          }
+        };
+        gapWalk(b, n - 1, 1);
+        gapWalk(b, 0, -1);
+      }
+      return [...set].sort((a, b) => a - b);
+    }
     const ahead = Math.max(0, n - 1 - b);
-    const aheadStep = rail
-      ? Math.max(2, Math.ceil(ahead / 5) || 2)
-      : Math.max(1, Math.ceil(ahead / 8) || 5);
+    const aheadStep = Math.max(1, Math.ceil(ahead / 8) || 5);
     for (let i = b + 1; i < n; i++) {
       if (i === n - 1 || (i - b) % aheadStep === 0) set.add(i);
     }
@@ -1017,11 +1121,12 @@ export class BusPositionEngine {
         const norm = normalizeRows(ctx.op, rows, ctx.bound, now);
         if (norm.length) stopEtas.set(idx, norm);
       }
-      // Passive reuse over the whole window (fetch-more off): cached rows the
-      // ETA panel fetched for other stops — e.g. the stop the user had open
-      // before switching — still constrain the trips, so switching the board
-      // stop keeps their estimates continuous instead of re-anchoring them.
-      if (!ctx.fetchMore) {
+      // Passive reuse over the whole window (fetch-more off, bus only):
+      // cached rows from other stops keep trips continuous when switching.
+      // Rail without fetch-more stays board-only — extra trains are
+      // frequency-predicted so we don't stack every station's next-train list.
+      const rail = ctx.op === "mtr" || ctx.op === "lrt";
+      if (!ctx.fetchMore && !rail) {
         for (let i = 0; i < (ctx.stops?.length || 0); i++) {
           if (stopEtas.has(i)) continue;
           const stop = ctx.stops?.[i];
@@ -1045,10 +1150,12 @@ export class BusPositionEngine {
         const slack = boardRows.length >= 3 ? 0 : PHANTOM_SLACK_MS;
         this.boardHorizonMs = Math.max(0, maxRowT - now + slack);
       }
-      const rail = ctx.op === "mtr" || ctx.op === "lrt";
       if (!rail) {
         this.headwaySec = this.gtfsHeadwaySec || 0;
         this.observeEtaHeadway(boardRows);
+      } else {
+        const info = mtrHeadwayInfo(ctx, now);
+        this.headwaySec = info.hw;
       }
       this.matchAnchors(ctx, stopEtas, now);
       this.hasPolled = true;
@@ -1136,6 +1243,9 @@ export class BusPositionEngine {
         }
       }
       synthRows.push(...dedupeRailSynthRows(rows));
+      if (!ctx.fetchMore) {
+        synthRows.push(...this.freqAheadSynths(ctx, synthRows, now));
+      }
     }
     this.synth = this.reidentifySynth(synthRows, now);
     this.updateTripState(trips, prevConstraints, now);
@@ -1185,22 +1295,74 @@ export class BusPositionEngine {
    * kept through their dwell at the stop, then dropped (the feed dropped
    * their row anyway).
    */
+  /**
+   * When fetch-more is off, place extra trains ahead of the board stop using
+   * line headway and max trains/hour, clipped by last-train time so we don't
+   * invent ghosts after service ends.
+   */
+  freqAheadSynths(ctx, liveRows, now) {
+    const info = mtrHeadwayInfo(ctx, now);
+    const hw = info.hw;
+    const maxPerHour = info.maxPerHour;
+    const mins = hkServiceMins(now);
+    const remainServiceSec = Math.max(0, (info.lastMins - mins) * 60);
+    const boardD = ctx.stopDistM?.[ctx.boardStopIndex];
+    const endD = ctx.stopDistM?.[ctx.stops.length - 1];
+    if (!Number.isFinite(boardD) || !Number.isFinite(endD) || hw < 60) {
+      return [];
+    }
+    if (remainServiceSec < hw * 0.5) return [];
+    const dest = String(liveRows[0]?.dest || ctx.headsign || "");
+    const liveN = liveRows.length;
+    const extra = Math.max(
+      0,
+      Math.min(maxPerHour - liveN, Math.floor(remainServiceSec / hw) - liveN),
+    );
+    if (extra <= 0) return [];
+    const dirSign = endD >= boardD ? 1 : -1;
+    const spacing = hw * RAIL_V_MAX;
+    const out = [];
+    for (let k = 1; k <= extra; k++) {
+      const pos = boardD + dirSign * k * spacing;
+      if (dirSign > 0 && pos >= endD - 80) break;
+      if (dirSign < 0 && pos <= endD + 80) break;
+      out.push({
+        etaT: now + k * hw * 1000,
+        dest,
+        d: pos,
+        posD: pos,
+        fixedD: true,
+      });
+    }
+    return out;
+  }
+
   reidentifySynth(rows, now) {
     const prev = this.synth;
     const livePrev = [];
     for (const s of prev) {
       if (s.etaT > now && s.arrD < 0) livePrev.push(s);
     }
+    const impliedPos = (row) => {
+      if (row.fixedD && Number.isFinite(row.posD ?? row.d)) {
+        return row.posD ?? row.d;
+      }
+      if (Number.isFinite(row.posD)) return row.posD;
+      if (!Number.isFinite(row.d)) return NaN;
+      return this.walkBackFromDist(row.d, remainingSec(row.etaT, now));
+    };
     const pairs = [];
     for (let i = 0; i < livePrev.length; i++) {
       const s = livePrev[i];
+      const sd = impliedPos(s);
       for (let j = 0; j < rows.length; j++) {
         const r = rows[j];
+        const rd = impliedPos(r);
         const destPen =
           s.dest && r.dest && s.dest === r.dest ? 0 : 80_000;
         const dd =
-          Number.isFinite(s.d) && Number.isFinite(r.d)
-            ? Math.abs(s.d - r.d)
+          Number.isFinite(sd) && Number.isFinite(rd)
+            ? Math.abs(sd - rd)
             : 4000;
         const dt = Math.abs(s.etaT - r.etaT);
         pairs.push({
@@ -1232,6 +1394,8 @@ export class BusPositionEngine {
         arrD: -1,
         arrAt: 0,
         d: r.d,
+        posD: impliedPos(r),
+        fixedD: !!r.fixedD,
       });
     }
     for (let j = 0; j < rows.length; j++) {
@@ -1244,6 +1408,8 @@ export class BusPositionEngine {
         arrD: -1,
         arrAt: 0,
         d: r.d,
+        posD: impliedPos(r),
+        fixedD: !!r.fixedD,
       });
     }
     let nextRank = 1;
@@ -1655,13 +1821,25 @@ export class BusPositionEngine {
     // simulates the stop: it holds at the stop for the feed-listed window
     // (same rule as real trips), then drops (the feed dropped its row anyway).
     for (const s of this.synth) {
+      if (s.fixedD && Number.isFinite(s.d)) {
+        s.posD = s.d;
+        out.push({
+          id: `synth:${s.rank}`,
+          d: s.d,
+          confidence: CONF_ETA,
+          anchored: true,
+        });
+        continue;
+      }
       const fromD = Number.isFinite(s.d) ? s.d : boardDist;
       if (!Number.isFinite(fromD)) continue;
       const T = remainingSec(s.etaT, now);
       if (T > 0) {
+        const d = this.walkBackFromDist(fromD, T);
+        s.posD = d;
         out.push({
           id: `synth:${s.rank}`,
-          d: this.walkBackFromDist(fromD, T),
+          d,
           confidence: CONF_ETA,
           anchored: true,
         });

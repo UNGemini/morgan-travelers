@@ -17542,6 +17542,8 @@ async function busPosSyncState() {
       String(ctx?.op || "").toLowerCase() !== String(st.co || "").toLowerCase();
     const boardChanged = ctx?.boardStopIndex !== st.boardIndex;
     if (boardChanged || opChanged) {
+      const dirs = etaRouteDirections(st.route, { full: true });
+      const dir = dirs[resolveCardDirIndex(st.route, dirs)] || dirs[0];
       busPosEngine.updateBoard({
         boardStopIndex: st.boardIndex,
         op: st.co,
@@ -17552,6 +17554,7 @@ async function busPosSyncState() {
           lat: s.lat,
         })),
         fetchMore: st.fetchMore,
+        headsign: String(dir?.dest || ""),
       });
       void busPosEngine.poll();
     }
