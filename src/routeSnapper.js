@@ -1400,8 +1400,8 @@ export async function buildTransitPolyline(opt, opts = {}) {
         }
         if (poly?.length >= 2) {
           // Sparse stop-seq shapes (S1) densify stop-to-stop. Dense GTFS
-          // (S64C AM/PM) snaps a handful of corridor waypoints — never the
-          // full vertex list — then interpolates so zoom stays road-like.
+          // on CLK (S64C AM circular *and* PM inbound) map-matches the
+          // same GTFS vertices, then interpolates so zoom stays road-like.
           if (gtfs.sparse) {
             try {
               const dens = await densifyStopsViaOsrm(poly, opts);
@@ -1610,9 +1610,10 @@ function osrmCorridorPlausible(path, seed, seedLen) {
 
 /**
  * Road-hug a dense GTFS polyline without routing every vertex.
- * CLK: /route a handful of waypoints (drives the Shun Tung roundabout);
- * /match GTFS vertices only when that route shortcuts or fattens.
- * Elsewhere: few /route waypoints. Returns null → GTFS interpolation.
+ * CLK (S64C AM *and* PM): /match the operator vertices in 5-point windows
+ * — same path for the circular and the inbound. /route is only a fallback
+ * when matching fails. Elsewhere: few /route waypoints.
+ * Returns null → GTFS interpolation.
  *
  * @param {LngLat[]} poly
  * @param {{ signal?: AbortSignal }} [opts]
@@ -1652,17 +1653,11 @@ async function snapGtfsCorridorViaOsrm(poly, opts = {}) {
     return null;
   };
 
-  const routed = await tryRoute();
-  const routedRatio = routed ? pathLengthM(routed) / seedLen : Infinity;
-  // /route drives around roundabouts. /match of a GTFS vertex sitting in
-  // the island (S64C PM Shun Tung) still kinks. Only match when /route
-  // shortcuts or fattens the cargo loop (typical AM circular).
-  const routeLooksDriven =
-    !!routed && routedRatio >= 0.92 && routedRatio <= 1.18;
-
-  if (clk && !routeLooksDriven) {
+  const tryMatch = async () => {
+    // AM 127 pts and PM 69 pts both match the real GTFS vertices (same
+    // windowed /match that made AM hug Shun Tung / Yu Tung).
     const trace =
-      poly.length <= 90
+      poly.length <= 140
         ? dedupePathClose(poly, 4)
         : pathControlWaypoints(poly, {
             maxPoints: 24,
@@ -1681,9 +1676,15 @@ async function snapGtfsCorridorViaOsrm(poly, opts = {}) {
     } catch (e) {
       if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
     }
+    return null;
+  };
+
+  if (clk) {
+    const [matched, routed] = await Promise.all([tryMatch(), tryRoute()]);
+    return matched || routed;
   }
 
-  return routed;
+  return await tryRoute();
 }
 
 /**
