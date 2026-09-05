@@ -482,7 +482,7 @@
                 id="contrib-recalc-path"
                 class="btn contrib-follow-roads"
                 data-acrylic
-                title="Re-run the road calculation with current blockers, line and stops — whole route, or only sections between selected points (Shift+R)"
+                title="Re-route the line along real roads through its control points — whole route, or only sections between selected points (Shift+R)"
               >
                 <span class="btn-row">
                   <span class="material-symbols-outlined" aria-hidden="true">alt_route</span>
@@ -491,11 +491,12 @@
                 </span>
               </button>
               <p class="hint contrib-keys-hint" style="margin-top: 0">
-                Re-runs the road calculation on what is on the map now —
-                current blockers, line and stops. With 2+ selected points only
-                the sections between them are recalculated and the section ends
-                stay fixed; with no selection the whole route (or the visible
-                half of a circular) is.
+                Re-routes the line along real roads through the current control
+                points, honouring blockers and stops. With 2+ selected points
+                only the sections between them are re-routed and the section
+                ends stay fixed; with no selection the whole route (or the
+                visible half of a circular) is. <strong>Follow roads</strong> (R)
+                still only snaps your existing points onto nearby streets.
               </p>
               <div id="contrib-follow-legend" class="contrib-follow-legend" hidden>
                 <p class="contrib-follow-legend-title">Follow roads calculation</p>

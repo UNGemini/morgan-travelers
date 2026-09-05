@@ -12209,6 +12209,9 @@ async function bootstrapNearbyUserLocation(opts = {}) {
 geolocateControl.on?.("geolocate", (ev) => {
   const c = ev?.coords;
   if (!c || !Number.isFinite(c.latitude) || !Number.isFinite(c.longitude)) return;
+  // Contribute mode owns the map while open — a GPS fix must not yank the
+  // camera away from the path being edited or move the Nearby browse pin.
+  if (pathContributor?.isOpen()) return;
   // Manual browse point (map click) or route fit on screen: GPS must not
   // reset the override point or yank the camera back — only the locate
   // button re-engages following.
@@ -16841,6 +16844,14 @@ try {
 }
 
 /** Contributor path editor (About → Contribute route path) */
+// Contribute mode owns the map: opening it must stop GPS camera follow too
+// (MapLibre's trackUserLocation re-centres independently of our listener).
+document
+  .getElementById("btn-contribute-path")
+  ?.addEventListener("click", () => {
+    disengageGeolocateFollow();
+  });
+
 const pathContributor = createPathContributor({
   map,
   showToast,

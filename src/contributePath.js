@@ -18,6 +18,7 @@ import {
 } from "./busShapes.js";
 import {
   densifyStopsViaOsrm,
+  pathControlWaypoints,
   projectStops,
   followRoadsPath,
   sliceRouteBetweenStops,
@@ -2733,11 +2734,13 @@ export function createPathContributor(ctx) {
   }
 
   /**
-   * Recalculate path: re-run road snapping on what is on the map now —
-   * current blockers, edited line and visual stops. With 2+ selected
-   * vertices only the sections between consecutive selected points are
-   * recalculated (section anchors stay fixed); with no selection the
-   * whole visible route is (respects the circular hide cutoff). The
+   * Recalculate path: RE-ROUTE the line along real roads — unlike Follow
+   * roads, which only snaps existing points. Control waypoints trace the
+   * edited line; OSRM rebuilds the corridor between them, avoiding
+   * blockers. With 2+ selected vertices only the sections between
+   * consecutive selected points are re-routed (section anchors stay
+   * fixed); with no selection the whole visible route is (respects the
+   * circular hide cutoff). Visual stops are re-projected afterwards. The
    * result waits in the same Confirm / Revert preview as Follow roads.
    */
   async function runRecalcPath() {
@@ -2747,6 +2750,13 @@ export function createPathContributor(ctx) {
     }
     if (points.length < 2) {
       showToast(t("Draw or load a path first (need ≥ 2 points)"), 2200);
+      return;
+    }
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      showToast(
+        t("Recalculate needs a connection — you appear to be offline."),
+        2600,
+      );
       return;
     }
     if (loadAbort) loadAbort.abort();
@@ -2799,12 +2809,8 @@ export function createPathContributor(ctx) {
     let after = beforePath.map((c) => [c[0], c[1]]);
     /** @type {number[][]} recalculated coords, for the post-run map fit */
     const recalcCoords = [];
-    let snapN = 0;
     let insN = 0;
-    let rawN = 0;
     let done = 0;
-    /** @type {import("./routeSnapper.js").FollowRoadsDebug | null} */
-    let debug = null;
 
     try {
       // Right-to-left so splicing never shifts pending section indices
@@ -2812,60 +2818,44 @@ export function createPathContributor(ctx) {
         const [a, b] = sections[si];
         const sub = after.slice(a, b + 1).map((c) => [c[0], c[1]]);
         if (sub.length < 2) continue;
-        const interior = sub
-          .map((_, i) => i)
-          .filter((i) => i > 0 && i < sub.length - 1);
         setStatus(
           t("Road assistant: recalculating section {i}/{n}…", {
             i: sections.length - si,
             n: sections.length,
           }),
         );
-        const res = await followRoadsPath(sub, {
+        // Control waypoints trace the edited line — OSRM re-routes the
+        // corridor through them. This is a re-route, not a vertex snap.
+        const waypoints = pathControlWaypoints(
+          sub.map((c) => ({ lon: c[0], lat: c[1] })),
+        );
+        const routed = await densifyStopsViaOsrm(waypoints, {
           signal: loadAbort.signal,
-          skipWrap: true,
           avoidPoints: avoid,
-          // With interior points only they snap — both section anchors
-          // stay exactly where they are so the splice blends in.
-          snapIndices: interior.length ? interior : undefined,
-          onProgress: (ev) => {
-            if (ev?.msg) setStatus(t("Road assistant: {msg}", { msg: ev.msg }));
-          },
         });
-        if (res.method !== "snap" || res.path.length < 2) continue;
+        // All-chord fallback (OSRM unavailable / nothing gained) — skip
+        // rather than flattening the user's line to straight chords
+        if (!routed || routed.length <= waypoints.length) continue;
         /** @type {number[][]} */
-        const seg = res.path.map((p) => [p.lon, p.lat]);
-        if (!interior.length) {
-          // Two anchors only: keep them exactly, splice in the road mids
-          if (seg.length < 3) continue;
-          seg[0] = sub[0];
-          seg[seg.length - 1] = sub[sub.length - 1];
-        }
+        const seg = routed.map((p) => [p.lon, p.lat]);
+        // Keep both section anchors exactly so the splice blends in
+        seg[0] = sub[0];
+        seg[seg.length - 1] = sub[sub.length - 1];
         after.splice(a, b - a + 1, ...seg);
         for (const c of seg) recalcCoords.push(c);
-        snapN += res.snapped ?? 0;
-        insN += res.inserted ?? 0;
-        rawN += res.keptRaw ?? 0;
+        insN += Math.max(0, seg.length - waypoints.length);
         done += 1;
-        if (res.debug) {
-          debug = debug
-            ? {
-                ...debug,
-                vertices: [...debug.vertices, ...res.debug.vertices],
-                segments: [...debug.segments, ...res.debug.segments],
-                inserted: [...debug.inserted, ...res.debug.inserted],
-              }
-            : res.debug;
-        }
       }
 
       if (!done) {
         pathHistory.pop(); // nothing changed
-        if (debug) paintFollowRoadsDebug(debug);
         setStatus(
-          t("Road assistant: nothing changed — see map legend (grey=original, amber=kept raw)."),
+          t("Couldn't reroute along roads — OSRM is unavailable. Path unchanged."),
         );
-        showToast(t("Path unchanged — debug overlay shows why"), 2800);
+        showToast(
+          t("Couldn't reroute along roads — OSRM is unavailable. Path unchanged."),
+          3200,
+        );
         return;
       }
 
@@ -2875,33 +2865,26 @@ export function createPathContributor(ctx) {
       else paintDraft();
       fitCoords(recalcCoords.length >= 2 ? recalcCoords : points);
       setEditMode("path");
-      if (debug) {
-        debug = {
-          ...debug,
-          original: beforePath.map((c) => ({ lon: c[0], lat: c[1] })),
-          result: points.map((c) => ({ lon: c[0], lat: c[1] })),
-        };
-        paintFollowRoadsDebug(debug);
-      }
-
-      const densN = (debug?.segments || []).filter(
-        (s) => s.status === "densified",
-      ).length;
-      const failN = (debug?.segments || []).filter(
-        (s) => s.status === "downgrade",
-      ).length;
+      // Grey "original" overlay so the reroute is easy to compare + revert
+      paintFollowRoadsDebug({
+        original: beforePath.map((c) => ({ lon: c[0], lat: c[1] })),
+        vertices: [],
+        segments: [],
+        inserted: [],
+        result: points.map((c) => ({ lon: c[0], lat: c[1] })),
+      });
 
       followPending = {
         beforePath,
         beforeStops,
         afterPath: points.map((c) => [c[0], c[1]]),
-        debug: debug || null,
+        debug: null,
         stats: {
-          snapN,
+          snapN: 0,
           insN,
-          rawN,
-          densN,
-          failN,
+          rawN: 0,
+          densN: 0,
+          failN: 0,
           beforeN,
           afterN: points.length,
         },
@@ -2909,10 +2892,9 @@ export function createPathContributor(ctx) {
       setFollowPendingUi(true);
 
       setStatus(
-        t("Recalc preview: {snap} snapped · {raw} raw · {ins} road pts · {before}→{after} pts — Confirm or Revert", {
-          snap: snapN,
-          raw: rawN,
+        t("Recalc preview: {ins} road pts via {n} section(s) · {before}→{after} pts — Confirm or Revert", {
           ins: insN,
+          n: done,
           before: beforeN,
           after: points.length,
         }),

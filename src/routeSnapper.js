@@ -245,7 +245,7 @@ const TERMINAL_END_OK_M = 60;
  * Densify stop sequence via OSRM driving (road-following bus approx).
  * Proxied at /osrm for COEP. Detour-rejects bad airport/HZMB legs.
  * @param {Array<{ lon: number, lat: number }>} stops
- * @param {{ signal?: AbortSignal }} [opts]
+ * @param {{ signal?: AbortSignal, avoidPoints?: Array<{ lon: number, lat: number } | number[]> }} [opts]
  * @returns {Promise<LngLat[]>}
  */
 export async function densifyStopsViaOsrm(stops, opts = {}) {
@@ -266,6 +266,7 @@ export async function densifyStopsViaOsrm(stops, opts = {}) {
 
   const clk = pointsInClkTungChung(waypoints);
   const routeOpts = clk ? { radiusesM: OSRM_CLK_RADIUS_M } : {};
+  const avoidPoints = normalizeLngLatList(opts.avoidPoints || []);
 
   // Prefer one multi-waypoint request when the path stays near every stop
   try {
@@ -273,7 +274,8 @@ export async function densifyStopsViaOsrm(stops, opts = {}) {
     if (
       path.length >= 2 &&
       osrmMultiPathPlausible(path, waypoints, stops) &&
-      osrmMultiPathTerminalsOk(path, waypoints)
+      osrmMultiPathTerminalsOk(path, waypoints) &&
+      !pathNearAvoid(path, avoidPoints)
     ) {
       return path;
     }
@@ -283,11 +285,33 @@ export async function densifyStopsViaOsrm(stops, opts = {}) {
       );
     }
   } catch (e) {
-    if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
+    if (
+      e?.name === "AbortError" ||
+      e?.name === "TimeoutError" ||
+      e?.name === "OsrmDown"
+    ) {
+      throw e;
+    }
     console.warn("[routeSnapper] multi-waypoint OSRM failed, trying pairs", e);
   }
 
-  return densifyOsrmPairs(waypoints, opts.signal, routeOpts);
+  return densifyOsrmPairs(waypoints, opts.signal, routeOpts, avoidPoints);
+}
+
+/**
+ * Any vertex of `path` within `lim` m of an avoid (blocker) point?
+ * @param {LngLat[]} path
+ * @param {LngLat[]} avoid
+ * @param {number} [lim]
+ */
+function pathNearAvoid(path, avoid, lim = 40) {
+  if (!avoid?.length || !path?.length) return false;
+  for (const p of path) {
+    for (const a of avoid) {
+      if (haversineM(p.lat, p.lon, a.lat, a.lon) <= lim) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -1122,7 +1146,7 @@ async function osrmMatch(points, signal, opts = {}) {
  * @param {AbortSignal} [signal]
  * @param {{ radiusesM?: number }} [routeOpts]
  */
-async function densifyOsrmPairs(waypoints, signal, routeOpts = {}) {
+async function densifyOsrmPairs(waypoints, signal, routeOpts = {}, avoidPoints = []) {
   const chunks = [];
   for (let i = 0; i < waypoints.length - 1; i++) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -1137,7 +1161,13 @@ async function densifyOsrmPairs(waypoints, signal, routeOpts = {}) {
     try {
       path = await osrmRoute([a, b], signal, hopOpts);
     } catch (e) {
-      if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
+      if (
+        e?.name === "AbortError" ||
+        e?.name === "TimeoutError" ||
+        e?.name === "OsrmDown"
+      ) {
+        throw e;
+      }
       path = null;
     }
     const isFirstHop = i === 0;
@@ -1147,7 +1177,10 @@ async function densifyOsrmPairs(waypoints, signal, routeOpts = {}) {
         (!isFirstHop || terminalApproachOk(path, a, b, false)) &&
         (!isLastHop || terminalApproachOk(path, b, a, true))
       : false;
-    if (!endOk) {
+    if (endOk && pathNearAvoid(path, avoidPoints)) {
+      console.warn("[routeSnapper] OSRM hop crosses a blocker → chord");
+      path = chordDensify(a, b);
+    } else if (!endOk) {
       if (path?.length >= 2) {
         console.warn(
           "[routeSnapper] OSRM hop rejected",
