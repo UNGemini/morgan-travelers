@@ -188,6 +188,7 @@ export const zhCn = {
   "Recalculate path": "重新计算路径",
   "Recalc preview: {snap} snapped · {raw} raw · {ins} road pts · {before}→{after} pts — Confirm or Revert": "重新计算预览：{snap} 个已吸附 · {raw} 个保留原样 · 新增 {ins} 个道路点 · {before}→{after} 个点——请确认或还原",
   "Road assistant: recalculating section {i}/{n}…": "道路助手：正在重新计算第 {i}/{n} 段…",
+  "Road assistant stopped: OSRM is rate-limiting or down — try again in a minute.": "道路助手已停止：OSRM 正在限流或不可用——请一分钟后再试。",
   "Follow-roads overlay hidden": "已隐藏沿路行驶叠加层",
   "Add blocker": "添加阻挡点",
   "Blocker added": "已添加阻挡点",

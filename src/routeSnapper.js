@@ -298,11 +298,11 @@ const FOLLOW_MAX_DRIFT_M = 70;
 /** Max /nearest distance from a user point (m). */
 const FOLLOW_NEAREST_MAX_M = 95;
 /** Concurrent /nearest requests. */
-const FOLLOW_NEAREST_CONCURRENCY = 8;
+const FOLLOW_NEAREST_CONCURRENCY = 4;
 /** Concurrent segment densify requests (segments are independent). */
-const FOLLOW_SEGMENTS_CONCURRENCY = 6;
+const FOLLOW_SEGMENTS_CONCURRENCY = 3;
 /** Concurrent /nearest fallbacks per segment while the segment pool runs. */
-const FOLLOW_INNER_NEAREST_CONCURRENCY = 3;
+const FOLLOW_INNER_NEAREST_CONCURRENCY = 2;
 /** Max intermediate road points inserted per successful segment. */
 const FOLLOW_MAX_INSERT_PER_SEG = 24;
 
@@ -424,7 +424,8 @@ export async function followRoadsPath(coords, opts = {}) {
             reason: "drift",
           };
         }
-      } catch {
+      } catch (e) {
+        if (e?.name === "OsrmDown") throw e;
         /* keep raw */
       }
       return {
@@ -511,7 +512,7 @@ export async function followRoadsPath(coords, opts = {}) {
           segMethod = dens.method;
         }
       } catch (e) {
-        if (e?.name === "AbortError") throw e;
+        if (e?.name === "AbortError" || e?.name === "OsrmDown") throw e;
         mids = null;
       }
 
@@ -705,7 +706,8 @@ async function densifySegmentIfOsrmOk(aSnap, bSnap, aOrig, bOrig, opts) {
       radiusesM: [30, 50, 70],
       gaps: "ignore",
     });
-  } catch {
+  } catch (e) {
+    if (e?.name === "OsrmDown") throw e;
     matched = null;
   }
 
@@ -763,7 +765,8 @@ async function densifySegmentIfOsrmOk(aSnap, bSnap, aOrig, bOrig, opts) {
         ) {
           return { lon: n.lon, lat: n.lat, ok: true };
         }
-      } catch {
+      } catch (e) {
+        if (e?.name === "OsrmDown") throw e;
         /* skip */
       }
       return { lon: p.lon, lat: p.lat, ok: false };
@@ -2002,23 +2005,77 @@ function abortablePromise(p, signal) {
   });
 }
 
-/** Timed fetch + parse for cached OSRM requests. Errors carry `.status`. */
-async function osrmFetchJson(url) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(
-    () => ctrl.abort(new DOMException("OSRM timeout", "TimeoutError")),
-    OSRM_TIMEOUT_MS,
+/** Timed fetch + parse for cached OSRM requests. Errors carry `.status`.
+ *  Starts are throttled through a min-gap gate and 429/5xx answers are
+ *  retried with backoff — FOSSGIS rate-limits bursts (429) and briefly
+ *  fails whole IPs (520/521), which would otherwise downgrade every segment. */
+const OSRM_MIN_GAP_MS = 300;
+let osrmGate = Promise.resolve();
+const osrmSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Consecutive upstream failures — stop hammering a rate-limited OSRM.
+ *  Recovers automatically after a quiet minute. */
+const OSRM_FAIL_STREAK_LIMIT = 8;
+let osrmFailStreak = 0;
+let osrmLastFailAt = 0;
+function osrmCircuitOpen() {
+  return (
+    osrmFailStreak >= OSRM_FAIL_STREAK_LIMIT &&
+    Date.now() - osrmLastFailAt < 60_000
   );
-  try {
-    const res = await fetch(url, { signal: ctrl.signal });
-    if (!res.ok) {
-      const err = new Error(`OSRM ${res.status}`);
-      err.status = res.status;
-      throw err;
+}
+function osrmDownError() {
+  const e = new Error(
+    t("Road assistant stopped: OSRM is rate-limiting or down — try again in a minute."),
+  );
+  e.name = "OsrmDown";
+  return e;
+}
+async function osrmFetchJson(url) {
+  if (osrmCircuitOpen()) throw osrmDownError();
+  const start = osrmGate.then(() => undefined);
+  osrmGate = start.then(() => osrmSleep(OSRM_MIN_GAP_MS));
+  await start;
+  let gap = 900;
+  for (let attempt = 0; ; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(
+      () => ctrl.abort(new DOMException("OSRM timeout", "TimeoutError")),
+      OSRM_TIMEOUT_MS,
+    );
+    let res;
+    try {
+      res = await fetch(url, { signal: ctrl.signal });
+    } catch (e) {
+      if (e?.name === "TimeoutError" && attempt < 1) {
+        await osrmSleep(gap + Math.random() * 300);
+        gap *= 2;
+        continue;
+      }
+      osrmFailStreak += 1;
+      osrmLastFailAt = Date.now();
+      throw e;
+    } finally {
+      clearTimeout(timer);
     }
-    return await res.json();
-  } finally {
-    clearTimeout(timer);
+    if (res.ok) {
+      osrmFailStreak = 0;
+      return await res.json();
+    }
+    if ((res.status === 429 || res.status >= 500) && attempt < 2) {
+      const ra = Number(res.headers.get("retry-after"));
+      const wait =
+        Number.isFinite(ra) && ra > 0
+          ? Math.min(ra * 1000, 8000)
+          : gap + Math.random() * 400;
+      await osrmSleep(wait);
+      gap *= 2;
+      continue;
+    }
+    const err = new Error(`OSRM ${res.status}`);
+    err.status = res.status;
+    osrmFailStreak += 1;
+    osrmLastFailAt = Date.now();
+    throw err;
   }
 }
 

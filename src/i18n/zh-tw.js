@@ -186,6 +186,7 @@ export const zhTw = {
   "Recalculate path": "重新計算路徑",
   "Recalc preview: {snap} snapped · {raw} raw · {ins} road pts · {before}→{after} pts — Confirm or Revert": "重新計算預覽：{snap} 個已吸附 · {raw} 個保留原樣 · 新增 {ins} 個道路點 · {before}→{after} 個點——請確認或還原",
   "Road assistant: recalculating section {i}/{n}…": "道路助手：正在重新計算第 {i}/{n} 段…",
+  "Road assistant stopped: OSRM is rate-limiting or down — try again in a minute.": "道路助手已停止：OSRM 正限制請求或離線——請一分鐘後再試。",
   "Follow-roads overlay hidden": "已隱藏沿路行駛疊加層",
   "Add blocker": "加入阻擋點",
   "Blocker added": "已加入阻擋點",

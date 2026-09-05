@@ -186,6 +186,7 @@ export const ko = {
   "Recalculate path": "경로 재계산",
   "Recalc preview: {snap} snapped · {raw} raw · {ins} road pts · {before}→{after} pts — Confirm or Revert": "재계산 미리보기: 스냅 {snap} · 원본 유지 {raw} · 도로 점 {ins} · {before}→{after}개 점 — 확인 또는 되돌리기",
   "Road assistant: recalculating section {i}/{n}…": "도로 어시스턴트: 구간 {i}/{n} 재계산 중…",
+  "Road assistant stopped: OSRM is rate-limiting or down — try again in a minute.": "도로 어시스턴트 중지: OSRM 요청 제한 또는 접근 불가 — 1분 후 다시 시도하세요.",
   "Follow-roads overlay hidden": "도로 추종 오버레이를 숨겼습니다",
   "Add blocker": "차단점 추가",
   "Blocker added": "차단점을 추가했습니다",

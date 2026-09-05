@@ -186,6 +186,7 @@ export const ja = {
   "Recalculate path": "経路を再計算",
   "Recalc preview: {snap} snapped · {raw} raw · {ins} road pts · {before}→{after} pts — Confirm or Revert": "再計算プレビュー：スナップ {snap} · 手描き維持 {raw} · 道路ポイント {ins} · {before}→{after} 箇所 — 確認または取り消し",
   "Road assistant: recalculating section {i}/{n}…": "道路アシスタント：区間 {i}/{n} を再計算中…",
+  "Road assistant stopped: OSRM is rate-limiting or down — try again in a minute.": "道路アシスタントを停止：OSRM がレート制限中か到達不能です — 1 分後に再試行してください。",
   "Follow-roads overlay hidden": "道路追従オーバーレイを非表示にしました",
   "Add blocker": "ブロッカーを追加",
   "Blocker added": "ブロッカーを追加しました",
