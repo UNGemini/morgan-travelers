@@ -299,6 +299,10 @@ const FOLLOW_MAX_DRIFT_M = 70;
 const FOLLOW_NEAREST_MAX_M = 95;
 /** Concurrent /nearest requests. */
 const FOLLOW_NEAREST_CONCURRENCY = 8;
+/** Concurrent segment densify requests (segments are independent). */
+const FOLLOW_SEGMENTS_CONCURRENCY = 6;
+/** Concurrent /nearest fallbacks per segment while the segment pool runs. */
+const FOLLOW_INNER_NEAREST_CONCURRENCY = 3;
 /** Max intermediate road points inserted per successful segment. */
 const FOLLOW_MAX_INSERT_PER_SEG = 24;
 
@@ -450,100 +454,103 @@ export async function followRoadsPath(coords, opts = {}) {
   });
 
   // ── 2) Between consecutive vertices: add road middles only if OSRM can ──
+  // Vertex snaps are final before this point, so segments are independent —
+  // densify them through a small pool and assemble in index order.
+  const segCount = vertexSnaps.length - 1;
+  /** @type {Array<{ i: number, skip: boolean, status: "densified" | "downgrade" | "skip_short", aSnap: LngLat, bSnap: LngLat, mids: LngLat[] | null, method: "match" | "nearest" | null }> } */
+  const segJobs = [];
+  for (let i = 0; i < segCount; i++) {
+    const aSnap = { lon: vertexSnaps[i].lon, lat: vertexSnaps[i].lat };
+    const bSnap = {
+      lon: vertexSnaps[i + 1].lon,
+      lat: vertexSnaps[i + 1].lat,
+    };
+    const aOrig = pts[i];
+    const bOrig = pts[i + 1];
+    const hopM = haversineM(aOrig.lat, aOrig.lon, bOrig.lat, bOrig.lon);
+    const wrapSkip = skipWrap && i === segCount - 1 && isClosedLoop(pts, 40);
+    const unselected = !!snapOnly && !snapOnly.has(i) && !snapOnly.has(i + 1);
+    segJobs.push({
+      i,
+      aSnap,
+      bSnap,
+      skip: wrapSkip || hopM < 35 || unselected,
+      status: wrapSkip || hopM < 35 ? "skip_short" : "downgrade",
+      mids: null,
+      method: null,
+    });
+  }
+
+  let segProgress = 0;
+  const segResults = await mapPool(
+    segJobs,
+    FOLLOW_SEGMENTS_CONCURRENCY,
+    async (job) => {
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      if (job.skip) {
+        segProgress += 1;
+        return job;
+      }
+      /** @type {LngLat[]} */
+      let mids = null;
+      let segMethod = null;
+      try {
+        const dens = await densifySegmentIfOsrmOk(
+          job.aSnap,
+          job.bSnap,
+          pts[job.i],
+          pts[job.i + 1],
+          {
+            signal,
+            maxDrift,
+            nearestConcurrency: FOLLOW_INNER_NEAREST_CONCURRENCY,
+          },
+        );
+        if (dens) {
+          mids = dens.mids;
+          segMethod = dens.method;
+        }
+      } catch (e) {
+        if (e?.name === "AbortError") throw e;
+        mids = null;
+      }
+
+      if (mids?.length) {
+        const hitBlocker = mids.some((m) => nearAvoid(m, 36));
+        if (hitBlocker) {
+          mids = null;
+          segMethod = null;
+        }
+      }
+
+      segProgress += 1;
+      if (segProgress % 10 === 0 || segProgress === segJobs.length) {
+        onProgress({
+          phase: "segments",
+          i: segProgress,
+          n: segJobs.length,
+          msg: t("Segment {n}/{total}", { n: segProgress, total: segJobs.length }),
+        });
+      }
+      return { ...job, mids, method: segMethod };
+    },
+  );
+
   /** @type {LngLat[]} */
   const out = [];
   for (let i = 0; i < vertexSnaps.length; i++) {
     const v = vertexSnaps[i];
     out.push({ lon: v.lon, lat: v.lat });
 
-    if (i >= vertexSnaps.length - 1) break;
+    if (i >= segCount) break;
 
-    const aOrig = pts[i];
-    const bOrig = pts[i + 1];
-    const aSnap = { lon: v.lon, lat: v.lat };
-    const bSnap = {
-      lon: vertexSnaps[i + 1].lon,
-      lat: vertexSnaps[i + 1].lat,
-    };
-
-    const hopM = haversineM(aOrig.lat, aOrig.lon, bOrig.lat, bOrig.lon);
-    if (
-      skipWrap &&
-      i === vertexSnaps.length - 2 &&
-      isClosedLoop(pts, 40)
-    ) {
-      debugSegs.push({
-        i,
-        status: "skip_short",
-        method: null,
-        a: aSnap,
-        b: bSnap,
-        mids: [],
-      });
-      continue;
-    }
-    if (snapOnly && !snapOnly.has(i) && !snapOnly.has(i + 1)) {
-      debugSegs.push({
-        i,
-        status: "downgrade",
-        method: null,
-        a: aSnap,
-        b: bSnap,
-        mids: [],
-      });
-      continue;
-    }
-    if (hopM < 35) {
-      debugSegs.push({
-        i,
-        status: "skip_short",
-        method: null,
-        a: aSnap,
-        b: bSnap,
-        mids: [],
-      });
-      continue;
-    }
-
-    if (i % 20 === 0) {
-      onProgress({
-        phase: "segments",
-        i,
-        n: vertexSnaps.length - 1,
-        msg: t("Segment {n}/{total}", { n: i + 1, total: vertexSnaps.length - 1 }),
-      });
-    }
-
-    let mids = null;
-    let segMethod = null;
-    try {
-      const dens = await densifySegmentIfOsrmOk(aSnap, bSnap, aOrig, bOrig, {
-        signal,
-        maxDrift,
-      });
-      if (dens) {
-        mids = dens.mids;
-        segMethod = dens.method;
-      }
-    } catch (e) {
-      if (e?.name === "AbortError") throw e;
-      mids = null;
-    }
-
-    if (mids?.length) {
-      const hitBlocker = mids.some((m) => nearAvoid(m, 36));
-      if (hitBlocker) {
-        mids = null;
-        segMethod = null;
-      }
-    }
-
-    if (mids?.length) {
+    const seg = segResults[i];
+    if (seg.mids?.length) {
       /** @type {LngLat[]} */
       const keptMids = [];
-      for (const m of mids) {
-        if (haversineM(m.lat, m.lon, aSnap.lat, aSnap.lon) < 4) continue;
-        if (haversineM(m.lat, m.lon, bSnap.lat, bSnap.lon) < 4) continue;
+      for (const m of seg.mids) {
+        if (haversineM(m.lat, m.lon, seg.aSnap.lat, seg.aSnap.lon) < 4) continue;
+        if (haversineM(m.lat, m.lon, seg.bSnap.lat, seg.bSnap.lon) < 4) continue;
         out.push(m);
         keptMids.push(m);
         insertedPts.push(m);
@@ -552,18 +559,18 @@ export async function followRoadsPath(coords, opts = {}) {
       debugSegs.push({
         i,
         status: "densified",
-        method: segMethod,
-        a: aSnap,
-        b: bSnap,
+        method: seg.method,
+        a: seg.aSnap,
+        b: seg.bSnap,
         mids: keptMids,
       });
     } else {
       debugSegs.push({
         i,
-        status: "downgrade",
+        status: seg.status,
         method: null,
-        a: aSnap,
-        b: bSnap,
+        a: seg.aSnap,
+        b: seg.bSnap,
         mids: [],
       });
     }
@@ -667,12 +674,14 @@ function emptyFollowDebug(pts) {
  * @param {LngLat} bSnap
  * @param {LngLat} aOrig
  * @param {LngLat} bOrig
- * @param {{ signal?: AbortSignal, maxDrift?: number }} opts
+ * @param {{ signal?: AbortSignal, maxDrift?: number, nearestConcurrency?: number }} opts
  * @returns {Promise<{ mids: LngLat[], method: "match" | "nearest" } | null>}
  */
 async function densifySegmentIfOsrmOk(aSnap, bSnap, aOrig, bOrig, opts) {
   const signal = opts.signal;
   const maxDrift = opts.maxDrift ?? FOLLOW_MAX_DRIFT_M;
+  const nearestConcurrency =
+    opts.nearestConcurrency ?? FOLLOW_NEAREST_CONCURRENCY;
   const chord = [
     { lon: aOrig.lon, lat: aOrig.lat },
     { lon: bOrig.lon, lat: bOrig.lat },
@@ -742,7 +751,7 @@ async function densifySegmentIfOsrmOk(aSnap, bSnap, aOrig, bOrig, opts) {
 
   const mids = await mapPool(
     samples,
-    FOLLOW_NEAREST_CONCURRENCY,
+    nearestConcurrency,
     async (p) => {
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
       try {
@@ -916,9 +925,10 @@ function distPointToLngLatSegmentM(p, a, b) {
  */
 async function osrmNearest(p, signal) {
   const url = osrmApiUrl("nearest", [p], { number: 1 });
-  const res = await fetch(url, { signal });
-  if (!res.ok) throw new Error(`OSRM nearest ${res.status}`);
-  const data = await res.json();
+  const data = await abortablePromise(
+    osrmCached(url, () => osrmFetchJson(url)),
+    signal,
+  );
   const w = data?.waypoints?.[0];
   if (!w?.location) return null;
   const lon = Number(w.location[0]);
@@ -1065,12 +1075,17 @@ async function osrmMatch(points, signal, opts = {}) {
       gaps,
       radiuses: trace.map(() => radiusM).join("|"),
     });
-    const res = await fetch(url, { signal });
-    if (!res.ok) {
-      if (res.status === 400 || res.status === 404) continue;
-      throw new Error(`OSRM match ${res.status}`);
+    let data = null;
+    try {
+      data = await abortablePromise(
+        osrmCached(url, () => osrmFetchJson(url)),
+        signal,
+      );
+    } catch (e) {
+      if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
+      if (e?.status === 400 || e?.status === 404) continue;
+      throw e;
     }
-    const data = await res.json();
     const matchings = data?.matchings;
     if (!Array.isArray(matchings) || !matchings.length) continue;
 
@@ -1925,6 +1940,88 @@ function osrmApiUrl(kind, points, query = {}) {
  *  blocking the route paint forever (no caller supplies a timeout signal). */
 const OSRM_TIMEOUT_MS = 12000;
 
+// ── OSRM response cache ──────────────────────────────────────────────────────
+// Follow roads / recalc re-request identical vertices after every small edit
+// (new blocker, confirm, next section). Memoize parsed JSON per request URL so
+// repeat runs only pay for what changed. FOSSGIS answers are deterministic;
+// entries live for the page session only and failures are never cached.
+// Values are stored as promises so concurrent callers share one upstream call.
+const OSRM_CACHE_MAX = 4000;
+/** @type {Map<string, Promise<any>>} */
+const osrmCache = new Map();
+
+/**
+ * Memoized OSRM request. The cached fetch is detached from any caller signal —
+ * one cancelled UI action must not kill a request other segments are sharing.
+ * @template T
+ * @param {string} url
+ * @param {() => Promise<T>} run fetch + parse without a caller signal
+ * @returns {Promise<T>}
+ */
+function osrmCached(url, run) {
+  const hit = osrmCache.get(url);
+  if (hit) return hit;
+  const p = run().catch((e) => {
+    osrmCache.delete(url); // failures retry next time
+    throw e;
+  });
+  if (osrmCache.size >= OSRM_CACHE_MAX) osrmCache.clear();
+  osrmCache.set(url, p);
+  return p;
+}
+
+/**
+ * Race a cached promise against the caller's abort signal so Esc/cancel stays
+ * responsive even though the shared request continues.
+ * @template T
+ * @param {Promise<T>} p
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<T>}
+ */
+function abortablePromise(p, signal) {
+  if (!signal) return p;
+  if (signal.aborted) {
+    return Promise.reject(
+      signal.reason || new DOMException("Aborted", "AbortError"),
+    );
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () =>
+      reject(signal.reason || new DOMException("Aborted", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    p.then(
+      (v) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(v);
+      },
+      (e) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(e);
+      },
+    );
+  });
+}
+
+/** Timed fetch + parse for cached OSRM requests. Errors carry `.status`. */
+async function osrmFetchJson(url) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(
+    () => ctrl.abort(new DOMException("OSRM timeout", "TimeoutError")),
+    OSRM_TIMEOUT_MS,
+  );
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (!res.ok) {
+      const err = new Error(`OSRM ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * @param {Array<{ lon: number, lat: number }>} points
  * @param {AbortSignal} [signal]
@@ -1944,30 +2041,15 @@ async function osrmRoute(points, signal, opts = {}) {
         ? points.map(() => Math.round(r)).join("|")
         : undefined,
   });
-  // Own abort controller: hard timeout + forward the caller's signal.
-  const ctrl = new AbortController();
-  const timer = setTimeout(
-    () => ctrl.abort(new DOMException("OSRM timeout", "TimeoutError")),
-    OSRM_TIMEOUT_MS,
+  const data = await abortablePromise(
+    osrmCached(url, () => osrmFetchJson(url)),
+    signal,
   );
-  const onAbort = () => ctrl.abort(signal?.reason);
-  if (signal) {
-    if (signal.aborted) ctrl.abort(signal.reason);
-    else signal.addEventListener("abort", onAbort, { once: true });
+  const coords = data?.routes?.[0]?.geometry?.coordinates;
+  if (!Array.isArray(coords) || coords.length < 2) {
+    return points.map((p) => ({ lon: p.lon, lat: p.lat }));
   }
-  try {
-    const res = await fetch(url, { signal: ctrl.signal });
-    if (!res.ok) throw new Error(`OSRM ${res.status}`);
-    const data = await res.json();
-    const coords = data?.routes?.[0]?.geometry?.coordinates;
-    if (!Array.isArray(coords) || coords.length < 2) {
-      return points.map((p) => ({ lon: p.lon, lat: p.lat }));
-    }
-    return coords.map(([lon, lat]) => ({ lon, lat }));
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener("abort", onAbort);
-  }
+  return coords.map(([lon, lat]) => ({ lon, lat }));
 }
 
 function cumulativeDistances(route) {
