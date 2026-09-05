@@ -1400,8 +1400,8 @@ export async function buildTransitPolyline(opt, opts = {}) {
         }
         if (poly?.length >= 2) {
           // Sparse stop-seq shapes (S1) densify stop-to-stop. Dense GTFS
-          // on CLK (S64C AM circular *and* PM inbound) map-matches the
-          // same GTFS vertices, then interpolates so zoom stays road-like.
+          // on CLK: S64C fills long hops via 2-point /route; S64's long
+          // circular stays on the operator line (whole-loop OSRM breaks it).
           if (gtfs.sparse) {
             try {
               const dens = await densifyStopsViaOsrm(poly, opts);
@@ -1610,10 +1610,15 @@ function osrmCorridorPlausible(path, seed, seedLen) {
 
 /**
  * Road-hug a dense GTFS polyline without routing every vertex.
- * CLK (S64C AM *and* PM): /match the operator vertices in 5-point windows
- * — same path for the circular and the inbound. /route is only a fallback
- * when matching fails. Elsewhere: few /route waypoints.
- * Returns null → GTFS interpolation.
+ *
+ * CLK short shapes (S64C AM/PM): fill long GTFS hops with 2-point /route
+ * so Shun Tung / Yu Tung follow the kerb. Matching the raw vertices is
+ * wrong — S64C PM drops a point in the roundabout island.
+ *
+ * CLK long circulars (S64 ~23 km): do not /route or /match the whole
+ * loop (10–24 waypoints shortcut GTC/cargo). Keep the operator line.
+ *
+ * Elsewhere: few /route waypoints. Returns null → GTFS interpolation.
  *
  * @param {LngLat[]} poly
  * @param {{ signal?: AbortSignal }} [opts]
@@ -1628,63 +1633,139 @@ async function snapGtfsCorridorViaOsrm(poly, opts = {}) {
   if (!(seedLen > 120)) return null;
 
   const clk = pointsInClkTungChung(poly);
+  if (clk) {
+    // S64 main circular: leave GTFS alone. Hop-fill only S64C-scale shapes.
+    if (seedLen > 16_000 || poly.length > 180) return null;
+    try {
+      const filled = await fillGtfsHopsViaOsrm(poly, opts.signal, 48);
+      if (
+        filled &&
+        filled.length >= 2 &&
+        osrmCorridorPlausible(filled, poly, seedLen)
+      ) {
+        return filled;
+      }
+    } catch (e) {
+      if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
+    }
+    return null;
+  }
+
   const controls = pathControlWaypoints(poly, {
     maxPoints: 10,
     maxSpacingM: Math.max(500, seedLen / 8),
     minTurnDeg: 25,
   });
   if (controls.length < 2) return null;
+  try {
+    const routed = await osrmRoute(controls, opts.signal, {});
+    if (
+      routed &&
+      routed.length >= 2 &&
+      osrmCorridorPlausible(routed, poly, seedLen)
+    ) {
+      return routed;
+    }
+  } catch (e) {
+    if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
+  }
+  return null;
+}
 
-  const tryRoute = async () => {
-    try {
-      const routed = await osrmRoute(controls, opts.signal, {
-        radiusesM: clk ? OSRM_CLK_RADIUS_M : 0,
+/**
+ * Replace long / colinear GTFS chords with a 2-point OSRM drive (roundabout
+ * kerb, Yu Tung corner). Tight radius + lateral cap so Link Road cannot win.
+ *
+ * @param {LngLat[]} poly
+ * @param {AbortSignal} [signal]
+ * @param {number} minHopM
+ * @returns {Promise<LngLat[] | null>}
+ */
+async function fillGtfsHopsViaOsrm(poly, signal, minHopM) {
+  if (!poly || poly.length < 2) return null;
+
+  /** @type {Array<{ i: number, j: number, a: LngLat, b: LngLat, chord: number }>} */
+  const jobs = [];
+  let i = 0;
+  while (i < poly.length - 1) {
+    let j = i + 1;
+    let path = haversineM(
+      poly[i].lat,
+      poly[i].lon,
+      poly[j].lat,
+      poly[j].lon,
+    );
+    while (j < poly.length - 1) {
+      const next = j + 1;
+      const add = haversineM(
+        poly[j].lat,
+        poly[j].lon,
+        poly[next].lat,
+        poly[next].lon,
+      );
+      const straight = haversineM(
+        poly[i].lat,
+        poly[i].lon,
+        poly[next].lat,
+        poly[next].lon,
+      );
+      if (straight > 220 || path + add > straight * 1.2 + 25) break;
+      path += add;
+      j = next;
+    }
+    if (path >= minHopM) {
+      jobs.push({
+        i,
+        j,
+        a: poly[i],
+        b: poly[j],
+        chord: path,
       });
-      if (
-        routed &&
-        routed.length >= 2 &&
-        osrmCorridorPlausible(routed, poly, seedLen)
-      ) {
-        return routed;
-      }
-    } catch (e) {
-      if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
     }
-    return null;
-  };
+    i = j;
+  }
+  if (!jobs.length) return poly.map((p) => ({ lon: p.lon, lat: p.lat }));
 
-  const tryMatch = async () => {
-    // AM 127 pts and PM 69 pts both match the real GTFS vertices (same
-    // windowed /match that made AM hug Shun Tung / Yu Tung).
-    const trace =
-      poly.length <= 140
-        ? dedupePathClose(poly, 4)
-        : pathControlWaypoints(poly, {
-            maxPoints: 24,
-            maxSpacingM: Math.max(180, seedLen / 20),
-            minTurnDeg: 14,
-          });
+  const routed = await mapPool(jobs, 4, async (job) => {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    let path = null;
     try {
-      const matched = await osrmMatchWindows(trace, opts.signal);
-      if (
-        matched &&
-        matched.length >= 2 &&
-        osrmCorridorPlausible(matched, poly, seedLen)
-      ) {
-        return matched;
-      }
+      path = await osrmRoute([job.a, job.b], signal, {
+        radiusesM: 60,
+      });
     } catch (e) {
       if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
+      path = null;
     }
-    return null;
-  };
+    if (!path || path.length < 2) return null;
+    if (!osrmHopPlausible(job.a, job.b, path)) return null;
+    if (maxLateralDeviationM(path, job.a, job.b) > 110) return null;
+    const len = pathLengthM(path);
+    if (len > job.chord * 2.6 + 220) return null;
+    return path;
+  });
 
-  if (clk) {
-    const [matched, routed] = await Promise.all([tryMatch(), tryRoute()]);
-    return matched || routed;
+  /** @type {Map<number, LngLat[]>} */
+  const byI = new Map();
+  for (let k = 0; k < jobs.length; k++) {
+    if (routed[k]?.length >= 2) byI.set(jobs[k].i, routed[k]);
   }
 
-  return await tryRoute();
+  /** @type {LngLat[]} */
+  const out = [{ lon: poly[0].lon, lat: poly[0].lat }];
+  let at = 0;
+  while (at < poly.length - 1) {
+    const job = jobs.find((s) => s.i === at);
+    const path = job ? byI.get(at) : null;
+    if (path && job) {
+      out.push(...path.slice(1));
+      at = job.j;
+    } else {
+      at += 1;
+      out.push({ lon: poly[at].lon, lat: poly[at].lat });
+    }
+  }
+  return out.length >= 2 ? out : null;
 }
 
 /**
