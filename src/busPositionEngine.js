@@ -1187,49 +1187,71 @@ export class BusPositionEngine {
    */
   reidentifySynth(rows, now) {
     const prev = this.synth;
+    const livePrev = [];
+    for (const s of prev) {
+      if (s.etaT > now && s.arrD < 0) livePrev.push(s);
+    }
+    const pairs = [];
+    for (let i = 0; i < livePrev.length; i++) {
+      const s = livePrev[i];
+      for (let j = 0; j < rows.length; j++) {
+        const r = rows[j];
+        const destPen =
+          s.dest && r.dest && s.dest === r.dest ? 0 : 80_000;
+        const dd =
+          Number.isFinite(s.d) && Number.isFinite(r.d)
+            ? Math.abs(s.d - r.d)
+            : 4000;
+        const dt = Math.abs(s.etaT - r.etaT);
+        pairs.push({
+          i,
+          j,
+          cost: destPen + dd * 4 + dt / 20,
+          dd,
+          dt,
+        });
+      }
+    }
+    pairs.sort((a, b) => a.cost - b.cost);
+    const takenPrev = new Set();
+    const takenNew = new Set();
     const out = [];
-    const taken = new Set();
-    for (const row of rows) {
-      let best = null;
-      let bestPen = Infinity;
-      for (const s of prev) {
-        if (s.etaT <= now || taken.has(s.rank)) continue;
-        const pen =
-          (row.dest && s.dest && row.dest === s.dest ? 0 : 60_000) +
-          Math.abs(row.etaT - s.etaT);
-        if (pen < bestPen) {
-          bestPen = pen;
-          best = s;
-        }
-      }
-      if (best) {
-        taken.add(best.rank);
-        out.push({
-          rank: best.rank,
-          etaT: row.etaT,
-          dest: row.dest,
-          arrD: -1,
-          arrAt: 0,
-          d: row.d,
-        });
-      } else {
-        out.push({
-          rank: 0,
-          etaT: row.etaT,
-          dest: row.dest,
-          arrD: -1,
-          arrAt: 0,
-          d: row.d,
-        });
-      }
+    for (const p of pairs) {
+      if (takenPrev.has(p.i) || takenNew.has(p.j)) continue;
+      // A new 2-min train must not inherit the 12-min train's marker.
+      if (p.dd > 10_000 && p.dt > 120_000) continue;
+      if (p.dt > 8 * 60_000) continue;
+      takenPrev.add(p.i);
+      takenNew.add(p.j);
+      const s = livePrev[p.i];
+      const r = rows[p.j];
+      out.push({
+        rank: s.rank,
+        etaT: r.etaT,
+        dest: r.dest,
+        arrD: -1,
+        arrAt: 0,
+        d: r.d,
+      });
+    }
+    for (let j = 0; j < rows.length; j++) {
+      if (takenNew.has(j)) continue;
+      const r = rows[j];
+      out.push({
+        rank: 0,
+        etaT: r.etaT,
+        dest: r.dest,
+        arrD: -1,
+        arrAt: 0,
+        d: r.d,
+      });
     }
     let nextRank = 1;
     for (const s of prev) nextRank = Math.max(nextRank, s.rank + 1);
     for (const s of out) if (!s.rank) s.rank = nextRank++;
+    const takenRanks = new Set(out.map((s) => s.rank));
     for (const s of prev) {
-      if (taken.has(s.rank)) continue;
-      // Arrived synths stay while the feed still lists them (the card's
-      // "Now" window), at least the dwell, capped like real trips.
+      if (takenRanks.has(s.rank)) continue;
       if (s.arrD >= 0) {
         const held = this.rowStillListed(this.ctx.boardStopIndex, s.etaT);
         if (now < s.arrAt + (held ? DWELL_MAX_MS : DWELL_MS)) out.push(s);
@@ -1634,6 +1656,7 @@ export class BusPositionEngine {
     // (same rule as real trips), then drops (the feed dropped its row anyway).
     for (const s of this.synth) {
       const fromD = Number.isFinite(s.d) ? s.d : boardDist;
+      if (!Number.isFinite(fromD)) continue;
       const T = remainingSec(s.etaT, now);
       if (T > 0) {
         out.push({
@@ -1745,6 +1768,14 @@ export class BusPositionEngine {
     const coords = ctx.shape.coords;
     const cumM = ctx.shape.cumM;
     const total = cumM?.[cumM.length - 1] || 0;
+    const rail = ctx.op === "mtr" || ctx.op === "lrt";
+    if (rail) {
+      let ok = 0;
+      for (const d of ctx.stopDistM || []) {
+        if (Number.isFinite(d)) ok += 1;
+      }
+      if (ok < 2) return;
+    }
     // Whole route: approaching (behind board) and already-passed (ahead).
     // Anchored / tracked first, then the rest by along-track order.
     const boardDist = ctx.stopDistM?.[ctx.boardStopIndex] || 0;

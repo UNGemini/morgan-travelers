@@ -17280,6 +17280,12 @@ function busPosAdoptMapGeom() {
   const shape = { coords, cumM };
   busPosShape = shape;
   busPosEngine.updateBoard({ stopDistM, shape });
+  // New polyline → old along-m is meaningless; next emit must snap.
+  busPosDisplay.clear();
+  if (busPosEngine.hasPolled) {
+    busPosEngine.computePositions(busPosEngine.nowFn());
+    busPosEngine.emit(busPosEngine.nowFn());
+  }
 }
 
 // Marker cosmetics + animation state (PRD 4.2 marker enhancements):
@@ -17761,7 +17767,12 @@ function busPosOnUpdate(evt) {
     };
     const tgt = Number.isFinite(v.d) ? { alongM: v.d } : project(tLon, tLat);
     const src = prev ? prevAlongM(prev) : null;
-    if (busPosReducedMotion || !prev) {
+    const jumpM =
+      tgt && src && Number.isFinite(tgt.alongM) && Number.isFinite(src.alongM)
+        ? Math.abs(tgt.alongM - src.alongM)
+        : 0;
+    // Identity swap or a new rail geometry: snap, don't fly the line.
+    if (busPosReducedMotion || !prev || jumpM > 1800) {
       // First sighting (or reduced motion): snap straight to the target.
       next.fromLon = tLon;
       next.fromLat = tLat;
