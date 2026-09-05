@@ -334,6 +334,20 @@
             </div>
 
             <div id="contrib-stop-actions" class="contrib-stop-actions" hidden>
+              <label class="loc-label" for="contrib-focus-stop" style="flex: 1 1 100%; margin: 0">
+                Cutoff stop (by sequence — not the overlapping pin)
+              </label>
+              <div class="contrib-stop-pick-row">
+                <button type="button" id="contrib-stop-prev" class="btn btn-ghost btn-icon" data-acrylic title="Previous stop" aria-label="Previous stop">
+                  <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
+                </button>
+                <select id="contrib-focus-stop" class="loc-input contrib-select" disabled>
+                  <option value="">Load a path first</option>
+                </select>
+                <button type="button" id="contrib-stop-next" class="btn btn-ghost btn-icon" data-acrylic title="Next stop" aria-label="Next stop">
+                  <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+                </button>
+              </div>
               <button type="button" id="contrib-hide-before" class="btn btn-ghost" data-acrylic title="Hide path and stops before the focused stop">
                 <span class="btn-row">
                   <span class="material-symbols-outlined" aria-hidden="true">visibility_off</span>
@@ -356,11 +370,12 @@
                 </span>
               </button>
               <p class="hint contrib-keys-hint" style="margin: 0; flex: 1 1 100%">
-                Circular routes often retrace the same road. Click a stop (the
-                far end of the first half) then <strong>Hide before</strong> or
-                <strong>Hide after</strong> so you only see one half — the other
-                half’s line and pins stay hidden so they are not dropped on the
-                wrong pass.
+                Circular routes often retrace the same road. Pick the far-end
+                stop from the <strong>list</strong> (overlapping pins are
+                unreliable) then <strong>Hide before</strong> / <strong>Hide after</strong>.
+                Only that half’s line and pins stay on the map, so return stops
+                cannot be dropped on the outbound path.
+                <kbd>,</kbd> / <kbd>.</kbd> previous · next stop.
               </p>
             </div>
 

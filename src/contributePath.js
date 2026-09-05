@@ -890,6 +890,9 @@ export function createPathContributor(ctx) {
     btnHideBefore: document.getElementById("contrib-hide-before"),
     btnHideAfter: document.getElementById("contrib-hide-after"),
     btnShowAll: document.getElementById("contrib-show-all"),
+    focusStop: document.getElementById("contrib-focus-stop"),
+    btnStopPrev: document.getElementById("contrib-stop-prev"),
+    btnStopNext: document.getElementById("contrib-stop-next"),
     btnSelectOffsets: document.getElementById("contrib-select-offsets"),
     btnDeleteSelected: document.getElementById("contrib-delete-selected"),
     btnClearSelection: document.getElementById("contrib-clear-selection"),
@@ -1855,10 +1858,14 @@ export function createPathContributor(ctx) {
   }
 
   function updateStopActionState() {
-    const hasFocus = focusStopIdx >= 0 && focusStopIdx < stopMarkers.length;
+    fillStopSelect();
+    const n = stopMarkers.length;
+    const hasFocus = focusStopIdx >= 0 && focusStopIdx < n;
     if (els.btnHideBefore) els.btnHideBefore.disabled = !hasFocus;
     if (els.btnHideAfter) els.btnHideAfter.disabled = !hasFocus;
     if (els.btnShowAll) els.btnShowAll.disabled = !hideHalf;
+    if (els.btnStopPrev) els.btnStopPrev.disabled = n < 2;
+    if (els.btnStopNext) els.btnStopNext.disabled = n < 2;
     els.btnHideBefore?.classList.toggle(
       "is-active",
       hideHalf?.mode === "before",
@@ -1867,6 +1874,87 @@ export function createPathContributor(ctx) {
       "is-active",
       hideHalf?.mode === "after",
     );
+  }
+
+  /** @type {string} */
+  let stopSelectSig = "";
+
+  function fillStopSelect() {
+    const sel = els.focusStop;
+    if (!(sel instanceof HTMLSelectElement)) return;
+    const sig = stopMarkers
+      .map((s, i) => `${i}:${s.stopId}:${s.name}`)
+      .join("|");
+    if (sig !== stopSelectSig) {
+      stopSelectSig = sig;
+      sel.replaceChildren();
+      if (!stopMarkers.length) {
+        const o = document.createElement("option");
+        o.value = "";
+        o.textContent = t("Load a path first");
+        sel.appendChild(o);
+        sel.disabled = true;
+      } else {
+        sel.disabled = false;
+        for (let i = 0; i < stopMarkers.length; i++) {
+          const o = document.createElement("option");
+          o.value = String(i);
+          sel.appendChild(o);
+        }
+      }
+    }
+    if (!stopMarkers.length) return;
+    for (const o of sel.options) {
+      const i = Number(o.value);
+      if (!Number.isFinite(i) || !stopMarkers[i]) continue;
+      const name = stopMarkers[i].name || t("Stop {n}", { n: i + 1 });
+      const hidden = hideHalf && !isStopVisible(i);
+      o.textContent = hidden
+        ? `#${i + 1} ${name} (${t("hidden")})`
+        : `#${i + 1} ${name}`;
+    }
+    const want = focusStopIdx >= 0 ? focusStopIdx : hideHalf?.stopIdx ?? -1;
+    if (want >= 0) {
+      if (sel.value !== String(want)) sel.value = String(want);
+    } else {
+      sel.selectedIndex = -1;
+    }
+  }
+
+  function panToStop(i) {
+    const s = stopMarkers[i];
+    if (!s || !map) return;
+    const lon = Number(s.visualLon ?? s.officialLon ?? s.lon);
+    const lat = Number(s.visualLat ?? s.officialLat ?? s.lat);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
+    try {
+      map.easeTo({ center: [lon, lat], duration: 380, zoom: Math.max(map.getZoom(), 16) });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function focusStopAt(i, opts = {}) {
+    if (i < 0 || i >= stopMarkers.length) return;
+    focusStopIdx = i;
+    paintDraft();
+    updateStopActionState();
+    const s = stopMarkers[i];
+    setStatus(
+      t("Focused stop #{n} {name} · [ hide before · ] hide after · 0 show all", {
+        n: i + 1,
+        name: s?.name || "",
+      }),
+    );
+    if (opts.pan !== false) panToStop(i);
+  }
+
+  function stepFocusStop(delta) {
+    if (!stopMarkers.length) return;
+    const cur = focusStopIdx >= 0 ? focusStopIdx : hideHalf?.stopIdx ?? 0;
+    const n = stopMarkers.length;
+    const next = ((cur + delta) % n + n) % n;
+    focusStopAt(next, { pan: true });
   }
 
   function isStopVisible(i) {
@@ -2029,6 +2117,7 @@ export function createPathContributor(ctx) {
     focusStopIdx = idx;
     syncStopActionsUi();
     paintDraft();
+    fitToVisible();
     const msg = hideStatusText();
     setStatus(msg);
     showToast(msg, 2800);
@@ -2039,6 +2128,7 @@ export function createPathContributor(ctx) {
     hideHalf = null;
     syncStopActionsUi();
     paintDraft();
+    fitToPath();
     setStatus(t("Showing all stops and path"));
     showToast(t("Showing all"), 1400);
   }
@@ -2884,17 +2974,37 @@ export function createPathContributor(ctx) {
   }
 
   function fitToPath() {
-    if (!map || points.length < 1) return;
+    fitCoords(points);
+  }
+
+  function fitToVisible() {
+    const vis = visiblePathCoords();
+    const extra = [];
+    for (let i = 0; i < stopMarkers.length; i++) {
+      if (!isStopVisible(i)) continue;
+      const s = stopMarkers[i];
+      const lon = Number(s.visualLon ?? s.officialLon);
+      const lat = Number(s.visualLat ?? s.officialLat);
+      if (Number.isFinite(lon) && Number.isFinite(lat)) extra.push([lon, lat]);
+    }
+    fitCoords(vis.length >= 1 ? vis.concat(extra) : extra);
+  }
+
+  /** @param {number[][]} coords */
+  function fitCoords(coords) {
+    if (!map || !coords?.length) return;
     let minLng = Infinity;
     let minLat = Infinity;
     let maxLng = -Infinity;
     let maxLat = -Infinity;
-    for (const [lng, lat] of points) {
+    for (const [lng, lat] of coords) {
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
       minLng = Math.min(minLng, lng);
       maxLng = Math.max(maxLng, lng);
       minLat = Math.min(minLat, lat);
       maxLat = Math.max(maxLat, lat);
     }
+    if (!Number.isFinite(minLng)) return;
     try {
       // Centre path in the map visible beside the left panel (not absolute canvas centre)
       const mapEl = map.getContainer?.();
@@ -3244,6 +3354,14 @@ export function createPathContributor(ctx) {
     } else if (k === "]" && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       setHideHalf("after");
+    } else if ((k === "," || k === "<") && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      if (editMode !== "stops") setEditMode("stops");
+      stepFocusStop(-1);
+    } else if ((k === "." || k === ">") && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      if (editMode !== "stops") setEditMode("stops");
+      stepFocusStop(1);
     } else if (k === "0" && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       clearHideHalf();
@@ -3963,6 +4081,12 @@ export function createPathContributor(ctx) {
   els.btnShowAll?.addEventListener("click", () => {
     clearHideHalf();
   });
+  els.focusStop?.addEventListener("change", () => {
+    const i = Number(els.focusStop.value);
+    if (Number.isFinite(i)) focusStopAt(i, { pan: true });
+  });
+  els.btnStopPrev?.addEventListener("click", () => stepFocusStop(-1));
+  els.btnStopNext?.addEventListener("click", () => stepFocusStop(1));
   els.btnSelectOffsets?.addEventListener("click", () => {
     if (editMode !== "select") setEditMode("select");
     selectOffsetPoints();

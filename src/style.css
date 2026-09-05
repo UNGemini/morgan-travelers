@@ -3569,6 +3569,26 @@ body.contrib-placing-blocker .contrib-map-hint {
   border-color: rgba(240, 160, 48, 0.55);
 }
 
+.contrib-stop-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+.contrib-stop-pick-row .contrib-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.contrib-stop-pick-row .btn-icon {
+  flex: 0 0 auto;
+  width: 36px;
+  min-width: 36px;
+  padding: 4px;
+}
+
 .contrib-select-actions {
   display: flex;
   flex-wrap: wrap;
