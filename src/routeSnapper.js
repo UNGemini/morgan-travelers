@@ -844,8 +844,7 @@ function distPointToLngLatSegmentM(p, a, b) {
  * @returns {Promise<{ lon: number, lat: number, distanceM: number } | null>}
  */
 async function osrmNearest(p, signal) {
-  const url =
-    `${osrmBase()}/nearest/v1/driving/${p.lon},${p.lat}` + `?number=1`;
+  const url = osrmApiUrl("nearest", [p], { number: 1 });
   const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`OSRM nearest ${res.status}`);
   const data = await res.json();
@@ -983,16 +982,18 @@ async function osrmMatch(points, signal, opts = {}) {
     points.length <= 90
       ? points
       : pathControlWaypoints(points, { maxPoints: 90, maxSpacingM: 100 });
-  const coordStr = trace.map((p) => `${p.lon},${p.lat}`).join(";");
   const radiusTries = opts.radiusesM?.length ? opts.radiusesM : [40, 75];
   // gaps=ignore: continue matching when the graph has holes (bus bays, etc.)
   const gaps = opts.gaps === "split" ? "split" : "ignore";
 
   for (const radiusM of radiusTries) {
-    const radiuses = trace.map(() => radiusM).join(";");
-    const url =
-      `${osrmBase()}/match/v1/driving/${coordStr}` +
-      `?overview=full&geometries=geojson&tidy=true&gaps=${gaps}&radiuses=${radiuses}`;
+    const url = osrmApiUrl("match", trace, {
+      overview: "full",
+      geometries: "geojson",
+      tidy: "true",
+      gaps,
+      radiuses: trace.map(() => radiusM).join("|"),
+    });
     const res = await fetch(url, { signal });
     if (!res.ok) {
       if (res.status === 400 || res.status === 404) continue;
@@ -1609,10 +1610,9 @@ function osrmCorridorPlausible(path, seed, seedLen) {
 
 /**
  * Road-hug a dense GTFS polyline without routing every vertex.
- * CLK: always /match the operator vertices in 5-point windows (S64C PM
- * GTFS only has ~6 points through the Shun Tung roundabout and a 147 m
- * chord at Yu Tung — interpolating those is the kite vs AM). Elsewhere:
- * few /route waypoints. Returns null → caller keeps GTFS interpolation.
+ * CLK: /route a handful of waypoints (drives the Shun Tung roundabout);
+ * /match GTFS vertices only when that route shortcuts or fattens.
+ * Elsewhere: few /route waypoints. Returns null → GTFS interpolation.
  *
  * @param {LngLat[]} poly
  * @param {{ signal?: AbortSignal }} [opts]
@@ -1652,9 +1652,15 @@ async function snapGtfsCorridorViaOsrm(poly, opts = {}) {
     return null;
   };
 
-  if (clk) {
-    // Prefer matching the real GTFS vertices so roundabouts / junctions
-    // keep OSM kerb geometry. Downsample only when the shape is huge.
+  const routed = await tryRoute();
+  const routedRatio = routed ? pathLengthM(routed) / seedLen : Infinity;
+  // /route drives around roundabouts. /match of a GTFS vertex sitting in
+  // the island (S64C PM Shun Tung) still kinks. Only match when /route
+  // shortcuts or fattens the cargo loop (typical AM circular).
+  const routeLooksDriven =
+    !!routed && routedRatio >= 0.92 && routedRatio <= 1.18;
+
+  if (clk && !routeLooksDriven) {
     const trace =
       poly.length <= 90
         ? dedupePathClose(poly, 4)
@@ -1675,10 +1681,9 @@ async function snapGtfsCorridorViaOsrm(poly, opts = {}) {
     } catch (e) {
       if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
     }
-    return await tryRoute();
   }
 
-  return await tryRoute();
+  return routed;
 }
 
 /**
@@ -1736,6 +1741,27 @@ function osrmBase() {
   return `${location.origin}/osrm`;
 }
 
+/**
+ * OSRM URLs for the Pages/Vite proxy. Coordinates go in `?coordinates=`
+ * with `|` separators — a `;` in the path is 403'd by Cloudflare WAF.
+ *
+ * @param {"route" | "nearest" | "match"} kind
+ * @param {LngLat[]} points
+ * @param {Record<string, string | number | undefined>} [query]
+ */
+function osrmApiUrl(kind, points, query = {}) {
+  const qs = new URLSearchParams();
+  qs.set(
+    "coordinates",
+    points.map((p) => `${p.lon},${p.lat}`).join("|"),
+  );
+  for (const [k, v] of Object.entries(query)) {
+    if (v == null || v === "") continue;
+    qs.set(k, String(v));
+  }
+  return `${osrmBase()}/${kind}/v1/driving?${qs.toString()}`;
+}
+
 /** Cap OSRM latency: a hung upstream falls back to stop chords instead of
  *  blocking the route paint forever (no caller supplies a timeout signal). */
 const OSRM_TIMEOUT_MS = 12000;
@@ -1749,15 +1775,16 @@ async function osrmRoute(points, signal, opts = {}) {
   if (!points || points.length < 2) {
     return (points || []).map((p) => ({ lon: p.lon, lat: p.lat }));
   }
-  const coordStr = points.map((p) => `${p.lon},${p.lat}`).join(";");
   const r = Number(opts.radiusesM);
-  const radiusQs =
-    Number.isFinite(r) && r > 0
-      ? `&radiuses=${points.map(() => Math.round(r)).join(";")}`
-      : "";
-  const url =
-    `${osrmBase()}/route/v1/driving/${coordStr}` +
-    `?overview=full&geometries=geojson&steps=false${radiusQs}`;
+  const url = osrmApiUrl("route", points, {
+    overview: "full",
+    geometries: "geojson",
+    steps: "false",
+    radiuses:
+      Number.isFinite(r) && r > 0
+        ? points.map(() => Math.round(r)).join("|")
+        : undefined,
+  });
   // Own abort controller: hard timeout + forward the caller's signal.
   const ctrl = new AbortController();
   const timer = setTimeout(

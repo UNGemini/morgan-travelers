@@ -849,12 +849,25 @@ export default defineConfig({
           });
         },
       },
-      // OSRM for road-following bus polylines (route-snapper densify)
+      // OSRM for road-following bus polylines (route-snapper densify).
+      // Client sends ?coordinates=lon,lat|lon,lat (WAF-safe); rewrite to
+      // upstream /{kind}/v1/driving/lon,lat;lon,lat.
       "/osrm": {
         target: "https://router.project-osrm.org",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/osrm/, ""),
         configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq, req) => {
+            const u = new URL(req.url, "http://127.0.0.1");
+            const raw = u.searchParams.get("coordinates");
+            if (!raw) return;
+            const coords = raw.replace(/\|/g, ";");
+            u.searchParams.delete("coordinates");
+            const rad = u.searchParams.get("radiuses");
+            if (rad) u.searchParams.set("radiuses", rad.replace(/[|,]/g, ";"));
+            const kind = u.pathname.replace(/^\/osrm/, "");
+            proxyReq.path = `${kind}/${coords}${u.search}`;
+          });
           proxy.on("proxyRes", (proxyRes) => {
             proxyRes.headers["cross-origin-resource-policy"] = "cross-origin";
             proxyRes.headers["access-control-allow-origin"] = "*";

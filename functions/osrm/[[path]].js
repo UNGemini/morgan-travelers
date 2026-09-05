@@ -1,14 +1,21 @@
 /**
  * Cloudflare Pages Function — OSRM proxy for bus route densification.
- * Allowlisted: /osrm/{route|nearest|match}/v1/driving/…
+ *
+ * Coordinates live in `?coordinates=` (pipe-separated) so the path never
+ * contains `;`. Cloudflare WAF 403s `/driving/lon,lat;lon,lat`, and the
+ * old allowlist rejected `%3B`, so production snaps always fell back to
+ * GTFS kites at roundabouts.
+ *
+ * Allowlisted: /osrm/{route|nearest|match}/v1/driving?coordinates=…
  */
 import {
   foreignOriginResponse,
   sameOriginCors,
 } from "../_shared/security.js";
 
-const OSRM_PATH =
-  /^\/(route|nearest|match)\/v1\/driving\/[0-9.\-;,]+$/;
+const OSRM_SERVICE = /^\/(route|nearest|match)\/v1\/driving\/?$/;
+const COORDS_OK =
+  /^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?(?:\|-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?)*$/;
 
 export async function onRequest(context) {
   const req = context.request;
@@ -38,15 +45,31 @@ export async function onRequest(context) {
 
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\/osrm/, "") || "/";
-  if (!OSRM_PATH.test(path) || path.includes("..")) {
+  const service = path.match(OSRM_SERVICE);
+  const coords = (url.searchParams.get("coordinates") || "").replace(
+    /;/g,
+    "|",
+  );
+  if (!service || path.includes("..") || !COORDS_OK.test(coords)) {
     return Response.json(
       { ok: false, error: "unknown osrm route" },
       { status: 404, headers: cors },
     );
   }
 
-  const target = new URL(`https://router.project-osrm.org${path}`);
-  target.search = url.search;
+  const kind = service[1];
+  const coordPath = coords.replace(/\|/g, ";");
+  const target = new URL(
+    `https://router.project-osrm.org/${kind}/v1/driving/${coordPath}`,
+  );
+  for (const [k, v] of url.searchParams) {
+    if (k === "coordinates") continue;
+    if (k === "radiuses") {
+      target.searchParams.set(k, v.replace(/[|,]/g, ";"));
+    } else {
+      target.searchParams.set(k, v);
+    }
+  }
 
   // The public demo server is slow — cap the upstream so a hung request
   // becomes a fast structured 504 instead of a stuck worker.
