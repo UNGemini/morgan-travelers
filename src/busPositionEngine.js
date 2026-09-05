@@ -233,6 +233,50 @@ function remainingSec(etaT, now) {
   return Math.max(0, (etaT + NOW_SLACK_MS - now) / 1000);
 }
 
+/** Metro cruise used to match the same train across successive stations. */
+const RAIL_V_TYP = 16;
+
+/**
+ * MTR/LRT list the same train at every station. Collapse rows whose
+ * along-track gap and ETA delta match one moving train.
+ * @param {Array<{ etaT: number, dest: string, d: number }>} rows
+ */
+function dedupeRailSynthRows(rows) {
+  if (!rows?.length) return [];
+  if (rows.length === 1) return rows;
+  const groups = new Map();
+  for (const r of rows) {
+    const k = String(r.dest || "").toUpperCase() || "_";
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+  const out = [];
+  for (const list of groups.values()) {
+    list.sort(
+      (a, b) => (a.d || 0) - (b.d || 0) || a.etaT - b.etaT,
+    );
+    const kept = [];
+    for (const r of list) {
+      const mate = kept.find((t) => {
+        const dd = Math.abs((r.d || 0) - (t.d || 0));
+        const dt = Math.abs(r.etaT - t.etaT) / 1000;
+        const expect = dd / RAIL_V_TYP;
+        return Math.abs(dt - expect) < 75 + expect * 0.5;
+      });
+      if (!mate) {
+        kept.push({ ...r });
+      } else if (r.etaT < mate.etaT) {
+        mate.etaT = r.etaT;
+        mate.d = r.d;
+        mate.dest = r.dest;
+      }
+    }
+    out.push(...kept);
+  }
+  out.sort((a, b) => a.etaT - b.etaT);
+  return out;
+}
+
 /** Default per-operator ETA row fetcher (browser; lazy eta.js import).
  * 1. Reuses the ETA panel's just-fetched rows when fresh (one fetch drives
  *    both panel and engine — the panel strips operator prefixes, so this
@@ -287,11 +331,31 @@ async function defaultFetchRows(ctx, stop) {
     const key = `${line}-${sta}`;
     const block = data?.data?.[key] || data?.data?.[sta] || {};
     const bound = String(ctx.bound || "O").toUpperCase();
-    const dirKey = bound === "I" ? "DOWN" : "UP";
-    const primary = Array.isArray(block[dirKey]) ? block[dirKey] : [];
-    const trains = primary.length
-      ? primary
-      : [...(block.UP || []), ...(block.DOWN || [])];
+    const up = Array.isArray(block.UP) ? block.UP : [];
+    const down = Array.isArray(block.DOWN) ? block.DOWN : [];
+    const want = String(ctx.headsign || "").toUpperCase();
+    const lastId = String(
+      ctx.stops?.[ctx.stops.length - 1]?.stopId || "",
+    ).toUpperCase();
+    const lastCode = lastId.replace(/^MTR-/, "").slice(-3);
+    const destHits = (list) =>
+      (list || []).some((t) => {
+        const d = String(t.dest || "").toUpperCase();
+        if (!d) return false;
+        if (lastCode && (d === lastCode || d.includes(lastCode))) return true;
+        if (want && (want.includes(d) || d.includes(want.slice(0, 3)))) {
+          return true;
+        }
+        return false;
+      });
+    let dirKey = bound === "I" || bound === "DOWN" ? "DOWN" : "UP";
+    if (bound === "LINE" || bound === "O" || bound === "I") {
+      const upHit = destHits(up);
+      const downHit = destHits(down);
+      if (downHit && !upHit) dirKey = "DOWN";
+      else if (upHit && !downHit) dirKey = "UP";
+    }
+    const trains = dirKey === "DOWN" ? down : up;
     const now = Date.now();
     return (trains || []).map((t) => {
       const wait = Number(t.ttnt);
@@ -597,6 +661,8 @@ export class BusPositionEngine {
       if (b >= 0 && b + 1 < dists.length) return dists[b + 1];
       return Infinity;
     })();
+    const rail = ctx?.op === "mtr" || ctx?.op === "lrt";
+    const minM = rail ? 150 : CLUMP_MIN_M;
     const sorted = [...vehicles].filter((v) => Number.isFinite(v.d));
     sorted.sort((a, b) => a.d - b.d);
     for (let i = sorted.length - 1; i > 0; i--) {
@@ -605,16 +671,16 @@ export class BusPositionEngine {
       // Forward = closer to (or past) the board stop
       const a = fwd.d >= rear.d ? fwd : rear;
       const b = a === fwd ? rear : fwd;
-      if (a.d - b.d >= CLUMP_MIN_M) continue;
-      b.d = Math.max(0, a.d - CLUMP_MIN_M);
+      if (a.d - b.d >= minM) continue;
+      b.d = Math.max(0, a.d - minM);
       if (i >= 2) b.d = Math.max(sorted[i - 2].d + 0.01, b.d);
     }
     for (const v of vehicles) {
       if (!Number.isFinite(v.d)) continue;
       if (Number.isFinite(nextStopDist) && v.d > boardDist - 0.5) {
         /* at/after board: leave */
-      } else if (Number.isFinite(nextStopDist) && v.d >= nextStopDist - CLUMP_MIN_M) {
-        v.d = Math.max(0, nextStopDist - CLUMP_MIN_M);
+      } else if (Number.isFinite(nextStopDist) && v.d >= nextStopDist - minM) {
+        v.d = Math.max(0, nextStopDist - minM);
       }
     }
   }
@@ -847,9 +913,7 @@ export class BusPositionEngine {
     // passed still get an ETA pin (Next Train / stop ETA at later stops).
     const ahead = Math.max(0, n - 1 - b);
     const aheadStep = rail
-      ? ahead > 10
-        ? 2
-        : 1
+      ? Math.max(2, Math.ceil(ahead / 5) || 2)
       : Math.max(1, Math.ceil(ahead / 8) || 5);
     for (let i = b + 1; i < n; i++) {
       if (i === n - 1 || (i - b) % aheadStep === 0) set.add(i);
@@ -1012,15 +1076,18 @@ export class BusPositionEngine {
         }
       }
     } else {
-      // No schedule (MTR/LRT): every fetched stop's ETAs become synths —
-      // board = approaching, later stops = trains that already passed.
+      // No schedule (MTR/LRT): stop ETAs become synths. The same train is
+      // listed at every station — merge those rows or the map stacks a
+      // pile of TCL badges at Tsing Yi.
+      const rows = [];
       for (const [stopIdx, etas] of stopEtas) {
         const d = ctx.stopDistM?.[stopIdx];
         if (!Number.isFinite(d)) continue;
         for (const eta of etas) {
-          synthRows.push({ etaT: eta.t, dest: eta.dest, d });
+          rows.push({ etaT: eta.t, dest: eta.dest, d });
         }
       }
+      synthRows.push(...dedupeRailSynthRows(rows));
     }
     this.synth = this.reidentifySynth(synthRows, now);
     this.updateTripState(trips, prevConstraints, now);
@@ -1545,7 +1612,10 @@ export class BusPositionEngine {
     }
     this.antiClump(out);
     const rail = ctx.op === "mtr" || ctx.op === "lrt";
-    if (!rail) this.dropGhostsByHeadway(out);
+    if (rail && !(this.headwaySec >= HEADWAY_MIN_S)) {
+      this.headwaySec = 240;
+    }
+    this.dropGhostsByHeadway(out);
     this.vehicles = out;
   }
 

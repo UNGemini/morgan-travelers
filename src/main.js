@@ -17513,6 +17513,7 @@ async function busPosBuildCtx(st) {
       boardStopIndex: st.boardIndex,
       shape,
       stopDistM,
+      headsign: String(dir?.dest || ""),
       fetchMore: !!st.fetchMore,
       nlbRouteIds: st.co === "nlb" ? [String(dir?.routeId || "")].filter(Boolean) : undefined,
     },
