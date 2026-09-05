@@ -902,6 +902,7 @@ export function createPathContributor(ctx) {
     btnFromPlan: document.getElementById("contrib-from-plan"),
     btnLoad: document.getElementById("contrib-load-path"),
     btnFollowRoads: document.getElementById("contrib-follow-roads"),
+    btnRecalc: document.getElementById("contrib-recalc-path"),
     btnImport: document.getElementById("contrib-import-json"),
     importFile: document.getElementById("contrib-import-file"),
     btnDownload: document.getElementById("contrib-download"),
@@ -2550,6 +2551,9 @@ export function createPathContributor(ctx) {
     if (els.btnFollowRoads) {
       els.btnFollowRoads.disabled = !!on;
     }
+    if (els.btnRecalc) {
+      els.btnRecalc.disabled = !!on;
+    }
   }
 
   /**
@@ -2724,6 +2728,213 @@ export function createPathContributor(ctx) {
       } else if (btn && followPending) {
         btn.removeAttribute("aria-busy");
         // stays disabled until confirm/revert
+      }
+    }
+  }
+
+  /**
+   * Recalculate path: re-run road snapping on what is on the map now —
+   * current blockers, edited line and visual stops. With 2+ selected
+   * vertices only the sections between consecutive selected points are
+   * recalculated (section anchors stay fixed); with no selection the
+   * whole visible route is (respects the circular hide cutoff). The
+   * result waits in the same Confirm / Revert preview as Follow roads.
+   */
+  async function runRecalcPath() {
+    if (followPending) {
+      showToast(t("Confirm or Revert the current Follow roads result first"), 2400);
+      return;
+    }
+    if (points.length < 2) {
+      showToast(t("Draw or load a path first (need ≥ 2 points)"), 2200);
+      return;
+    }
+    if (loadAbort) loadAbort.abort();
+    loadAbort = new AbortController();
+
+    const btn = els.btnRecalc;
+    const btnRoads = els.btnFollowRoads;
+    for (const b of [btn, btnRoads]) {
+      if (b) {
+        b.disabled = true;
+        b.setAttribute("aria-busy", "true");
+      }
+    }
+    clearFollowRoadsDebug();
+
+    // Sections to recalculate. Selected vertices group into contiguous
+    // runs; sections are each run plus the gap to the next run, so the
+    // selected points act as fixed anchors: [3,7] → 3..7; a box-selected
+    // run 10..20 → 10..20; [3,4,10] → 3..4 and 4..10. No selection →
+    // the visible half (circular cutoff) or the whole path.
+    const vis = visibleVertexIndexSet();
+    const sel = [...selectedIdx]
+      .filter((i) => i >= 0 && i < points.length && (!vis || vis.has(i)))
+      .sort((a, b) => a - b);
+    /** @type {Array<[number, number]>} contiguous runs of the selection */
+    const runs = [];
+    for (const i of sel) {
+      const last = runs[runs.length - 1];
+      if (last && i === last[1] + 1) last[1] = i;
+      else runs.push([i, i]);
+    }
+    /** @type {Array<[number, number]>} */
+    const sections = [];
+    for (const [s, e] of runs) {
+      if (e > s) sections.push([s, e]);
+    }
+    for (let k = 0; k + 1 < runs.length; k++) {
+      sections.push([runs[k][1], runs[k + 1][0]]);
+    }
+    sections.sort((x, y) => x[0] - y[0]);
+    if (!sections.length) sections.push([0, points.length - 1]);
+
+    const beforeN = points.length;
+    const beforePath = points.map((c) => [c[0], c[1]]);
+    const beforeStops = stopMarkers.map((s) => ({ ...s }));
+    pushPathHistory();
+
+    const avoid = blockers.map((c) => ({ lon: c[0], lat: c[1] }));
+    /** @type {number[][]} */
+    let after = beforePath.map((c) => [c[0], c[1]]);
+    /** @type {number[][]} recalculated coords, for the post-run map fit */
+    const recalcCoords = [];
+    let snapN = 0;
+    let insN = 0;
+    let rawN = 0;
+    let done = 0;
+    /** @type {import("./routeSnapper.js").FollowRoadsDebug | null} */
+    let debug = null;
+
+    try {
+      // Right-to-left so splicing never shifts pending section indices
+      for (let si = sections.length - 1; si >= 0; si--) {
+        const [a, b] = sections[si];
+        const sub = after.slice(a, b + 1).map((c) => [c[0], c[1]]);
+        if (sub.length < 2) continue;
+        const interior = sub
+          .map((_, i) => i)
+          .filter((i) => i > 0 && i < sub.length - 1);
+        setStatus(
+          t("Road assistant: recalculating section {i}/{n}…", {
+            i: sections.length - si,
+            n: sections.length,
+          }),
+        );
+        const res = await followRoadsPath(sub, {
+          signal: loadAbort.signal,
+          skipWrap: true,
+          avoidPoints: avoid,
+          // With interior points only they snap — both section anchors
+          // stay exactly where they are so the splice blends in.
+          snapIndices: interior.length ? interior : undefined,
+          onProgress: (ev) => {
+            if (ev?.msg) setStatus(t("Road assistant: {msg}", { msg: ev.msg }));
+          },
+        });
+        if (res.method !== "snap" || res.path.length < 2) continue;
+        /** @type {number[][]} */
+        const seg = res.path.map((p) => [p.lon, p.lat]);
+        if (!interior.length) {
+          // Two anchors only: keep them exactly, splice in the road mids
+          if (seg.length < 3) continue;
+          seg[0] = sub[0];
+          seg[seg.length - 1] = sub[sub.length - 1];
+        }
+        after.splice(a, b - a + 1, ...seg);
+        for (const c of seg) recalcCoords.push(c);
+        snapN += res.snapped ?? 0;
+        insN += res.inserted ?? 0;
+        rawN += res.keptRaw ?? 0;
+        done += 1;
+        if (res.debug) {
+          debug = debug
+            ? {
+                ...debug,
+                vertices: [...debug.vertices, ...res.debug.vertices],
+                segments: [...debug.segments, ...res.debug.segments],
+                inserted: [...debug.inserted, ...res.debug.inserted],
+              }
+            : res.debug;
+        }
+      }
+
+      if (!done) {
+        pathHistory.pop(); // nothing changed
+        if (debug) paintFollowRoadsDebug(debug);
+        setStatus(
+          t("Road assistant: nothing changed — see map legend (grey=original, amber=kept raw)."),
+        );
+        showToast(t("Path unchanged — debug overlay shows why"), 2800);
+        return;
+      }
+
+      // Preview: apply but require Confirm / Revert (same as Follow roads)
+      points = after;
+      if (stopMarkers.length) reprojectVisualStops();
+      else paintDraft();
+      fitCoords(recalcCoords.length >= 2 ? recalcCoords : points);
+      setEditMode("path");
+      if (debug) {
+        debug = {
+          ...debug,
+          original: beforePath.map((c) => ({ lon: c[0], lat: c[1] })),
+          result: points.map((c) => ({ lon: c[0], lat: c[1] })),
+        };
+        paintFollowRoadsDebug(debug);
+      }
+
+      const densN = (debug?.segments || []).filter(
+        (s) => s.status === "densified",
+      ).length;
+      const failN = (debug?.segments || []).filter(
+        (s) => s.status === "downgrade",
+      ).length;
+
+      followPending = {
+        beforePath,
+        beforeStops,
+        afterPath: points.map((c) => [c[0], c[1]]),
+        debug: debug || null,
+        stats: {
+          snapN,
+          insN,
+          rawN,
+          densN,
+          failN,
+          beforeN,
+          afterN: points.length,
+        },
+      };
+      setFollowPendingUi(true);
+
+      setStatus(
+        t("Recalc preview: {snap} snapped · {raw} raw · {ins} road pts · {before}→{after} pts — Confirm or Revert", {
+          snap: snapN,
+          raw: rawN,
+          ins: insN,
+          before: beforeN,
+          after: points.length,
+        }),
+      );
+      showToast(
+        t("Review the map · Confirm to keep · Revert to undo"),
+        3600,
+      );
+    } catch (e) {
+      if (e?.name === "AbortError") return;
+      console.warn("[contribute] recalc path", e);
+      pathHistory.pop();
+      followPending = null;
+      setFollowPendingUi(false);
+      setStatus(e?.message || t("Road assistant failed"));
+      showToast(e?.message || t("Road assistant failed"), 2800);
+    } finally {
+      for (const b of [btn, btnRoads]) {
+        if (!b) continue;
+        b.removeAttribute("aria-busy");
+        if (!followPending) b.disabled = false;
+        // stays disabled until confirm/revert otherwise
       }
     }
   }
@@ -3330,6 +3541,8 @@ export function createPathContributor(ctx) {
       e.preventDefault();
       if (followPending) {
         showToast(t("Confirm (Enter) or Revert (Esc) Follow roads first"), 2200);
+      } else if (e.shiftKey) {
+        void runRecalcPath();
       } else {
         void runFollowRoadsAssist();
       }
@@ -4110,6 +4323,9 @@ export function createPathContributor(ctx) {
 
   els.btnFollowRoads?.addEventListener("click", () => {
     void runFollowRoadsAssist();
+  });
+  els.btnRecalc?.addEventListener("click", () => {
+    void runRecalcPath();
   });
   document.getElementById("contrib-follow-confirm")?.addEventListener(
     "click",

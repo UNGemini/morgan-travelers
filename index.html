@@ -294,9 +294,9 @@
             </p>
             <p class="hint contrib-keys-hint">
               <kbd>V</kbd> path · <kbd>S</kbd> stops · <kbd>B</kbd> select ·
-              <kbd>R</kbd> roads · <kbd>X</kbd> blocker · <kbd>1</kbd> start ·
-              <kbd>2</kbd> last · <kbd>[</kbd> hide before · <kbd>]</kbd> hide after ·
-              <kbd>Tab</kbd> cycle
+              <kbd>R</kbd> roads · <kbd>⇧R</kbd> recalc · <kbd>X</kbd> blocker ·
+              <kbd>1</kbd> start · <kbd>2</kbd> last · <kbd>[</kbd> hide before ·
+              <kbd>]</kbd> hide after · <kbd>Tab</kbd> cycle
             </p>
 
             <div id="contrib-path-actions" class="contrib-path-actions">
@@ -475,6 +475,27 @@
                 drew them. In <strong>Select</strong> mode only selected points
                 snap. Red blockers keep OSRM off the wrong road at a junction.
                 Closed loops do not densify last→first. Result is a calculation overlay.
+              </p>
+
+              <button
+                type="button"
+                id="contrib-recalc-path"
+                class="btn contrib-follow-roads"
+                data-acrylic
+                title="Re-run the road calculation with current blockers, line and stops — whole route, or only sections between selected points (Shift+R)"
+              >
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">alt_route</span>
+                  Recalculate path
+                  <kbd class="contrib-inline-kbd">⇧R</kbd>
+                </span>
+              </button>
+              <p class="hint contrib-keys-hint" style="margin-top: 0">
+                Re-runs the road calculation on what is on the map now —
+                current blockers, line and stops. With 2+ selected points only
+                the sections between them are recalculated and the section ends
+                stay fixed; with no selection the whole route (or the visible
+                half of a circular) is.
               </p>
               <div id="contrib-follow-legend" class="contrib-follow-legend" hidden>
                 <p class="contrib-follow-legend-title">Follow roads calculation</p>
