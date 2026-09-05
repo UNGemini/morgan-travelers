@@ -7,7 +7,8 @@
  *
  * Live Bus Position Engine (PRD 4.2 v2) — schedule-based whole-route tracking.
  * ETA remaining-time walk (Now + 35 s slack, 30 s hop floor) places markers
- * from the board stop; MTR/LRT use the same walk on rail geometry (no GTFS).
+ * from the board stop. MTR/LRT have no railway speed map: each hop's
+ * average speed is hop-distance / max(ETA remaining, min-travel-time).
  * Bus hops speed up toward natural travel when the floored min-hop sum
  * exceeds remaining ETA, and schedule-only ghosts closer than ~½ the route's
  * max frequency (tightest GTFS/ETA headway) are dropped.
@@ -82,6 +83,10 @@ import {
 
 /** Typical bus speed for synthetic/fallback anchoring (m/s, ~30 km/h). */
 const V_TYP = 8.3;
+/** Fastest metro hop (m/s, ~80 km/h) — min travel time = distance / this. */
+const RAIL_V_MAX = 22;
+/** Floor on a rail hop so two platforms in one station don't collapse. */
+const RAIL_MIN_HOP_S = 20;
 /**
  * Extra seconds after a minute-rounded "Now" before the marker is treated
  * as at the stop (traffic lights). Inside the 25–45 s band.
@@ -593,15 +598,18 @@ export class BusPositionEngine {
 
   /**
    * Walk backward along ctx.stopDistM from `fromDist` for `remainSec`.
-   * Default hop is max(MIN_HOP_S, natural) so close stops don't collapse.
-   * If that floored sum exceeds remaining ETA, hops scale down toward
-   * natural travel (the marker speeds up) instead of lagging near the stop.
+   * Bus: max(MIN_HOP_S, natural) so close stops don't collapse. If that
+   * floored sum exceeds remaining ETA, hops scale down toward natural.
+   * Rail: no speed map — avg speed = hop / max(ETA, min-travel).
    */
   walkBackFromDist(fromDist, remainSec) {
     const dists = this.ctx?.stopDistM;
     if (!dists?.length || !Number.isFinite(fromDist)) return Math.max(0, fromDist || 0);
     const tRemain = Math.max(0, remainSec);
     if (tRemain <= 0) return Math.max(0, fromDist);
+    const rail =
+      this.ctx?.op === "mtr" || this.ctx?.op === "lrt";
+    if (rail) return this.railProgressBack(fromDist, tRemain);
     let i = dists.length - 1;
     while (i > 0 && dists[i] > fromDist + 0.5) i -= 1;
     const hops = [];
@@ -643,6 +651,45 @@ export class BusPositionEngine {
         t = 0;
         break;
       }
+    }
+    return Math.max(0, d);
+  }
+
+  /**
+   * Place an MTR/LRT train by progress along the rail polyline.
+   * Min travel Tmin = max(RAIL_MIN_HOP_S, D / RAIL_V_MAX). Average speed on
+   * the current hop is D / max(ETA remaining, Tmin). If remaining time
+   * exceeds Tmin the hop is already behind the train — consume Tmin and
+   * walk the previous hop. Never uses the road traffic speed map.
+   */
+  railProgressBack(fromDist, remainSec) {
+    const dists = this.ctx?.stopDistM;
+    if (!dists?.length) return Math.max(0, fromDist);
+    let i = dists.length - 1;
+    while (i > 0 && dists[i] > fromDist + 0.5) i -= 1;
+    let d = Math.min(fromDist, dists[i] ?? fromDist);
+    let t = remainSec;
+    while (i > 0 && t > 0) {
+      const dPrev = dists[i - 1];
+      const dCur = dists[i];
+      const span = Math.max(1e-3, dCur - dPrev);
+      const fromOnHop = Math.max(0, Math.min(1, (d - dPrev) / span));
+      const D = span * fromOnHop;
+      const tMin = Math.max(RAIL_MIN_HOP_S * fromOnHop, D / RAIL_V_MAX);
+      if (tMin <= 1e-6) {
+        d = dPrev;
+        i -= 1;
+        continue;
+      }
+      const tHop = Math.max(t, tMin);
+      const vAvg = D / tHop;
+      const back = vAvg * t;
+      if (back < D - 0.5) {
+        return Math.max(0, d - back);
+      }
+      t -= tMin;
+      d = dPrev;
+      i -= 1;
     }
     return Math.max(0, d);
   }
@@ -694,7 +741,8 @@ export class BusPositionEngine {
   dropGhostsByHeadway(vehicles) {
     const hw = this.headwaySec;
     if (!(hw >= HEADWAY_MIN_S) || vehicles.length < 2) return;
-    const minGapM = hw * GHOST_HEADWAY_FRAC * V_TYP;
+    const rail = this.ctx?.op === "mtr" || this.ctx?.op === "lrt";
+    const minGapM = hw * GHOST_HEADWAY_FRAC * (rail ? RAIL_V_MAX : V_TYP);
     const tracked = (v) => this.tripState.get(v.id)?.arrD >= 0;
     const keepPri = (v) => v.anchored || tracked(v);
     const sorted = vehicles.filter((v) => Number.isFinite(v.d)).sort((a, b) => b.d - a.d);
