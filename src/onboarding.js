@@ -79,8 +79,8 @@ const STEP_TITLES = [
 const BETA_SECTIONS = [
   {
     id: "live-pos",
-    titleKey: "Live Position Engine (Prediction-based)",
-    descKey: "Show live bus markers predicted from nearby ETA countdowns.",
+    titleKey: "Live Position Engine",
+    descKey: "Show live markers predicted from nearby ETA countdowns.",
     loadEnabled: loadLiveBusPref,
     saveEnabled: saveLiveBusPref,
     subs: [
@@ -101,7 +101,7 @@ const BETA_SECTIONS = [
     id: "beta-banner",
     titleKey: "Beta warning banner",
     descKey:
-      "Show the “Beta Feature” disclaimer while live bus positions are active. Swipe the banner up to hide it for the session.",
+      "Show the “Beta Feature” disclaimer while the Live Position Engine is active. Swipe the banner up to hide it for the session.",
     loadEnabled: loadBetaBannerPref,
     saveEnabled: saveBetaBannerPref,
     standalone: true,

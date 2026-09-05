@@ -17942,7 +17942,7 @@ function initLiveBusPrefUi() {
   tgl.addEventListener("change", () => {
     const next = saveLiveBusPref(!!tgl.checked);
     showToast(
-      next ? t("Live bus positions enabled") : t("Live bus positions disabled"),
+      next ? t("Live Position Engine enabled") : t("Live Position Engine disabled"),
       1600,
     );
     syncMoreVisibility();
