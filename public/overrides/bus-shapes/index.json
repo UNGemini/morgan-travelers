@@ -1,12 +1,10 @@
 {
   "updated_at": "2026-08-02",
-  "note": "Contributed routes live in bus-shapes/<id>.json (see split_index). This stub is not the route list.",
-  "split_index": "bus-shapes/index.json",
+  "note": "Hand-reviewed bus route path overrides. Contributors submit drafts via About → Contribute route path; mods merge approved entries here.",
   "files": [
     "kmb_e42_pok_hong_airport_gtc.json",
     "nlb_38_yat_tung_estate_yat_tung_estate.json",
     "ctb_s52p_yat_tung_estate_kui_yat_house_yat_tung_e.json",
     "kmb_e31_yat_tung_estate_bus_term_tsuen_wan_discovery_par.json"
-  ],
-  "routes": []
+  ]
 }

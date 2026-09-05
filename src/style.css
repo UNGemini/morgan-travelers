@@ -3521,6 +3521,33 @@ body.contrib-mode .map-status {
   grid-template-columns: 1fr 1fr 1fr;
 }
 
+.contrib-path-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(94, 228, 160, 0.08);
+  border: 1px solid rgba(94, 228, 160, 0.28);
+}
+
+.contrib-path-actions .btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.72rem;
+}
+
+.contrib-path-actions .btn.is-active,
+#contrib-add-blocker.is-active {
+  background: rgba(255, 92, 92, 0.22);
+  border-color: rgba(255, 92, 92, 0.5);
+}
+
+body.contrib-placing-blocker .contrib-map-hint {
+  background: rgba(255, 92, 92, 0.1);
+  border-color: rgba(255, 92, 92, 0.32);
+}
+
 .contrib-select-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3751,6 +3778,11 @@ body.contrib-edit-stops .contrib-map-hint .material-symbols-outlined {
     transparent 4px 7px
   );
   border-color: #ff922b;
+}
+
+.swatch-red {
+  background: #ff5c5c;
+  border-color: #fff;
 }
 
 .contrib-follow-confirm-row {

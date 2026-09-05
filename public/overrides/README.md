@@ -6,7 +6,7 @@ Hand-maintained corrections that **must not** be replaced by open-data collect o
 |------|---------|
 | `lrt.json` | Light Rail stop/platform pins + track shape overrides (e.g. Tin Wing YOHO West) |
 | `mtr-access-pins.json` | MTR station pins locked against `stations.geojson` merge |
-| `bus-shapes.json` | Reviewed **bus path** polylines (bundled fallback). **Live source of truth** is the separate GitHub repo `morgan-travelers-overrides` — see that repo’s README. |
+| `bus-shapes/` | Reviewed **bus path** polylines, **one JSON file per route** (`index.json` lists them). `bus-shapes.json` is a stub that points at the split index. **Live source of truth** is still the GitHub repo `morgan-travelers-overrides` (assembled `bus-shapes.json`) — see that repo’s README. |
 
 ## Rules
 
@@ -78,12 +78,14 @@ scripts/merge-pending.mjs
 3. Mod: review PR → Actions **Merge pending contribution** (or run `merge-pending.mjs`) → merge to `main`.
 4. Clients pick up the new shapes on next load (`cache: no-cache`).
 
-Sync into this app’s offline bundle:
+Sync into this app’s offline bundle (writes split files under `bus-shapes/`):
 
 ```bash
 npm run sync:bus-shapes
 # or: OVERRIDES_BUS_SHAPES_URL=https://raw.githubusercontent.com/UNGemini/morgan-travelers-overrides/main/bus-shapes.json node scripts/sync-bus-shapes-from-remote.mjs
 ```
+
+Edit a published path locally by opening `public/overrides/bus-shapes/<id>.json` (not the stub `bus-shapes.json`). After adding a file, list it in `index.json`. `npm run shapes:split` rebuilds the index from a full assembled JSON if you still have one.
 
 ### Review checklist (manual / local)
 

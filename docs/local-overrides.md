@@ -81,7 +81,7 @@ You should see `overrides_repo_path`, `published_routes`, and `pending_files`.
 
 In **dev**, the app loads:
 
-`/api/overrides/bus-shapes.json` → `../morgan-travelers-overrides/bus-shapes.json`
+`/api/overrides/bus-shapes.json` → sibling `bus-shapes.json` if it has `routes[]`, otherwise the app’s split files in `public/overrides/bus-shapes/`.
 
 Console: `[overrides] bus shapes N (local-dev-api)`.
 

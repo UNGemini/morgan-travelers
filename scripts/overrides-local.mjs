@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { loadPublishedBusShapes, syncPublicBusShapes } from "./bus-shapes-store.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.join(__dirname, "..");
@@ -63,11 +64,9 @@ const publicShapes = path.join(appRoot, "public", "overrides", "bus-shapes.json"
 if (cmd === "status") {
   let n = 0;
   let updated = "";
-  if (fs.existsSync(shapes)) {
-    const j = JSON.parse(fs.readFileSync(shapes, "utf8"));
-    n = j.routes?.length || 0;
-    updated = j.updated_at || "";
-  }
+  const published = loadPublishedBusShapes(shapes, path.join(root, "bus-shapes"));
+  n = published.routes?.length || 0;
+  updated = published.updated_at || "";
   const pending = fs.existsSync(pendingDir)
     ? fs.readdirSync(pendingDir).filter((f) => f.endsWith(".json"))
     : [];
@@ -120,8 +119,18 @@ if (cmd === "merge") {
   process.stdout.write(r.stdout || "");
   process.stderr.write(r.stderr || "");
   if (r.status === 0 && fs.existsSync(shapes)) {
-    fs.copyFileSync(shapes, publicShapes);
-    console.log("Synced →", publicShapes);
+    try {
+      const data = JSON.parse(fs.readFileSync(shapes, "utf8"));
+      if (Array.isArray(data?.routes) && data.routes.length) {
+        const index = syncPublicBusShapes(data);
+        console.log("Synced split files → public/overrides/bus-shapes/", index.files.length);
+      } else {
+        fs.copyFileSync(shapes, publicShapes);
+        console.log("Synced →", publicShapes);
+      }
+    } catch (e) {
+      console.error("Public sync failed", e?.message || e);
+    }
   }
   process.exit(r.status ?? 1);
 }

@@ -12,10 +12,12 @@ import {
   loadDataSourcePref,
   loadLiveBusMorePref,
   loadLiveBusPref,
+  loadOsrmZoomChordPref,
   saveBetaBannerPref,
   saveDataCachePref,
   saveDataSourcePref,
   saveLiveBusPref,
+  saveOsrmZoomChordPref,
 } from "./preferences.js";
 import {
   FARE_TYPE_HINTS,
@@ -94,6 +96,15 @@ const BETA_SECTIONS = [
         defaultValue: loadLiveBusMorePref() ? "1" : "0",
       },
     ],
+  },
+  {
+    id: "osrm-zoom-chord",
+    titleKey: "OSRM Zoom Chord",
+    descKey:
+      "On non-contributed bus routes, snap the GTFS line onto OpenStreetMap roads when you zoom in. OSRM can pick the wrong carriageway at junctions — leave off unless you need it.",
+    loadEnabled: loadOsrmZoomChordPref,
+    saveEnabled: saveOsrmZoomChordPref,
+    subs: [],
   },
   {
     // Same pref as Settings → Beta features → “Beta warning banner”.

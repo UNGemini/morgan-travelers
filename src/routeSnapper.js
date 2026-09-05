@@ -314,6 +314,9 @@ const FOLLOW_MAX_INSERT_PER_SEG = 24;
  * @param {{
  *   signal?: AbortSignal,
  *   maxDriftM?: number,
+ *   snapIndices?: number[],
+ *   avoidPoints?: Array<{ lon: number, lat: number } | number[]>,
+ *   skipWrap?: boolean,
  *   onProgress?: (ev: { phase: string, i?: number, n?: number, msg?: string }) => void,
  * }} [opts]
  * @returns {Promise<{
@@ -342,6 +345,17 @@ export async function followRoadsPath(coords, opts = {}) {
 
   const maxDrift = opts.maxDriftM ?? FOLLOW_MAX_DRIFT_M;
   const signal = opts.signal;
+  const snapOnly = Array.isArray(opts.snapIndices)
+    ? new Set(opts.snapIndices.map((n) => Number(n)).filter((n) => n >= 0))
+    : null;
+  const avoid = normalizeLngLatList(opts.avoidPoints || []);
+  const nearAvoid = (p, lim = 42) => {
+    if (!avoid.length || !p) return false;
+    return avoid.some(
+      (a) => haversineM(p.lat, p.lon, a.lat, a.lon) <= lim,
+    );
+  };
+  const skipWrap = !!opts.skipWrap;
   /** @type {(ev: { phase: string, i?: number, n?: number, msg?: string }) => void} */
   const onProgress =
     typeof opts.onProgress === "function" ? opts.onProgress : () => {};
@@ -354,6 +368,16 @@ export async function followRoadsPath(coords, opts = {}) {
     FOLLOW_NEAREST_CONCURRENCY,
     async (p, i) => {
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      if (snapOnly && !snapOnly.has(i)) {
+        return {
+          lon: p.lon,
+          lat: p.lat,
+          snapped: false,
+          raw: true,
+          driftM: 0,
+          reason: "unselected",
+        };
+      }
       const isEnd = i === 0 || i === pts.length - 1;
       try {
         const n = await osrmNearest(p, signal);
@@ -366,6 +390,19 @@ export async function followRoadsPath(coords, opts = {}) {
           // Ends: only tiny pull so board/alight stay put
           const lim = isEnd ? Math.min(25, maxDrift) : maxDrift;
           if (drift <= lim) {
+            if (
+              nearAvoid({ lon: n.lon, lat: n.lat }) &&
+              !nearAvoid(p, 28)
+            ) {
+              return {
+                lon: p.lon,
+                lat: p.lat,
+                snapped: false,
+                raw: true,
+                driftM: drift,
+                reason: "blocker",
+              };
+            }
             return {
               lon: n.lon,
               lat: n.lat,
@@ -430,6 +467,32 @@ export async function followRoadsPath(coords, opts = {}) {
     };
 
     const hopM = haversineM(aOrig.lat, aOrig.lon, bOrig.lat, bOrig.lon);
+    if (
+      skipWrap &&
+      i === vertexSnaps.length - 2 &&
+      isClosedLoop(pts, 40)
+    ) {
+      debugSegs.push({
+        i,
+        status: "skip_short",
+        method: null,
+        a: aSnap,
+        b: bSnap,
+        mids: [],
+      });
+      continue;
+    }
+    if (snapOnly && !snapOnly.has(i) && !snapOnly.has(i + 1)) {
+      debugSegs.push({
+        i,
+        status: "downgrade",
+        method: null,
+        a: aSnap,
+        b: bSnap,
+        mids: [],
+      });
+      continue;
+    }
     if (hopM < 35) {
       debugSegs.push({
         i,
@@ -465,6 +528,14 @@ export async function followRoadsPath(coords, opts = {}) {
     } catch (e) {
       if (e?.name === "AbortError") throw e;
       mids = null;
+    }
+
+    if (mids?.length) {
+      const hitBlocker = mids.some((m) => nearAvoid(m, 36));
+      if (hitBlocker) {
+        mids = null;
+        segMethod = null;
+      }
     }
 
     if (mids?.length) {
@@ -1412,8 +1483,11 @@ export async function buildTransitPolyline(opt, opts = {}) {
             }
           } else {
             try {
-              const snapped = await snapGtfsCorridorViaOsrm(poly, opts);
-              if (snapped?.length >= 2) return densifyAlongPolyline(snapped);
+              const { loadOsrmZoomChordPref } = await import("./preferences.js");
+              if (loadOsrmZoomChordPref()) {
+                const snapped = await snapGtfsCorridorViaOsrm(poly, opts);
+                if (snapped?.length >= 2) return densifyAlongPolyline(snapped);
+              }
             } catch (e) {
               if (e?.name === "AbortError") throw e;
               console.warn("[routeSnapper] GTFS corridor OSRM", e);

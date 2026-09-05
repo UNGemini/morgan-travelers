@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Pull published bus-shapes.json from the overrides GitHub repo into
- * public/overrides/bus-shapes.json (for offline / deploy bundling).
+ * Pull published bus-shapes.json from the overrides GitHub repo and
+ * split into public/overrides/bus-shapes/<id>.json (offline bundle).
  *
  * Usage:
  *   OVERRIDES_BUS_SHAPES_URL=https://raw.githubusercontent.com/…/main/bus-shapes.json \
@@ -12,6 +12,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { syncPublicBusShapes } from "./bus-shapes-store.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
@@ -35,8 +36,6 @@ const url =
   process.env.VITE_OVERRIDES_BUS_SHAPES_URL ||
   "https://raw.githubusercontent.com/UNGemini/morgan-travelers-overrides/main/bus-shapes.json";
 
-const out = path.join(root, "public", "overrides", "bus-shapes.json");
-
 const res = await fetch(url, { headers: { Accept: "application/json" } });
 if (!res.ok) {
   console.error("Fetch failed", res.status, url);
@@ -47,12 +46,10 @@ if (!Array.isArray(data?.routes)) {
   console.error("Invalid bus-shapes.json (no routes array)");
   process.exit(1);
 }
-fs.writeFileSync(out, JSON.stringify(data, null, 2) + "\n");
+const index = syncPublicBusShapes(data);
 console.info(
   "Wrote",
-  out,
-  "·",
-  data.routes.length,
-  "routes · from",
+  index.files.length,
+  "route files under public/overrides/bus-shapes/ · from",
   url,
 );

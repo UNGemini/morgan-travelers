@@ -294,8 +294,43 @@
             </p>
             <p class="hint contrib-keys-hint">
               <kbd>V</kbd> path · <kbd>S</kbd> stops · <kbd>B</kbd> select ·
-              <kbd>R</kbd> roads · <kbd>Tab</kbd> cycle
+              <kbd>R</kbd> roads · <kbd>X</kbd> blocker · <kbd>1</kbd> start ·
+              <kbd>2</kbd> last · <kbd>Tab</kbd> cycle
             </p>
+
+            <div id="contrib-path-actions" class="contrib-path-actions">
+              <button type="button" id="contrib-add-blocker" class="btn btn-ghost" data-acrylic title="Shift+click the wrong road at a junction">
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">block</span>
+                  Add blocker
+                  <kbd class="contrib-inline-kbd">X</kbd>
+                </span>
+              </button>
+              <button type="button" id="contrib-set-start" class="btn btn-ghost" data-acrylic title="Rotate the polyline so the focused point is the start">
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">first_page</span>
+                  Start here
+                  <kbd class="contrib-inline-kbd">1</kbd>
+                </span>
+              </button>
+              <button type="button" id="contrib-set-last" class="btn btn-ghost" data-acrylic title="Trim the line so the focused point is the last vertex">
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">last_page</span>
+                  Set as last
+                  <kbd class="contrib-inline-kbd">2</kbd>
+                </span>
+              </button>
+              <button type="button" id="contrib-clear-blockers" class="btn btn-ghost" data-acrylic disabled>
+                Clear blockers
+              </button>
+              <p class="hint contrib-keys-hint" style="margin: 0; flex: 1 1 100%">
+                Path preview: arrows show travel direction, <strong>START</strong> /
+                <strong>END</strong> mark the line. Click a green ring then
+                <kbd>1</kbd> / <kbd>2</kbd> to pick start or last (circular routes).
+                <kbd>Shift</kbd>+click or <kbd>X</kbd> then click to drop a red
+                blocker so Follow roads skips that carriageway.
+              </p>
+            </div>
 
             <div id="contrib-select-actions" class="contrib-select-actions" hidden>
               <button type="button" id="contrib-select-offsets" class="btn btn-ghost" data-acrylic>
@@ -390,7 +425,9 @@
               <p class="hint contrib-keys-hint" style="margin-top: 0">
                 Snaps your vertices onto nearby streets. Never deletes points —
                 only adds road detail where OSRM can; weak sections stay as you
-                drew them. Result is drawn on the map as a calculation overlay.
+                drew them. In <strong>Select</strong> mode only selected points
+                snap. Red blockers keep OSRM off the wrong road at a junction.
+                Closed loops do not densify last→first. Result is a calculation overlay.
               </p>
               <div id="contrib-follow-legend" class="contrib-follow-legend" hidden>
                 <p class="contrib-follow-legend-title">Follow roads calculation</p>
@@ -401,6 +438,7 @@
                   <li><span class="swatch swatch-amber"></span> Vertex kept raw (OSRM weak)</li>
                   <li><span class="swatch swatch-blue"></span> Segment densified + inserted mids</li>
                   <li><span class="swatch swatch-orange-dash"></span> Segment left as-is</li>
+                  <li><span class="swatch swatch-red"></span> Junction blocker (avoid this road)</li>
                 </ul>
                 <div
                   id="contrib-follow-confirm-row"
@@ -1468,6 +1506,22 @@
                   Also fetches ETAs at the nearest stops and every 5th stop
                   ahead and behind the selected stop, so positions are stitched
                   from more anchors (extra requests per route view).
+                </p>
+              </div>
+              <div class="pref-field" id="osrm-zoom-chord-field">
+                <div class="settings-toggle-row">
+                  <span class="loc-label pref-label">
+                    <span class="material-symbols-outlined" aria-hidden="true">alt_route</span>
+                    OSRM Zoom Chord
+                  </span>
+                  <label class="onb-toggle">
+                    <input type="checkbox" id="osrm-zoom-chord-toggle" aria-label="OSRM Zoom Chord" />
+                    <span class="onb-toggle-track"></span>
+                  </label>
+                </div>
+                <p class="pref-field-note">
+                  <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin-right: 6px">Beta</span>
+                  On non-contributed bus routes, snap the GTFS line onto OpenStreetMap roads when you zoom in. OSRM can pick the wrong carriageway at junctions — leave off unless you need it.
                 </p>
               </div>
               <div class="pref-field" id="beta-banner-field">

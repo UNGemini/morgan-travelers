@@ -24,6 +24,7 @@
     "check": "node scripts/check.mjs",
     "generate-metadata": "node scripts/generate-metadata.mjs",
     "sync:bus-shapes": "node scripts/sync-bus-shapes-from-remote.mjs",
+    "shapes:split": "node scripts/bus-shapes-store.mjs split",
     "overrides:status": "node scripts/overrides-local.mjs status",
     "overrides:pending": "node scripts/overrides-local.mjs pending",
     "overrides:merge": "node scripts/overrides-local.mjs merge",

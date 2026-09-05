@@ -593,6 +593,40 @@ export function saveLiveBusMorePref(v) {
   return next;
 }
 
+/**
+ * OSRM Zoom Chord (Beta) — snap non-contributed GTFS corridors onto OSM
+ * roads when zooming. Default **off**: OSRM often takes the wrong
+ * carriageway at junctions. Contributed overrides never use this path.
+ */
+export const OSRM_ZOOM_CHORD_STORAGE_KEY = "morgan.osrmZoomChord";
+
+/**
+ * @returns {boolean} user opted into OSRM zoom-chord on GTFS bus shapes
+ */
+export function loadOsrmZoomChordPref() {
+  try {
+    const raw = localStorage.getItem(OSRM_ZOOM_CHORD_STORAGE_KEY);
+    if (raw === "1" || raw === "0") return raw === "1";
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/**
+ * @param {boolean} v
+ * @returns {boolean}
+ */
+export function saveOsrmZoomChordPref(v) {
+  const next = !!v;
+  try {
+    localStorage.setItem(OSRM_ZOOM_CHORD_STORAGE_KEY, next ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+  return next;
+}
+
 /** Beta warning banner preference — hide the disclaimer card entirely (default on) */
 export const BETA_BANNER_STORAGE_KEY = "morgan.betaBanner";
 

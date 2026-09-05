@@ -14,6 +14,10 @@ import {
   b64decode,
   DEFAULT_OVERRIDES_REPO,
 } from "./functions/_shared/github.js";
+import {
+  loadPublishedBusShapes,
+  syncPublicBusShapes,
+} from "./scripts/bus-shapes-store.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -312,6 +316,7 @@ function crossOriginIsolation() {
 
     const overridesRoot = resolveOverridesRepoRoot();
     const publicShapes = path.join(__dirname, "public", "overrides", "bus-shapes.json");
+    const publicShapesDir = path.join(__dirname, "public", "overrides", "bus-shapes");
     const artifactsDir = path.join(__dirname, "artifacts", "contributions");
     const pendingDir = overridesRoot
       ? path.join(overridesRoot, "pending")
@@ -328,10 +333,13 @@ function crossOriginIsolation() {
       let routes = 0;
       let pending = [];
       try {
-        if (fs.existsSync(shapesPath)) {
-          const j = JSON.parse(fs.readFileSync(shapesPath, "utf8"));
-          routes = Array.isArray(j.routes) ? j.routes.length : 0;
-        }
+        const published = loadPublishedBusShapes(
+          fs.existsSync(shapesPath) ? shapesPath : publicShapes,
+          fs.existsSync(path.join(overridesRoot || "", "bus-shapes", "index.json"))
+            ? path.join(overridesRoot, "bus-shapes")
+            : publicShapesDir,
+        );
+        routes = published.routes.length;
         if (fs.existsSync(pendingDir)) {
           pending = fs
             .readdirSync(pendingDir)
@@ -361,17 +369,16 @@ function crossOriginIsolation() {
         urlPath === "/api/overrides/bus-shapes") &&
       req.method === "GET"
     ) {
-      const file = fs.existsSync(shapesPath) ? shapesPath : publicShapes;
-      if (!fs.existsSync(file)) {
+      const published = loadPublishedBusShapes(
+        fs.existsSync(shapesPath) ? shapesPath : publicShapes,
+        fs.existsSync(path.join(overridesRoot || "", "bus-shapes", "index.json"))
+          ? path.join(overridesRoot, "bus-shapes")
+          : publicShapesDir,
+      );
+      if (!published.routes.length && !fs.existsSync(publicShapes) && !fs.existsSync(shapesPath)) {
         return jsonRes(res, 404, { ok: false, error: "bus-shapes.json not found" });
       }
-      res.statusCode = 200;
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cache-Control", "no-store");
-      fs.createReadStream(file).pipe(res);
-      return;
+      return jsonRes(res, 200, published);
     }
 
     // ── list pending ────────────────────────────────────────────────────
@@ -672,7 +679,7 @@ function crossOriginIsolation() {
           if (!dryRun) {
             fs.mkdirSync(path.dirname(shapesPath), { recursive: true });
             fs.writeFileSync(shapesPath, JSON.stringify(shapes, null, 2) + "\n");
-            fs.writeFileSync(publicShapes, JSON.stringify(shapes, null, 2) + "\n");
+            syncPublicBusShapes(shapes);
           }
           return jsonRes(res, 200, {
             ok: true,
@@ -699,7 +706,16 @@ function crossOriginIsolation() {
         }
         // Mirror into app public/ for offline fallback
         if (!dryRun && fs.existsSync(shapesPath)) {
-          fs.copyFileSync(shapesPath, publicShapes);
+          try {
+            const data = JSON.parse(fs.readFileSync(shapesPath, "utf8"));
+            if (Array.isArray(data?.routes) && data.routes.length) {
+              syncPublicBusShapes(data);
+            } else {
+              fs.copyFileSync(shapesPath, publicShapes);
+            }
+          } catch {
+            fs.copyFileSync(shapesPath, publicShapes);
+          }
         }
         console.info("[dev overrides/merge]", r.stdout);
         return jsonRes(res, 200, {

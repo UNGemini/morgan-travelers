@@ -845,6 +845,15 @@ export function createPathContributor(ctx) {
   let boxEl = null;
   /** Offset threshold in meters for auto-select */
   const OFFSET_SELECT_M = 40;
+  /** Focused path vertex (Path turns: Start here / Set as last) */
+  let focusIdx = -1;
+  /** Junction blockers: OSRM must not snap/densify onto these points */
+  /** @type {number[][]} */
+  let blockers = [];
+  /** Next map click in path mode drops a blocker */
+  let placingBlocker = false;
+  /** True once the current vertex drag moved far enough to count as a drag */
+  let dragMoved = false;
 
   const els = {
     sheet: document.getElementById("contribute-sheet"),
@@ -865,6 +874,10 @@ export function createPathContributor(ctx) {
     btnModePath: document.getElementById("contrib-mode-path"),
     btnModeStops: document.getElementById("contrib-mode-stops"),
     btnModeSelect: document.getElementById("contrib-mode-select"),
+    btnAddBlocker: document.getElementById("contrib-add-blocker"),
+    btnSetStart: document.getElementById("contrib-set-start"),
+    btnSetLast: document.getElementById("contrib-set-last"),
+    btnClearBlockers: document.getElementById("contrib-clear-blockers"),
     btnSelectOffsets: document.getElementById("contrib-select-offsets"),
     btnDeleteSelected: document.getElementById("contrib-delete-selected"),
     btnClearSelection: document.getElementById("contrib-clear-selection"),
@@ -1059,7 +1072,12 @@ export function createPathContributor(ctx) {
     els.btnModePath?.classList.toggle("is-active", editMode === "path");
     els.btnModeStops?.classList.toggle("is-active", editMode === "stops");
     els.btnModeSelect?.classList.toggle("is-active", editMode === "select");
-    // Select-mode action row
+    if (editMode !== "path") setPlacingBlocker(false);
+    // Path-turns + Select action rows
+    document.getElementById("contrib-path-actions")?.toggleAttribute(
+      "hidden",
+      editMode !== "path",
+    );
     document.getElementById("contrib-select-actions")?.toggleAttribute(
       "hidden",
       editMode !== "select",
@@ -1067,10 +1085,10 @@ export function createPathContributor(ctx) {
     if (els.modeLabel) {
       els.modeLabel.textContent =
         editMode === "path"
-          ? "Mode: Path turns (V) — drag hollow green rings"
+          ? t("Mode: Path turns (V) — drag rings · arrows show direction · 1 start · 2 last")
           : editMode === "stops"
-            ? "Mode: Visual stops (S) — drag orange pins · official (grey) is fixed"
-            : "Mode: Select (B) — drag box · Select offsets · Delete selected";
+            ? t("Mode: Visual stops (S) — drag orange pins · official (grey) is fixed")
+            : t("Mode: Select (B) — box-select · Follow roads snaps selected only");
     }
     // Layer visibility + dimming so path rings ≠ stop pins
     try {
@@ -1092,6 +1110,34 @@ export function createPathContributor(ctx) {
           "contrib-path-line",
           "line-width",
           editMode === "stops" ? 3 : 5,
+        );
+      }
+      if (map.getLayer("contrib-path-arrows")) {
+        map.setLayoutProperty(
+          "contrib-path-arrows",
+          "visibility",
+          editMode === "path" ? "visible" : "none",
+        );
+      }
+      if (map.getLayer("contrib-path-end-labels")) {
+        map.setLayoutProperty(
+          "contrib-path-end-labels",
+          "visibility",
+          editMode === "path" ? "visible" : "none",
+        );
+      }
+      if (map.getLayer("contrib-path-wrap")) {
+        map.setLayoutProperty(
+          "contrib-path-wrap",
+          "visibility",
+          editMode === "path" ? "visible" : "none",
+        );
+      }
+      if (map.getLayer("contrib-path-blockers")) {
+        map.setLayoutProperty(
+          "contrib-path-blockers",
+          "visibility",
+          editMode === "stops" ? "none" : "visible",
         );
       }
       if (map.getLayer("contrib-stops-circle")) {
@@ -1156,12 +1202,12 @@ export function createPathContributor(ctx) {
     }
     setStatus(
       editMode === "path"
-        ? t("Path mode: drag hollow green handles · click path to insert · Alt+click delete · B for select")
+        ? t("Path mode: drag rings · click a ring then 1/2 for start/last · Shift+click blocker · R Follow roads")
         : editMode === "stops"
           ? stopMarkers.length
             ? t("Visual stops: {n} orange pins · grey ghost only if moved from official · drag to adjust", { n: stopMarkers.length })
             : t("Visual stops: no stops loaded — Load calculated path first")
-          : t("Select mode: drag a box on the map · amber = offset >{n}m · Delete/Backspace removes selected", { n: OFFSET_SELECT_M }),
+          : t("Select mode: box-select · Follow roads snaps selected points only · Del removes", { n: OFFSET_SELECT_M }),
     );
   }
 
@@ -1225,6 +1271,8 @@ export function createPathContributor(ctx) {
             "case",
             ["==", ["get", "selected"], 1],
             7.5,
+            ["==", ["get", "focused"], 1],
+            7.5,
             ["==", ["get", "anchor"], true],
             7,
             ["==", ["get", "offset"], 1],
@@ -1235,6 +1283,8 @@ export function createPathContributor(ctx) {
             "case",
             ["==", ["get", "selected"], 1],
             "#ff5c5c",
+            ["==", ["get", "focused"], 1],
+            "#4dabf7",
             ["==", ["get", "offset"], 1],
             "#ffb020",
             "#000000",
@@ -1243,6 +1293,8 @@ export function createPathContributor(ctx) {
             "case",
             ["==", ["get", "selected"], 1],
             0.85,
+            ["==", ["get", "focused"], 1],
+            0.75,
             ["==", ["get", "offset"], 1],
             0.55,
             0.01,
@@ -1252,6 +1304,8 @@ export function createPathContributor(ctx) {
             "case",
             ["==", ["get", "selected"], 1],
             2.5,
+            ["==", ["get", "focused"], 1],
+            3,
             ["==", ["get", "anchor"], true],
             3,
             2.25,
@@ -1260,6 +1314,8 @@ export function createPathContributor(ctx) {
             "case",
             ["==", ["get", "selected"], 1],
             "#ffffff",
+            ["==", ["get", "focused"], 1],
+            "#ffffff",
             ["==", ["get", "offset"], 1],
             "#ffb020",
             ["==", ["get", "anchor"], true],
@@ -1267,6 +1323,97 @@ export function createPathContributor(ctx) {
             "#5ee4a0",
           ],
           "circle-pitch-alignment": "viewport",
+        },
+      });
+    }
+    if (!map.getLayer("contrib-path-arrows")) {
+      map.addLayer({
+        id: "contrib-path-arrows",
+        type: "symbol",
+        source: "contrib-path",
+        filter: ["==", ["get", "kind"], "line"],
+        layout: {
+          "symbol-placement": "line",
+          "symbol-spacing": 56,
+          "text-field": "▶",
+          "text-size": 11,
+          "text-keep-upright": false,
+          "text-rotation-alignment": "map",
+          "text-allow-overlap": true,
+          "text-ignore-placement": true,
+          visibility: "visible",
+        },
+        paint: {
+          "text-color": "#c8ffe0",
+          "text-halo-color": "#0b1a12",
+          "text-halo-width": 1.2,
+          "text-opacity": 0.9,
+        },
+      });
+    }
+    if (!map.getLayer("contrib-path-end-labels")) {
+      map.addLayer({
+        id: "contrib-path-end-labels",
+        type: "symbol",
+        source: "contrib-path",
+        filter: ["==", ["get", "kind"], "end-label"],
+        layout: {
+          "text-field": ["get", "label"],
+          "text-size": 11,
+          "text-offset": [
+            "case",
+            ["==", ["get", "role"], "start"],
+            ["literal", [0, -1.35]],
+            ["literal", [0, 1.35]],
+          ],
+          "text-anchor": [
+            "case",
+            ["==", ["get", "role"], "start"],
+            "bottom",
+            "top",
+          ],
+          "text-allow-overlap": true,
+          "text-ignore-placement": true,
+          visibility: "visible",
+        },
+        paint: {
+          "text-color": [
+            "case",
+            ["==", ["get", "role"], "start"],
+            "#b8f2d0",
+            "#ffd8a8",
+          ],
+          "text-halo-color": "#000",
+          "text-halo-width": 1.4,
+        },
+      });
+    }
+    if (!map.getLayer("contrib-path-wrap")) {
+      map.addLayer({
+        id: "contrib-path-wrap",
+        type: "line",
+        source: "contrib-path",
+        filter: ["==", ["get", "kind"], "wrap"],
+        paint: {
+          "line-color": "#cc5de8",
+          "line-width": 2.5,
+          "line-opacity": 0.7,
+          "line-dasharray": [2, 2],
+        },
+      });
+    }
+    if (!map.getLayer("contrib-path-blockers")) {
+      map.addLayer({
+        id: "contrib-path-blockers",
+        type: "circle",
+        source: "contrib-path",
+        filter: ["==", ["get", "kind"], "blocker"],
+        paint: {
+          "circle-radius": 7,
+          "circle-color": "#ff5c5c",
+          "circle-opacity": 0.85,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#fff",
         },
       });
     }
@@ -1490,6 +1637,17 @@ export function createPathContributor(ctx) {
           geometry: { type: "LineString", coordinates: points },
         });
       }
+      if (editMode === "path" && isClosedPath(points)) {
+        const a = points[0];
+        const b = points[points.length - 1];
+        if (a && b) {
+          features.push({
+            type: "Feature",
+            properties: { kind: "wrap" },
+            geometry: { type: "LineString", coordinates: [b, a] },
+          });
+        }
+      }
       // Path turning handles in path + select modes (hidden in stops mode)
       if (editMode === "path" || editMode === "select") {
         const idxs = editVertexIndices();
@@ -1503,11 +1661,32 @@ export function createPathContributor(ctx) {
               i,
               anchor: i === 0 || i === points.length - 1,
               selected: selectedIdx.has(i) ? 1 : 0,
+              focused: focusIdx === i ? 1 : 0,
               offset: offsetIdx.has(i) ? 1 : 0,
             },
             geometry: { type: "Point", coordinates: c },
           });
         }
+      }
+      if (editMode === "path" && points.length >= 2) {
+        features.push({
+          type: "Feature",
+          properties: { kind: "end-label", role: "start", label: t("START") },
+          geometry: { type: "Point", coordinates: points[0] },
+        });
+        features.push({
+          type: "Feature",
+          properties: { kind: "end-label", role: "end", label: t("END") },
+          geometry: { type: "Point", coordinates: points[points.length - 1] },
+        });
+      }
+      for (const c of blockers) {
+        if (!c || c.length < 2) continue;
+        features.push({
+          type: "Feature",
+          properties: { kind: "blocker" },
+          geometry: { type: "Point", coordinates: c },
+        });
       }
       src.setData({ type: "FeatureCollection", features });
     }
@@ -1562,7 +1741,9 @@ export function createPathContributor(ctx) {
       if (editMode === "select") {
         els.count.textContent = `${selectedIdx.size} selected · ${offsetIdx.size} offset >${OFFSET_SELECT_M}m · ${points.length} path pts`;
       } else if (editMode === "path") {
-        els.count.textContent = `${points.length} path pts · ${stopMarkers.length} stops (official fixed)`;
+        const loop = isClosedPath(points) ? ` · ${t("loop")}` : "";
+        const blk = blockers.length ? ` · ${blockers.length} ${t("blockers")}` : "";
+        els.count.textContent = `${points.length} path pts${loop}${blk} · ${stopMarkers.length} stops (official fixed)`;
       } else {
         els.count.textContent = stopMarkers.length
           ? `${stopMarkers.length} visual stops · drag orange pins`
@@ -1570,6 +1751,7 @@ export function createPathContributor(ctx) {
       }
     }
     updateSelectActionState();
+    updatePathActionState();
   }
 
   function updateSelectActionState() {
@@ -1579,6 +1761,144 @@ export function createPathContributor(ctx) {
       els.btnDeleteSelected.textContent = n ? t("Delete ({n})", { n }) : t("Delete selected");
     }
     if (els.btnClearSelection) els.btnClearSelection.disabled = n === 0;
+  }
+
+  function updatePathActionState() {
+    if (els.btnClearBlockers) els.btnClearBlockers.disabled = blockers.length === 0;
+    if (els.btnSetStart) els.btnSetStart.disabled = focusIdx < 0 || points.length < 2;
+    if (els.btnSetLast) els.btnSetLast.disabled = focusIdx < 0 || points.length < 2;
+    els.btnAddBlocker?.classList.toggle("is-active", placingBlocker);
+    document.body.classList.toggle("contrib-placing-blocker", placingBlocker);
+  }
+
+  /**
+   * Closed loop: first and last vertices sit on the same kerb.
+   * @param {number[][]} pts
+   * @param {number} [maxM]
+   */
+  function isClosedPath(pts, maxM = 40) {
+    if (!pts || pts.length < 4) return false;
+    const a = pts[0];
+    const b = pts[pts.length - 1];
+    if (!a || !b) return false;
+    const dlat = (a[1] - b[1]) * 111320;
+    const dlng = (a[0] - b[0]) * 111320 * Math.cos((a[1] * Math.PI) / 180);
+    return Math.hypot(dlat, dlng) < maxM;
+  }
+
+  function setPlacingBlocker(on) {
+    placingBlocker = !!on;
+    updatePathActionState();
+    if (placingBlocker) {
+      setStatus(t("Placing blockers — click the wrong road at a junction · Esc to stop"));
+    }
+  }
+
+  function addBlockerAt(lng, lat) {
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+    const dup = blockers.some((c) => {
+      const dlat = (c[1] - lat) * 111320;
+      const dlng = (c[0] - lng) * 111320 * Math.cos((lat * Math.PI) / 180);
+      return Math.hypot(dlat, dlng) < 12;
+    });
+    if (dup) {
+      showToast(t("Blocker already there"), 1200);
+      return;
+    }
+    blockers.push([lng, lat]);
+    paintDraft();
+    setStatus(t("Blocker added — Follow roads will avoid this junction"));
+    showToast(t("Blocker added"), 1400);
+  }
+
+  function hitBlocker(point, maxPx = 16) {
+    if (!map || !blockers.length) return -1;
+    let best = -1;
+    let bestD = maxPx;
+    for (let i = 0; i < blockers.length; i++) {
+      const c = blockers[i];
+      const p = map.project({ lng: c[0], lat: c[1] });
+      const d = Math.hypot(p.x - point.x, p.y - point.y);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  function removeBlockerAt(i) {
+    if (i < 0 || i >= blockers.length) return;
+    blockers.splice(i, 1);
+    paintDraft();
+    showToast(t("Blocker removed"), 1200);
+  }
+
+  function clearBlockers() {
+    if (!blockers.length) return;
+    blockers = [];
+    setPlacingBlocker(false);
+    paintDraft();
+    setStatus(t("Blockers cleared"));
+    showToast(t("Blockers cleared"), 1200);
+  }
+
+  /**
+   * Rotate the polyline so vertex `i` becomes the start (index 0).
+   * Closed loops keep the wrap after rotation.
+   */
+  function rotatePathStart(i) {
+    if (i < 0 || i >= points.length) {
+      showToast(t("Need a focused path point — click a green ring first"), 2200);
+      return;
+    }
+    if (i === 0) {
+      showToast(t("Path already starts here"), 1400);
+      return;
+    }
+    if (points.length < 2) return;
+    pushPathHistory();
+    const closed = isClosedPath(points);
+    let ring = points.map((c) => [c[0], c[1]]);
+    if (closed && ring.length >= 2) ring.pop();
+    const idx = Math.min(i, ring.length - 1);
+    const rotated = ring.slice(idx).concat(ring.slice(0, idx));
+    if (closed && rotated.length) {
+      rotated.push([rotated[0][0], rotated[0][1]]);
+    }
+    points = rotated;
+    selectedIdx.clear();
+    focusIdx = 0;
+    recomputeOffsetFlags();
+    paintDraft();
+    setStatus(t("Path rotated · this point is now the start"));
+    showToast(t("Line start moved here"), 1800);
+  }
+
+  /**
+   * Trim so vertex `i` is the last point (opens a circular wrap).
+   */
+  function setPathLast(i) {
+    if (i < 0 || i >= points.length) {
+      showToast(t("Need a focused path point — click a green ring first"), 2200);
+      return;
+    }
+    if (i === 0) {
+      showToast(t("Cannot set the first point as last"), 1800);
+      return;
+    }
+    if (i === points.length - 1) {
+      showToast(t("Path already ends here"), 1400);
+      return;
+    }
+    pushPathHistory();
+    points = points.slice(0, i + 1).map((c) => [c[0], c[1]]);
+    selectedIdx.clear();
+    focusIdx = points.length - 1;
+    recomputeOffsetFlags();
+    paintDraft();
+    setStatus(t("Path end set · {n} pts remain", { n: points.length }));
+    showToast(t("Line now ends here"), 1800);
   }
 
   /** Ensure box-select overlay on map container */
@@ -1928,6 +2248,16 @@ export function createPathContributor(ctx) {
       showToast(t("Draw or load a path first (need ≥ 2 points)"), 2200);
       return;
     }
+    if (editMode === "select" && !selectedIdx.size) {
+      showToast(
+        t("Select mode: Follow roads snaps selected points only. Select some, or leave Select mode to snap all."),
+        3200,
+      );
+      setStatus(
+        t("Select points first, or press V to snap the whole path"),
+      );
+      return;
+    }
     if (loadAbort) loadAbort.abort();
     loadAbort = new AbortController();
     const btn = els.btnFollowRoads;
@@ -1946,6 +2276,10 @@ export function createPathContributor(ctx) {
     try {
       const result = await followRoadsPath(beforePath, {
         signal: loadAbort.signal,
+        skipWrap: true,
+        avoidPoints: blockers.map((c) => ({ lon: c[0], lat: c[1] })),
+        snapIndices:
+          editMode === "select" ? [...selectedIdx] : undefined,
         onProgress: (ev) => {
           if (ev?.msg) setStatus(t("Road assistant: {msg}", { msg: ev.msg }));
         },
@@ -2069,6 +2403,9 @@ export function createPathContributor(ctx) {
       clearPathHistoryStacks();
       selectedIdx.clear();
       offsetIdx.clear();
+      focusIdx = -1;
+      blockers = [];
+      setPlacingBlocker(false);
       points = path;
 
       // Form fields
@@ -2378,6 +2715,9 @@ export function createPathContributor(ctx) {
 
   function onMouseDown(e) {
     if (!active) return;
+    if (editMode === "path" && (placingBlocker || e.originalEvent?.shiftKey)) {
+      return;
+    }
     if (editMode === "select") {
       boxSelecting = true;
       boxStart = { x: e.point.x, y: e.point.y };
@@ -2391,6 +2731,7 @@ export function createPathContributor(ctx) {
       const i = hitVertex(e.point, 16);
       if (i >= 0) {
         dragIdx = i;
+        dragMoved = false;
         map.dragPan.disable();
         e.preventDefault();
       }
@@ -2415,6 +2756,10 @@ export function createPathContributor(ctx) {
       return;
     }
     if (editMode === "path" && dragIdx >= 0 && points[dragIdx]) {
+      const prev = points[dragIdx];
+      const dlat = (prev[1] - e.lngLat.lat) * 111320;
+      const dlng = (prev[0] - e.lngLat.lng) * 111320 * Math.cos((e.lngLat.lat * Math.PI) / 180);
+      if (Math.hypot(dlat, dlng) > 1.5) dragMoved = true;
       points[dragIdx] = [e.lngLat.lng, e.lngLat.lat];
       paintDraft();
       return;
@@ -2430,8 +2775,14 @@ export function createPathContributor(ctx) {
       return;
     }
     if (editMode === "path") {
-      const i = hitVertex(e.point, 14);
-      map.getCanvas().style.cursor = i >= 0 ? "grab" : "crosshair";
+      if (placingBlocker) {
+        map.getCanvas().style.cursor = "crosshair";
+      } else {
+        const i = hitVertex(e.point, 14);
+        const b = hitBlocker(e.point, 14);
+        map.getCanvas().style.cursor =
+          i >= 0 ? "grab" : b >= 0 ? "pointer" : "crosshair";
+      }
     } else if (editMode === "stops") {
       const i = hitVisualStop(e.point, 16);
       map.getCanvas().style.cursor = i >= 0 ? "grab" : "default";
@@ -2456,7 +2807,15 @@ export function createPathContributor(ctx) {
       return;
     }
     if (dragIdx >= 0) {
+      if (!dragMoved) {
+        focusIdx = dragIdx;
+        paintDraft();
+        setStatus(
+          t("Focused point {n} · 1 = start here · 2 = last here", { n: focusIdx + 1 }),
+        );
+      }
       dragIdx = -1;
+      dragMoved = false;
       map.dragPan.enable();
     }
     if (dragStopIdx >= 0) {
@@ -2491,15 +2850,33 @@ export function createPathContributor(ctx) {
     // Select / stops: no path insert
     if (editMode !== "path") return;
 
+    const blkHit = hitBlocker(e.point, 16);
+    if (placingBlocker || e.originalEvent?.shiftKey) {
+      if (blkHit >= 0 && !placingBlocker) {
+        removeBlockerAt(blkHit);
+        return;
+      }
+      addBlockerAt(e.lngLat.lng, e.lngLat.lat);
+      return;
+    }
+    if (blkHit >= 0) {
+      removeBlockerAt(blkHit);
+      return;
+    }
     // Alt/Option+click near vertex → delete turning point
     if (e.originalEvent?.altKey) {
       const i = hitVertex(e.point, 16);
       if (i > 0 && i < points.length - 1) {
+        pushPathHistory();
         points.splice(i, 1);
+        if (focusIdx === i) focusIdx = -1;
+        else if (focusIdx > i) focusIdx -= 1;
         paintDraft();
       }
       return;
     }
+    // Clicking a vertex focuses it (handled on mouseup) — don't insert
+    if (hitVertex(e.point, 16) >= 0) return;
     // Insert turning point on path (or append if empty)
     if (points.length < 2) {
       points.push([e.lngLat.lng, e.lngLat.lat]);
@@ -2513,13 +2890,13 @@ export function createPathContributor(ctx) {
   function onKeyDown(e) {
     if (!active) return;
     // Ignore when typing in inputs
-    const t = e.target;
+    const tgt = e.target;
     if (
-      t &&
-      (t.tagName === "INPUT" ||
-        t.tagName === "TEXTAREA" ||
-        t.tagName === "SELECT" ||
-        t.isContentEditable)
+      tgt &&
+      (tgt.tagName === "INPUT" ||
+        tgt.tagName === "TEXTAREA" ||
+        tgt.tagName === "SELECT" ||
+        tgt.isContentEditable)
     ) {
       return;
     }
@@ -2546,12 +2923,30 @@ export function createPathContributor(ctx) {
       } else {
         void runFollowRoadsAssist();
       }
+    } else if (k === "x" && !e.ctrlKey && !e.metaKey && editMode === "path") {
+      e.preventDefault();
+      setPlacingBlocker(!placingBlocker);
+      showToast(
+        placingBlocker
+          ? t("Click the map to drop a blocker")
+          : t("Blocker placement off"),
+        1400,
+      );
+    } else if (k === "1" && !e.ctrlKey && !e.metaKey && editMode === "path") {
+      e.preventDefault();
+      rotatePathStart(focusIdx);
+    } else if (k === "2" && !e.ctrlKey && !e.metaKey && editMode === "path") {
+      e.preventDefault();
+      setPathLast(focusIdx);
     } else if (k === "enter" && followPending && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       confirmFollowRoads();
     } else if (k === "escape") {
       e.preventDefault();
-      if (followPending) {
+      if (placingBlocker) {
+        setPlacingBlocker(false);
+        showToast(t("Blocker placement off"), 1200);
+      } else if (followPending) {
         revertFollowRoads();
       } else if (selectedIdx.size) {
         clearSelection();
@@ -2978,6 +3373,9 @@ export function createPathContributor(ctx) {
       clearPathHistoryStacks();
       selectedIdx.clear();
       offsetIdx.clear();
+      focusIdx = -1;
+      blockers = [];
+      setPlacingBlocker(false);
       points = result.path;
       stopMarkers = result.stops;
       if (els.from) {
@@ -3116,7 +3514,7 @@ export function createPathContributor(ctx) {
     updateUndoRedoButtons();
     void refreshGithubAuth();
     showToast(
-      "V path · S visual stops · R follow roads · Tab switch. Official greys stay fixed.",
+      "V path · S stops · B select · R roads · X blocker · 1 start · 2 last.",
       3400,
     );
   }
@@ -3135,11 +3533,16 @@ export function createPathContributor(ctx) {
       "contrib-edit-stops",
       "contrib-edit-select",
       "contrib-submitting",
+      "contrib-placing-blocker",
+      "contrib-follow-pending",
     );
     document.getElementById("app")?.removeAttribute("data-contrib");
     endBoxSelect(false);
     selectedIdx.clear();
     offsetIdx.clear();
+    focusIdx = -1;
+    blockers = [];
+    placingBlocker = false;
     if (followPending) {
       // Closing while previewing: discard follow result
       points = followPending.beforePath.map((c) => [c[0], c[1]]);
@@ -3215,7 +3618,26 @@ export function createPathContributor(ctx) {
   });
   els.btnModeSelect?.addEventListener("click", () => {
     setEditMode("select");
-    showToast(t("Select mode (B) — box-select offset points"), 1600);
+    showToast(t("Select mode (B) — Follow roads snaps selected points only"), 1800);
+  });
+  els.btnAddBlocker?.addEventListener("click", () => {
+    if (editMode !== "path") setEditMode("path");
+    setPlacingBlocker(!placingBlocker);
+    showToast(
+      placingBlocker
+        ? t("Click the map to drop a blocker")
+        : t("Blocker placement off"),
+      1600,
+    );
+  });
+  els.btnSetStart?.addEventListener("click", () => {
+    rotatePathStart(focusIdx);
+  });
+  els.btnSetLast?.addEventListener("click", () => {
+    setPathLast(focusIdx);
+  });
+  els.btnClearBlockers?.addEventListener("click", () => {
+    clearBlockers();
   });
   els.btnSelectOffsets?.addEventListener("click", () => {
     if (editMode !== "select") setEditMode("select");
@@ -3344,6 +3766,9 @@ export function createPathContributor(ctx) {
     stopMarkers = [];
     selectedIdx.clear();
     offsetIdx.clear();
+    focusIdx = -1;
+    blockers = [];
+    setPlacingBlocker(false);
     paintDraft();
     updateUndoRedoButtons();
     setStatus(t("Path cleared"));

@@ -1,6 +1,6 @@
 /**
  * Contributor / mod bus route path overrides.
- * Source: public/overrides/bus-shapes.json (reviewed entries only).
+ * Source: public/overrides/bus-shapes/<id>.json (reviewed entries only).
  *
  * Draft submissions open a GitHub PR (or download JSON); they are NOT auto-published.
  */

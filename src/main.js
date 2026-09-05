@@ -69,6 +69,8 @@ import {
   saveLiveBusPref,
   loadLiveBusMorePref,
   saveLiveBusMorePref,
+  loadOsrmZoomChordPref,
+  saveOsrmZoomChordPref,
   loadBetaBannerPref,
   saveBetaBannerPref,
 } from "./preferences.js";
@@ -4327,6 +4329,7 @@ function offlineDataManifest() {
     url("fares/bbi-compact.json?v=1"),
     url("fares/hk-fares.json?v=5"),
     url("overrides/bus-shapes.json"),
+    url("overrides/bus-shapes/index.json"),
     url("overrides/lrt.json"),
     url("overrides/mtr-access-pins.json"),
     url("mtr/exits.geojson"),
@@ -4356,6 +4359,22 @@ function offlineDataManifest() {
       }
     } catch (e) {
       console.warn("[offline] bus-shapes index", e);
+    }
+    try {
+      const ovIdx = await fetch(url("overrides/bus-shapes/index.json"), {
+        cache: "no-cache",
+      });
+      if (ovIdx.ok) {
+        const idx = await ovIdx.json();
+        for (const f of idx.files || []) {
+          const name = String(f || "").replace(/^.*\//, "");
+          if (name.endsWith(".json")) {
+            urls.push(url(`overrides/bus-shapes/${name}`));
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[offline] contributed bus-shapes index", e);
     }
     urls.push(PMTILES_URL);
     return urls;
@@ -17972,6 +17991,20 @@ function initLiveBusPrefUi() {
   });
 }
 initLiveBusPrefUi();
+
+function initOsrmZoomChordPrefUi() {
+  const tgl = document.getElementById("osrm-zoom-chord-toggle");
+  if (!tgl) return;
+  tgl.checked = loadOsrmZoomChordPref();
+  tgl.addEventListener("change", () => {
+    const next = saveOsrmZoomChordPref(!!tgl.checked);
+    showToast(
+      next ? t("OSRM Zoom Chord enabled") : t("OSRM Zoom Chord disabled"),
+      1800,
+    );
+  });
+}
+initOsrmZoomChordPrefUi();
 
 // ── Language settings ────────────────────────────────────────────────────────
 /** Wire the Language dropdown to the saved preference (initLang applied at boot). */
