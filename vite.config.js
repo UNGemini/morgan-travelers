@@ -364,16 +364,31 @@ function crossOriginIsolation() {
     }
 
     // ── published shapes (what the app fetches in dev) ──────────────────
-    if (
-      (urlPath === "/api/overrides/bus-shapes.json" ||
-        urlPath === "/api/overrides/bus-shapes") &&
-      req.method === "GET"
-    ) {
+    // /bus-shapes.json → assembled routes · /bus-shapes/index.json → split
+    // index · /bus-shapes/<file>.json → one published route
+    const mShapes = urlPath.match(
+      /^\/api\/overrides\/bus-shapes(?:\/(index\.json|[A-Za-z0-9._-]+\.json))?$/,
+    );
+    if (mShapes && req.method === "GET") {
+      const splitDir = fs.existsSync(
+        path.join(overridesRoot || "", "bus-shapes", "index.json"),
+      )
+        ? path.join(overridesRoot, "bus-shapes")
+        : publicShapesDir;
+      if (mShapes[1]) {
+        const file = path.join(splitDir, path.basename(mShapes[1]));
+        if (!fs.existsSync(file)) {
+          return jsonRes(res, 404, { ok: false, error: `not found: ${mShapes[1]}` });
+        }
+        try {
+          return jsonRes(res, 200, JSON.parse(fs.readFileSync(file, "utf8")));
+        } catch {
+          return jsonRes(res, 500, { ok: false, error: "bad JSON" });
+        }
+      }
       const published = loadPublishedBusShapes(
         fs.existsSync(shapesPath) ? shapesPath : publicShapes,
-        fs.existsSync(path.join(overridesRoot || "", "bus-shapes", "index.json"))
-          ? path.join(overridesRoot, "bus-shapes")
-          : publicShapesDir,
+        splitDir,
       );
       if (!published.routes.length && !fs.existsSync(publicShapes) && !fs.existsSync(shapesPath)) {
         return jsonRes(res, 404, { ok: false, error: "bus-shapes.json not found" });
@@ -704,17 +719,23 @@ function crossOriginIsolation() {
             error: r.stderr || r.stdout || `merge exit ${r.status}`,
           });
         }
-        // Mirror into app public/ for offline fallback
-        if (!dryRun && fs.existsSync(shapesPath)) {
+        // Mirror into app public/ for offline fallback (split store first —
+        // the overrides repo blob is a stub now)
+        if (!dryRun) {
           try {
-            const data = JSON.parse(fs.readFileSync(shapesPath, "utf8"));
-            if (Array.isArray(data?.routes) && data.routes.length) {
+            const data = loadPublishedBusShapes(
+              fs.existsSync(shapesPath) ? shapesPath : publicShapes,
+              fs.existsSync(path.join(overridesRoot || "", "bus-shapes", "index.json"))
+                ? path.join(overridesRoot, "bus-shapes")
+                : publicShapesDir,
+            );
+            if (data?.routes?.length) {
               syncPublicBusShapes(data);
-            } else {
+            } else if (fs.existsSync(shapesPath)) {
               fs.copyFileSync(shapesPath, publicShapes);
             }
           } catch {
-            fs.copyFileSync(shapesPath, publicShapes);
+            if (fs.existsSync(shapesPath)) fs.copyFileSync(shapesPath, publicShapes);
           }
         }
         console.info("[dev overrides/merge]", r.stdout);
@@ -733,17 +754,23 @@ function crossOriginIsolation() {
       }
     }
 
-    // ── copy shapes → public/overrides ──────────────────────────────────
+    // ── copy sibling split store → public/overrides ─────────────────────
     if (urlPath === "/api/overrides/reload-public" && req.method === "POST") {
       try {
-        if (!fs.existsSync(shapesPath)) {
-          return jsonRes(res, 404, { ok: false, error: "No bus-shapes.json" });
+        const data = loadPublishedBusShapes(
+          fs.existsSync(shapesPath) ? shapesPath : publicShapes,
+          fs.existsSync(path.join(overridesRoot || "", "bus-shapes", "index.json"))
+            ? path.join(overridesRoot, "bus-shapes")
+            : publicShapesDir,
+        );
+        if (!data?.routes?.length) {
+          return jsonRes(res, 404, { ok: false, error: "No published bus shapes" });
         }
-        fs.mkdirSync(path.dirname(publicShapes), { recursive: true });
-        fs.copyFileSync(shapesPath, publicShapes);
+        syncPublicBusShapes(data);
         return jsonRes(res, 200, {
           ok: true,
-          copied_to: publicShapes,
+          synced_to: publicShapesDir,
+          routes: data.routes.length,
         });
       } catch (e) {
         return jsonRes(res, 500, { ok: false, error: e?.message || "copy failed" });

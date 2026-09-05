@@ -2,7 +2,9 @@
  * Same-origin bus-shapes proxy (COEP-safe).
  *
  * GET /api/overrides/bus-shapes.json
- *   → https://raw.githubusercontent.com/<OVERRIDES_REPO>/main/bus-shapes.json
+ *   → https://raw.githubusercontent.com/<OVERRIDES_REPO>/<branch>/bus-shapes.json
+ * GET /api/overrides/bus-shapes/index.json, /api/overrides/bus-shapes/<id>.json
+ *   → same path in the overrides repo (split published store)
  *
  * Env:
  *   OVERRIDES_REPO = owner/name (default UNGemini/morgan-travelers-overrides)
@@ -37,8 +39,9 @@ export async function onRequest(context) {
     });
   }
 
-  // Only bus-shapes for now (status/pending stay local-dev via Vite)
-  if (rest !== "bus-shapes.json" && rest !== "bus-shapes") {
+  // Bus-shapes blob + the split published store (index / per-route files);
+  // status/pending stay local-dev via Vite
+  if (rest !== "bus-shapes.json" && !/^bus-shapes\/[A-Za-z0-9._-]+\.json$/.test(rest)) {
     return new Response(JSON.stringify({ error: "not found", path: rest }), {
       status: 404,
       headers: {
@@ -59,7 +62,7 @@ export async function onRequest(context) {
   const branch =
     String(env?.OVERRIDES_BRANCH || DEFAULT_BRANCH).trim() || DEFAULT_BRANCH;
   // Cache-bust lightly via GitHub; edge still caches briefly via CF
-  const target = `https://raw.githubusercontent.com/${repo}/${branch}/bus-shapes.json`;
+  const target = `https://raw.githubusercontent.com/${repo}/${branch}/${rest}`;
 
   try {
     const upstream = await fetch(target, {

@@ -7,7 +7,7 @@ Test **fetch → contribute → merge → reload** without Cloudflare or GitHub 
 ```
 Documents/Projects/
   MorganTraveler/                 ← this app (npm run dev)
-  morgan-travelers-overrides/     ← sibling repo (pending + bus-shapes.json)
+  morgan-travelers-overrides/     ← sibling repo (pending + split bus-shapes/ + stub)
 ```
 
 If the sibling folder is missing, drafts go to `artifacts/contributions/pending/`.
@@ -81,7 +81,7 @@ You should see `overrides_repo_path`, `published_routes`, and `pending_files`.
 
 In **dev**, the app loads:
 
-`/api/overrides/bus-shapes.json` → sibling `bus-shapes.json` if it has `routes[]`, otherwise the app’s split files in `public/overrides/bus-shapes/`.
+`/api/overrides/bus-shapes.json` → the sibling split store (`bus-shapes/index.json` + per-route files) when present, otherwise the app’s split files in `public/overrides/bus-shapes/`.
 
 Console: `[overrides] bus shapes N (local-dev-api)`.
 
@@ -125,7 +125,7 @@ cd ../morgan-travelers-overrides
 node scripts/merge-pending.mjs pending/<id>.json
 ```
 
-Merge also copies into `public/overrides/bus-shapes.json`.
+Merge writes `bus-shapes/<id>.json` + `index.json` in the overrides repo and refreshes the stub `bus-shapes.json`, then mirrors the split store into `public/overrides/bus-shapes/`.
 
 ### 4. Reload app shapes
 

@@ -120,8 +120,9 @@ if (cmd === "merge") {
   process.stderr.write(r.stderr || "");
   if (r.status === 0 && fs.existsSync(shapes)) {
     try {
-      const data = JSON.parse(fs.readFileSync(shapes, "utf8"));
-      if (Array.isArray(data?.routes) && data.routes.length) {
+      // Split store first — the overrides repo blob is a stub now
+      const data = loadPublishedBusShapes(shapes, path.join(root, "bus-shapes"));
+      if (data?.routes?.length) {
         const index = syncPublicBusShapes(data);
         console.log("Synced split files → public/overrides/bus-shapes/", index.files.length);
       } else {

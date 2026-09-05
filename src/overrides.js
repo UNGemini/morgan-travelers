@@ -3,6 +3,7 @@
  *
  * Bus shapes preferred source (live):
  *   VITE_OVERRIDES_BUS_SHAPES_URL → GitHub raw (morgan-travelers-overrides repo)
+ *   — assembled blob stub, then bus-shapes/index.json + per-route files
  * Fallback:
  *   public/overrides/bus-shapes/index.json + per-route files → offline bundle
  *
@@ -38,6 +39,15 @@ export function busShapesRemoteUrl() {
 /** Direct GitHub raw URL (fallback when same-origin API is down). */
 export function busShapesGithubRawUrl() {
   return `https://raw.githubusercontent.com/${OVERRIDES_REPO_DEFAULT}/main/bus-shapes.json`;
+}
+
+/**
+ * Split index on GitHub raw — one JSON file per published route.
+ * The overrides repo publishes this layout; the blob URL above is a stub
+ * pointing here (see split_index).
+ */
+export function busShapesGithubSplitUrl() {
+  return `https://raw.githubusercontent.com/${OVERRIDES_REPO_DEFAULT}/main/bus-shapes/index.json`;
 }
 
 /** @deprecated use busShapesRemoteUrl() */
@@ -253,6 +263,9 @@ export async function loadStaticOverrides() {
       ).href;
       const apiUrl = busShapesRemoteUrl();
       const githubUrl = busShapesGithubRawUrl();
+      const githubSplitUrl = busShapesGithubSplitUrl();
+      // Same-origin split index next to the assembled blob endpoint
+      const apiSplitUrl = apiUrl.replace(/bus-shapes\.json$/, "bus-shapes/index.json");
 
       const [lrtRes, pinRes] = await Promise.all([
         fetch(new URL(`${root}overrides/lrt.json`, window.location.href).href, {
@@ -267,11 +280,14 @@ export async function loadStaticOverrides() {
       if (lrtRes.ok) lrtOverrides = await lrtRes.json();
       if (pinRes.ok) mtrAccessOverrides = await pinRes.json();
 
-      // Prefer live merged shapes: same-origin API (GitHub proxy) → raw GitHub → bundle
+      // Prefer live merged shapes: same-origin API (GitHub proxy) →
+      // same-origin split index → raw GitHub blob → raw split index → bundle
       let busSource = "fallback";
       const hit =
         (await tryFetchBusShapes(apiUrl, "api-proxy")) ||
+        (await tryFetchSplitBusShapes(apiSplitUrl, "api-proxy-split")) ||
         (await tryFetchBusShapes(githubUrl, "github-raw")) ||
+        (await tryFetchSplitBusShapes(githubSplitUrl, "github-raw-split")) ||
         (await tryFetchSplitBusShapes(localSplitUrl, "local-split")) ||
         (await tryFetchBusShapes(localBusUrl, "local-bundle"));
 
