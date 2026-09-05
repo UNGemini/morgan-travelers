@@ -854,6 +854,15 @@ export function createPathContributor(ctx) {
   let placingBlocker = false;
   /** True once the current vertex drag moved far enough to count as a drag */
   let dragMoved = false;
+  /** Focused visual stop (Hide before / Hide after) */
+  let focusStopIdx = -1;
+  /**
+   * View filter for out-and-back circulars: hide the other half’s line + pins.
+   * @type {{ mode: "before" | "after", stopIdx: number } | null}
+   */
+  let hideHalf = null;
+  /** True once the current stop drag moved far enough to count as a drag */
+  let stopDragMoved = false;
 
   const els = {
     sheet: document.getElementById("contribute-sheet"),
@@ -878,6 +887,9 @@ export function createPathContributor(ctx) {
     btnSetStart: document.getElementById("contrib-set-start"),
     btnSetLast: document.getElementById("contrib-set-last"),
     btnClearBlockers: document.getElementById("contrib-clear-blockers"),
+    btnHideBefore: document.getElementById("contrib-hide-before"),
+    btnHideAfter: document.getElementById("contrib-hide-after"),
+    btnShowAll: document.getElementById("contrib-show-all"),
     btnSelectOffsets: document.getElementById("contrib-select-offsets"),
     btnDeleteSelected: document.getElementById("contrib-delete-selected"),
     btnClearSelection: document.getElementById("contrib-clear-selection"),
@@ -1082,12 +1094,13 @@ export function createPathContributor(ctx) {
       "hidden",
       editMode !== "select",
     );
+    syncStopActionsUi();
     if (els.modeLabel) {
       els.modeLabel.textContent =
         editMode === "path"
           ? t("Mode: Path turns (V) — drag rings · arrows show direction · 1 start · 2 last")
           : editMode === "stops"
-            ? t("Mode: Visual stops (S) — drag orange pins · official (grey) is fixed")
+            ? t("Mode: Visual stops (S) — click a stop then [ hide before / ] hide after")
             : t("Mode: Select (B) — box-select · Follow roads snaps selected only");
     }
     // Layer visibility + dimming so path rings ≠ stop pins
@@ -1155,7 +1168,27 @@ export function createPathContributor(ctx) {
         map.setPaintProperty(
           "contrib-stops-circle",
           "circle-radius",
-          editMode === "stops" ? 9 : 5,
+          [
+            "case",
+            ["==", ["get", "focused"], 1],
+            editMode === "stops" ? 11 : 7,
+            editMode === "stops" ? 9 : 5,
+          ],
+        );
+        map.setPaintProperty(
+          "contrib-stops-circle",
+          "circle-stroke-color",
+          [
+            "case",
+            ["==", ["get", "focused"], 1],
+            "#7dd3fc",
+            "#1a1208",
+          ],
+        );
+        map.setPaintProperty(
+          "contrib-stops-circle",
+          "circle-stroke-width",
+          ["case", ["==", ["get", "focused"], 1], 3, 2],
         );
       }
       if (map.getLayer("contrib-stops-core")) {
@@ -1205,7 +1238,9 @@ export function createPathContributor(ctx) {
         ? t("Path mode: drag rings · click a ring then 1/2 for start/last · Shift+click blocker · R Follow roads")
         : editMode === "stops"
           ? stopMarkers.length
-            ? t("Visual stops: {n} orange pins · grey ghost only if moved from official · drag to adjust", { n: stopMarkers.length })
+            ? hideHalf
+              ? hideStatusText()
+              : t("Visual stops: click a pin then [ / ] to hide the other half of a circular · drag to adjust")
             : t("Visual stops: no stops loaded — Load calculated path first")
           : t("Select mode: box-select · Follow roads snaps selected points only · Del removes", { n: OFFSET_SELECT_M }),
     );
@@ -1442,10 +1477,25 @@ export function createPathContributor(ctx) {
         source: "contrib-stops",
         filter: ["==", ["get", "kind"], "visual"],
         paint: {
-          "circle-radius": 5,
+          "circle-radius": [
+            "case",
+            ["==", ["get", "focused"], 1],
+            7,
+            5,
+          ],
           "circle-color": "#f0a030",
-          "circle-stroke-width": 2,
-          "circle-stroke-color": "#1a1208",
+          "circle-stroke-width": [
+            "case",
+            ["==", ["get", "focused"], 1],
+            3,
+            2,
+          ],
+          "circle-stroke-color": [
+            "case",
+            ["==", ["get", "focused"], 1],
+            "#7dd3fc",
+            "#1a1208",
+          ],
           "circle-opacity": 0.4,
           "circle-stroke-opacity": 1,
           "circle-pitch-alignment": "viewport",
@@ -1630,14 +1680,15 @@ export function createPathContributor(ctx) {
     if (src && typeof src.setData === "function") {
       /** @type {object[]} */
       const features = [];
-      if (points.length >= 2) {
+      const visPts = visiblePathCoords();
+      if (visPts.length >= 2) {
         features.push({
           type: "Feature",
           properties: { kind: "line" },
-          geometry: { type: "LineString", coordinates: points },
+          geometry: { type: "LineString", coordinates: visPts },
         });
       }
-      if (editMode === "path" && isClosedPath(points)) {
+      if (editMode === "path" && !hideHalf && isClosedPath(points)) {
         const a = points[0];
         const b = points[points.length - 1];
         if (a && b) {
@@ -1650,8 +1701,10 @@ export function createPathContributor(ctx) {
       }
       // Path turning handles in path + select modes (hidden in stops mode)
       if (editMode === "path" || editMode === "select") {
+        const visV = visibleVertexIndexSet();
         const idxs = editVertexIndices();
         for (const i of idxs) {
+          if (visV && !visV.has(i)) continue;
           const c = points[i];
           if (!c) continue;
           features.push({
@@ -1668,16 +1721,16 @@ export function createPathContributor(ctx) {
           });
         }
       }
-      if (editMode === "path" && points.length >= 2) {
+      if (editMode === "path" && visPts.length >= 2) {
         features.push({
           type: "Feature",
           properties: { kind: "end-label", role: "start", label: t("START") },
-          geometry: { type: "Point", coordinates: points[0] },
+          geometry: { type: "Point", coordinates: visPts[0] },
         });
         features.push({
           type: "Feature",
           properties: { kind: "end-label", role: "end", label: t("END") },
-          geometry: { type: "Point", coordinates: points[points.length - 1] },
+          geometry: { type: "Point", coordinates: visPts[visPts.length - 1] },
         });
       }
       for (const c of blockers) {
@@ -1696,6 +1749,7 @@ export function createPathContributor(ctx) {
       /** @type {object[]} */
       const stopFeatures = [];
       for (let i = 0; i < stopMarkers.length; i++) {
+        if (!isStopVisible(i)) continue;
         const s = stopMarkers[i];
         if (!s) continue;
         const vLon = Number(s.visualLon ?? s.lon);
@@ -1730,6 +1784,7 @@ export function createPathContributor(ctx) {
             label: String(i + 1),
             kind: "visual",
             i,
+            focused: focusStopIdx === i ? 1 : 0,
           },
           geometry: { type: "Point", coordinates: [vLon, vLat] },
         });
@@ -1743,15 +1798,20 @@ export function createPathContributor(ctx) {
       } else if (editMode === "path") {
         const loop = isClosedPath(points) ? ` · ${t("loop")}` : "";
         const blk = blockers.length ? ` · ${blockers.length} ${t("blockers")}` : "";
-        els.count.textContent = `${points.length} path pts${loop}${blk} · ${stopMarkers.length} stops (official fixed)`;
+        const visV = visibleVertexIndexSet();
+        const half = visV ? ` · ${t("showing {n}/{m}", { n: visV.size, m: points.length })}` : "";
+        els.count.textContent = `${points.length} path pts${loop}${blk}${half} · ${stopMarkers.length} stops (official fixed)`;
       } else {
+        const visN = stopMarkers.filter((_, i) => isStopVisible(i)).length;
+        const hideN = hideHalf ? ` · ${t("showing {n}/{m}", { n: visN, m: stopMarkers.length })}` : "";
         els.count.textContent = stopMarkers.length
-          ? `${stopMarkers.length} visual stops · drag orange pins`
+          ? `${visN} visual stops${hideN} · drag orange pins`
           : `0 visual stops · Load path first`;
       }
     }
     updateSelectActionState();
     updatePathActionState();
+    updateStopActionState();
   }
 
   function updateSelectActionState() {
@@ -1784,6 +1844,203 @@ export function createPathContributor(ctx) {
     const dlat = (a[1] - b[1]) * 111320;
     const dlng = (a[0] - b[0]) * 111320 * Math.cos((a[1] * Math.PI) / 180);
     return Math.hypot(dlat, dlng) < maxM;
+  }
+
+  function syncStopActionsUi() {
+    document.getElementById("contrib-stop-actions")?.toggleAttribute(
+      "hidden",
+      editMode !== "stops" && !hideHalf,
+    );
+    updateStopActionState();
+  }
+
+  function updateStopActionState() {
+    const hasFocus = focusStopIdx >= 0 && focusStopIdx < stopMarkers.length;
+    if (els.btnHideBefore) els.btnHideBefore.disabled = !hasFocus;
+    if (els.btnHideAfter) els.btnHideAfter.disabled = !hasFocus;
+    if (els.btnShowAll) els.btnShowAll.disabled = !hideHalf;
+    els.btnHideBefore?.classList.toggle(
+      "is-active",
+      hideHalf?.mode === "before",
+    );
+    els.btnHideAfter?.classList.toggle(
+      "is-active",
+      hideHalf?.mode === "after",
+    );
+  }
+
+  function isStopVisible(i) {
+    if (!hideHalf) return true;
+    if (hideHalf.mode === "before") return i >= hideHalf.stopIdx;
+    return i <= hideHalf.stopIdx;
+  }
+
+  /** Cumulative along-m for `points`. */
+  function pathAlongMeters(pts = points) {
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1];
+      const b = pts[i];
+      const dlat = (b[1] - a[1]) * 111320;
+      const dlng = (b[0] - a[0]) * 111320 * Math.cos((b[1] * Math.PI) / 180);
+      cum.push(cum[i - 1] + Math.hypot(dlat, dlng));
+    }
+    return cum;
+  }
+
+  function interpolateAtAlong(pts, cum, d) {
+    if (!pts.length) return null;
+    if (d <= 0) return [pts[0][0], pts[0][1]];
+    const total = cum[cum.length - 1] || 0;
+    if (d >= total) {
+      const last = pts[pts.length - 1];
+      return [last[0], last[1]];
+    }
+    for (let i = 1; i < cum.length; i++) {
+      if (cum[i] >= d) {
+        const span = cum[i] - cum[i - 1] || 1;
+        const f = (d - cum[i - 1]) / span;
+        return [
+          pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f,
+          pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f,
+        ];
+      }
+    }
+    const last = pts[pts.length - 1];
+    return [last[0], last[1]];
+  }
+
+  function slicePathAlong(pts, fromM, toM) {
+    if (!pts || pts.length < 2) return pts || [];
+    const cum = pathAlongMeters(pts);
+    const total = cum[cum.length - 1] || 0;
+    const a = Math.max(0, Math.min(fromM, total));
+    const b = Math.max(a, Math.min(toM, total));
+    const start = interpolateAtAlong(pts, cum, a);
+    const end = interpolateAtAlong(pts, cum, b);
+    /** @type {number[][]} */
+    const out = [];
+    if (start) out.push(start);
+    for (let i = 0; i < pts.length; i++) {
+      if (cum[i] > a + 0.8 && cum[i] < b - 0.8) out.push([pts[i][0], pts[i][1]]);
+    }
+    if (end) out.push(end);
+    return out.length >= 2 ? out : pts;
+  }
+
+  /**
+   * Along-m of a stop on the current path (official coords, forward-biased).
+   * @param {number} stopIdx
+   */
+  function stopAlongM(stopIdx) {
+    if (points.length < 2 || stopIdx < 0 || stopIdx >= stopMarkers.length) {
+      return 0;
+    }
+    const routeLine = points.map((c) => ({ lon: c[0], lat: c[1] }));
+    const projected = projectStops(
+      routeLine,
+      stopMarkers.map((s, i) => ({
+        id: s.stopId || String(i),
+        lon: Number(s.officialLon ?? s.visualLon ?? s.lon),
+        lat: Number(s.officialLat ?? s.visualLat ?? s.lat),
+      })),
+    );
+    const p = projected[stopIdx];
+    return Number.isFinite(p?.distanceAlong) ? p.distanceAlong : 0;
+  }
+
+  /** @returns {{ from: number, to: number } | null} */
+  function visibleAlongRange() {
+    if (!hideHalf || points.length < 2) return null;
+    const cum = pathAlongMeters(points);
+    const total = cum[cum.length - 1] || 0;
+    const d = stopAlongM(hideHalf.stopIdx);
+    if (hideHalf.mode === "before") {
+      return { from: Math.max(0, d - 12), to: total };
+    }
+    return { from: 0, to: Math.min(total, d + 12) };
+  }
+
+  function visiblePathCoords() {
+    const range = visibleAlongRange();
+    if (!range) return points;
+    return slicePathAlong(points, range.from, range.to);
+  }
+
+  function isVertexVisible(i, range = visibleAlongRange(), cum = pathAlongMeters(points)) {
+    if (!range) return true;
+    const d = cum[i] ?? 0;
+    return d >= range.from - 2 && d <= range.to + 2;
+  }
+
+  function visibleVertexIndexSet() {
+    const range = visibleAlongRange();
+    if (!range) return null;
+    const cum = pathAlongMeters(points);
+    /** @type {Set<number>} */
+    const set = new Set();
+    for (let i = 0; i < points.length; i++) {
+      if (isVertexVisible(i, range, cum)) set.add(i);
+    }
+    return set;
+  }
+
+  function hideStatusText() {
+    if (!hideHalf) return "";
+    const s = stopMarkers[hideHalf.stopIdx];
+    const name = s?.name || t("Stop {n}", { n: hideHalf.stopIdx + 1 });
+    const nHide =
+      hideHalf.mode === "before"
+        ? hideHalf.stopIdx
+        : Math.max(0, stopMarkers.length - 1 - hideHalf.stopIdx);
+    return hideHalf.mode === "before"
+      ? t("Showing from #{n} {name} · hidden {k} stops before · 0 to show all", {
+          n: hideHalf.stopIdx + 1,
+          name,
+          k: nHide,
+        })
+      : t("Showing through #{n} {name} · hidden {k} stops after · 0 to show all", {
+          n: hideHalf.stopIdx + 1,
+          name,
+          k: nHide,
+        });
+  }
+
+  function setHideHalf(mode) {
+    if (!stopMarkers.length) {
+      showToast(t("Load a path first"), 1600);
+      return;
+    }
+    const idx = focusStopIdx >= 0 ? focusStopIdx : hideHalf?.stopIdx ?? -1;
+    if (idx < 0 || idx >= stopMarkers.length) {
+      if (editMode !== "stops") setEditMode("stops");
+      showToast(t("Click a stop pin first, then Hide before / Hide after"), 2400);
+      return;
+    }
+    if (idx === 0 && mode === "before") {
+      showToast(t("Nothing before the first stop"), 1600);
+      return;
+    }
+    if (idx === stopMarkers.length - 1 && mode === "after") {
+      showToast(t("Nothing after the last stop"), 1600);
+      return;
+    }
+    hideHalf = { mode, stopIdx: idx };
+    focusStopIdx = idx;
+    syncStopActionsUi();
+    paintDraft();
+    const msg = hideStatusText();
+    setStatus(msg);
+    showToast(msg, 2800);
+  }
+
+  function clearHideHalf() {
+    if (!hideHalf) return;
+    hideHalf = null;
+    syncStopActionsUi();
+    paintDraft();
+    setStatus(t("Showing all stops and path"));
+    showToast(t("Showing all"), 1400);
   }
 
   function setPlacingBlocker(on) {
@@ -2144,17 +2401,25 @@ export function createPathContributor(ctx) {
   /** Re-project visual pins onto current path (keeps official fixed). */
   function reprojectVisualStops() {
     if (points.length < 2 || !stopMarkers.length) return;
-    const routeLine = points.map((c) => ({ lon: c[0], lat: c[1] }));
+    const visPts = visiblePathCoords();
+    const routeLine = visPts.map((c) => ({ lon: c[0], lat: c[1] }));
+    const visIdx = stopMarkers
+      .map((_, i) => i)
+      .filter((i) => isStopVisible(i));
     const projected = projectStops(
       routeLine,
-      stopMarkers.map((s, i) => ({
-        id: s.stopId || String(i),
-        lon: Number(s.officialLon ?? s.lon),
-        lat: Number(s.officialLat ?? s.lat),
-      })),
+      visIdx.map((i) => {
+        const s = stopMarkers[i];
+        return {
+          id: s.stopId || String(i),
+          lon: Number(s.officialLon ?? s.lon),
+          lat: Number(s.officialLat ?? s.lat),
+        };
+      }),
     );
+    const byVis = new Map(visIdx.map((i, k) => [i, projected[k]]));
     stopMarkers = stopMarkers.map((s, i) => {
-      const p = projected[i];
+      const p = byVis.get(i);
       if (!p || !Number.isFinite(p.lon) || !Number.isFinite(p.lat)) return s;
       return { ...s, visualLon: p.lon, visualLat: p.lat };
     });
@@ -2278,8 +2543,16 @@ export function createPathContributor(ctx) {
         signal: loadAbort.signal,
         skipWrap: true,
         avoidPoints: blockers.map((c) => ({ lon: c[0], lat: c[1] })),
-        snapIndices:
-          editMode === "select" ? [...selectedIdx] : undefined,
+        snapIndices: (() => {
+          /** @type {number[] | undefined} */
+          let idx;
+          if (editMode === "select") idx = [...selectedIdx];
+          const vis = visibleVertexIndexSet();
+          if (vis) {
+            idx = (idx || [...vis]).filter((i) => vis.has(i));
+          }
+          return idx;
+        })(),
         onProgress: (ev) => {
           if (ev?.msg) setStatus(t("Road assistant: {msg}", { msg: ev.msg }));
         },
@@ -2404,6 +2677,8 @@ export function createPathContributor(ctx) {
       selectedIdx.clear();
       offsetIdx.clear();
       focusIdx = -1;
+      focusStopIdx = -1;
+      hideHalf = null;
       blockers = [];
       setPlacingBlocker(false);
       points = path;
@@ -2651,8 +2926,10 @@ export function createPathContributor(ctx) {
     if (!map || !points.length) return -1;
     let best = -1;
     let bestD = maxPx;
+    const visV = visibleVertexIndexSet();
     const idxs = editVertexIndices();
     for (const i of idxs) {
+      if (visV && !visV.has(i)) continue;
       const c = points[i];
       const p = map.project({ lng: c[0], lat: c[1] });
       const d = Math.hypot(p.x - point.x, p.y - point.y);
@@ -2670,6 +2947,7 @@ export function createPathContributor(ctx) {
     let best = -1;
     let bestD = maxPx;
     for (let i = 0; i < stopMarkers.length; i++) {
+      if (!isStopVisible(i)) continue;
       const s = stopMarkers[i];
       const lon = Number(s.visualLon ?? s.lon);
       const lat = Number(s.visualLat ?? s.lat);
@@ -2691,7 +2969,9 @@ export function createPathContributor(ctx) {
     let bestD = Infinity;
     const p = { x: lngLat.lng, y: lngLat.lat };
     // approximate with projected coords
+    const visV = visibleVertexIndexSet();
     for (let i = 0; i < points.length - 1; i++) {
+      if (visV && !visV.has(i) && !visV.has(i + 1)) continue;
       const a = map.project({ lng: points[i][0], lat: points[i][1] });
       const b = map.project({ lng: points[i + 1][0], lat: points[i + 1][1] });
       const click = map.project(lngLat);
@@ -2741,6 +3021,7 @@ export function createPathContributor(ctx) {
       const i = hitVisualStop(e.point, 18);
       if (i >= 0) {
         dragStopIdx = i;
+        stopDragMoved = false;
         map.dragPan.disable();
         e.preventDefault();
       }
@@ -2766,6 +3047,11 @@ export function createPathContributor(ctx) {
     }
     if (editMode === "stops" && dragStopIdx >= 0 && stopMarkers[dragStopIdx]) {
       const s = stopMarkers[dragStopIdx];
+      const prevLon = Number(s.visualLon ?? s.lon);
+      const prevLat = Number(s.visualLat ?? s.lat);
+      const dlat = (prevLat - e.lngLat.lat) * 111320;
+      const dlng = (prevLon - e.lngLat.lng) * 111320 * Math.cos((e.lngLat.lat * Math.PI) / 180);
+      if (Math.hypot(dlat, dlng) > 1.5) stopDragMoved = true;
       stopMarkers[dragStopIdx] = {
         ...s,
         visualLon: e.lngLat.lng,
@@ -2819,10 +3105,23 @@ export function createPathContributor(ctx) {
       map.dragPan.enable();
     }
     if (dragStopIdx >= 0) {
+      if (!stopDragMoved) {
+        focusStopIdx = dragStopIdx;
+        paintDraft();
+        updateStopActionState();
+        const s = stopMarkers[focusStopIdx];
+        setStatus(
+          t("Focused stop #{n} {name} · [ hide before · ] hide after · 0 show all", {
+            n: focusStopIdx + 1,
+            name: s?.name || "",
+          }),
+        );
+      }
       // Soft-snap visual stop onto path if nearby
       const s = stopMarkers[dragStopIdx];
-      if (s && points.length >= 2) {
-        const routeLine = points.map((c) => ({ lon: c[0], lat: c[1] }));
+      if (s && points.length >= 2 && stopDragMoved) {
+        const visPts = visiblePathCoords();
+        const routeLine = visPts.map((c) => ({ lon: c[0], lat: c[1] }));
         const projected = projectStops(routeLine, [
           {
             id: s.stopId || String(dragStopIdx),
@@ -2841,6 +3140,7 @@ export function createPathContributor(ctx) {
         }
       }
       dragStopIdx = -1;
+      stopDragMoved = false;
       map.dragPan.enable();
     }
   }
@@ -2938,6 +3238,15 @@ export function createPathContributor(ctx) {
     } else if (k === "2" && !e.ctrlKey && !e.metaKey && editMode === "path") {
       e.preventDefault();
       setPathLast(focusIdx);
+    } else if (k === "[" && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      setHideHalf("before");
+    } else if (k === "]" && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      setHideHalf("after");
+    } else if (k === "0" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      clearHideHalf();
     } else if (k === "enter" && followPending && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       confirmFollowRoads();
@@ -2948,6 +3257,8 @@ export function createPathContributor(ctx) {
         showToast(t("Blocker placement off"), 1200);
       } else if (followPending) {
         revertFollowRoads();
+      } else if (hideHalf) {
+        clearHideHalf();
       } else if (selectedIdx.size) {
         clearSelection();
       } else if (editMode === "select") {
@@ -3374,6 +3685,8 @@ export function createPathContributor(ctx) {
       selectedIdx.clear();
       offsetIdx.clear();
       focusIdx = -1;
+      focusStopIdx = -1;
+      hideHalf = null;
       blockers = [];
       setPlacingBlocker(false);
       points = result.path;
@@ -3541,6 +3854,8 @@ export function createPathContributor(ctx) {
     selectedIdx.clear();
     offsetIdx.clear();
     focusIdx = -1;
+    focusStopIdx = -1;
+    hideHalf = null;
     blockers = [];
     placingBlocker = false;
     if (followPending) {
@@ -3638,6 +3953,15 @@ export function createPathContributor(ctx) {
   });
   els.btnClearBlockers?.addEventListener("click", () => {
     clearBlockers();
+  });
+  els.btnHideBefore?.addEventListener("click", () => {
+    setHideHalf("before");
+  });
+  els.btnHideAfter?.addEventListener("click", () => {
+    setHideHalf("after");
+  });
+  els.btnShowAll?.addEventListener("click", () => {
+    clearHideHalf();
   });
   els.btnSelectOffsets?.addEventListener("click", () => {
     if (editMode !== "select") setEditMode("select");
@@ -3767,6 +4091,8 @@ export function createPathContributor(ctx) {
     selectedIdx.clear();
     offsetIdx.clear();
     focusIdx = -1;
+    focusStopIdx = -1;
+    hideHalf = null;
     blockers = [];
     setPlacingBlocker(false);
     paintDraft();

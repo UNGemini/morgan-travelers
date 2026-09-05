@@ -295,7 +295,8 @@
             <p class="hint contrib-keys-hint">
               <kbd>V</kbd> path · <kbd>S</kbd> stops · <kbd>B</kbd> select ·
               <kbd>R</kbd> roads · <kbd>X</kbd> blocker · <kbd>1</kbd> start ·
-              <kbd>2</kbd> last · <kbd>Tab</kbd> cycle
+              <kbd>2</kbd> last · <kbd>[</kbd> hide before · <kbd>]</kbd> hide after ·
+              <kbd>Tab</kbd> cycle
             </p>
 
             <div id="contrib-path-actions" class="contrib-path-actions">
@@ -329,6 +330,37 @@
                 <kbd>1</kbd> / <kbd>2</kbd> to pick start or last (circular routes).
                 <kbd>Shift</kbd>+click or <kbd>X</kbd> then click to drop a red
                 blocker so Follow roads skips that carriageway.
+              </p>
+            </div>
+
+            <div id="contrib-stop-actions" class="contrib-stop-actions" hidden>
+              <button type="button" id="contrib-hide-before" class="btn btn-ghost" data-acrylic title="Hide path and stops before the focused stop">
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">visibility_off</span>
+                  Hide before
+                  <kbd class="contrib-inline-kbd">[</kbd>
+                </span>
+              </button>
+              <button type="button" id="contrib-hide-after" class="btn btn-ghost" data-acrylic title="Hide path and stops after the focused stop">
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">visibility_off</span>
+                  Hide after
+                  <kbd class="contrib-inline-kbd">]</kbd>
+                </span>
+              </button>
+              <button type="button" id="contrib-show-all" class="btn btn-ghost" data-acrylic disabled>
+                <span class="btn-row">
+                  <span class="material-symbols-outlined" aria-hidden="true">visibility</span>
+                  Show all
+                  <kbd class="contrib-inline-kbd">0</kbd>
+                </span>
+              </button>
+              <p class="hint contrib-keys-hint" style="margin: 0; flex: 1 1 100%">
+                Circular routes often retrace the same road. Click a stop (the
+                far end of the first half) then <strong>Hide before</strong> or
+                <strong>Hide after</strong> so you only see one half — the other
+                half’s line and pins stay hidden so they are not dropped on the
+                wrong pass.
               </p>
             </div>
 
