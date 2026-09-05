@@ -1609,8 +1609,10 @@ function osrmCorridorPlausible(path, seed, seedLen) {
 
 /**
  * Road-hug a dense GTFS polyline without routing every vertex.
- * CLK: 80 m radiuses + optional 5-point /match windows. Elsewhere: few
- * waypoints, corridor checks. Returns null → caller keeps GTFS interpolation.
+ * CLK: always /match the operator vertices in 5-point windows (S64C PM
+ * GTFS only has ~6 points through the Shun Tung roundabout and a 147 m
+ * chord at Yu Tung — interpolating those is the kite vs AM). Elsewhere:
+ * few /route waypoints. Returns null → caller keeps GTFS interpolation.
  *
  * @param {LngLat[]} poly
  * @param {{ signal?: AbortSignal }} [opts]
@@ -1632,29 +1634,35 @@ async function snapGtfsCorridorViaOsrm(poly, opts = {}) {
   });
   if (controls.length < 2) return null;
 
-  let routed = null;
-  try {
-    routed = await osrmRoute(controls, opts.signal, {
-      radiusesM: clk ? OSRM_CLK_RADIUS_M : 0,
-    });
-  } catch (e) {
-    if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
-    routed = null;
-  }
+  const tryRoute = async () => {
+    try {
+      const routed = await osrmRoute(controls, opts.signal, {
+        radiusesM: clk ? OSRM_CLK_RADIUS_M : 0,
+      });
+      if (
+        routed &&
+        routed.length >= 2 &&
+        osrmCorridorPlausible(routed, poly, seedLen)
+      ) {
+        return routed;
+      }
+    } catch (e) {
+      if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
+    }
+    return null;
+  };
 
-  const routedOk =
-    routed &&
-    routed.length >= 2 &&
-    osrmCorridorPlausible(routed, poly, seedLen);
-  const routedRatio = routedOk ? pathLengthM(routed) / seedLen : Infinity;
-
-  // CLK: if /route fattens or shortcuts the cargo loop, map-match windows.
-  if (clk && (!routedOk || routedRatio > 1.18 || routedRatio < 0.92)) {
-    const trace = pathControlWaypoints(poly, {
-      maxPoints: 20,
-      maxSpacingM: Math.max(280, seedLen / 16),
-      minTurnDeg: 18,
-    });
+  if (clk) {
+    // Prefer matching the real GTFS vertices so roundabouts / junctions
+    // keep OSM kerb geometry. Downsample only when the shape is huge.
+    const trace =
+      poly.length <= 90
+        ? dedupePathClose(poly, 4)
+        : pathControlWaypoints(poly, {
+            maxPoints: 24,
+            maxSpacingM: Math.max(180, seedLen / 20),
+            minTurnDeg: 14,
+          });
     try {
       const matched = await osrmMatchWindows(trace, opts.signal);
       if (
@@ -1667,9 +1675,10 @@ async function snapGtfsCorridorViaOsrm(poly, opts = {}) {
     } catch (e) {
       if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
     }
+    return await tryRoute();
   }
 
-  return routedOk ? routed : null;
+  return await tryRoute();
 }
 
 /**
@@ -1682,22 +1691,40 @@ async function snapGtfsCorridorViaOsrm(poly, opts = {}) {
  */
 async function osrmMatchWindows(trace, signal) {
   if (!trace || trace.length < 2) return null;
-  /** @type {LngLat[]} */
-  const out = [];
+  /** @type {Array<{ slice: LngLat[] }>} */
+  const jobs = [];
   for (let i = 0; i < trace.length - 1; ) {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     const end = Math.min(trace.length, i + OSRM_MATCH_WINDOW);
     const slice = trace.slice(i, end);
     if (slice.length < 2) break;
-    const matched = await osrmMatch(slice, signal, {
-      radiusesM: [30, 40],
-      gaps: "ignore",
-    });
-    if (!matched || matched.length < 2) return null;
-    if (!out.length) out.push(...matched);
-    else out.push(...matched.slice(1));
+    jobs.push({ slice });
     if (end >= trace.length) break;
     i = end - 1;
+  }
+  if (!jobs.length) return null;
+
+  const results = await mapPool(jobs, 3, async (job) => {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    try {
+      const matched = await osrmMatch(job.slice, signal, {
+        radiusesM: [30, 40],
+        gaps: "ignore",
+      });
+      if (matched && matched.length >= 2) return matched;
+    } catch (e) {
+      if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
+    }
+    // One cargo gap must not drop the whole CLK snap — keep that span's
+    // GTFS vertices so later windows can still hug the roundabout.
+    return job.slice.map((p) => ({ lon: p.lon, lat: p.lat }));
+  });
+
+  /** @type {LngLat[]} */
+  const out = [];
+  for (const part of results) {
+    if (!part?.length) continue;
+    if (!out.length) out.push(...part);
+    else out.push(...part.slice(1));
   }
   return out.length >= 2 ? out : null;
 }
