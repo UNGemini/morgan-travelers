@@ -853,9 +853,9 @@ export default defineConfig({
       // Client sends ?coordinates=lon,lat|lon,lat (WAF-safe); rewrite to
       // upstream /{kind}/v1/driving/lon,lat;lon,lat.
       "/osrm": {
-        target: "https://router.project-osrm.org",
+        target: "https://routing.openstreetmap.de",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/osrm/, ""),
+        rewrite: (path) => path.replace(/^\/osrm/, "/routed-car"),
         configure: (proxy) => {
           proxy.on("proxyReq", (proxyReq, req) => {
             const u = new URL(req.url, "http://127.0.0.1");
@@ -866,7 +866,7 @@ export default defineConfig({
             const rad = u.searchParams.get("radiuses");
             if (rad) u.searchParams.set("radiuses", rad.replace(/[|,]/g, ";"));
             const kind = u.pathname.replace(/^\/osrm/, "");
-            proxyReq.path = `${kind}/${coords}${u.search}`;
+            proxyReq.path = `/routed-car${kind}/${coords}${u.search}`;
           });
           proxy.on("proxyRes", (proxyRes) => {
             proxyRes.headers["cross-origin-resource-policy"] = "cross-origin";

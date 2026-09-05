@@ -59,8 +59,10 @@ export async function onRequest(context) {
 
   const kind = service[1];
   const coordPath = coords.replace(/\|/g, ";");
+  // router.project-osrm.org 403s Cloudflare datacenter IPs (nginx). FOSSGIS
+  // car profile is the same OSRM API and answers from Workers.
   const target = new URL(
-    `https://router.project-osrm.org/${kind}/v1/driving/${coordPath}`,
+    `https://routing.openstreetmap.de/routed-car/${kind}/v1/driving/${coordPath}`,
   );
   for (const [k, v] of url.searchParams) {
     if (k === "coordinates") continue;
@@ -71,14 +73,18 @@ export async function onRequest(context) {
     }
   }
 
-  // The public demo server is slow — cap the upstream so a hung request
-  // becomes a fast structured 504 instead of a stuck worker.
+  // Public OSRM is slow — cap the upstream so a hung request becomes a
+  // fast structured 504 instead of a stuck worker.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 15000);
   let res;
   try {
     res = await fetch(target.toString(), {
-      headers: { Accept: "application/json" },
+      headers: {
+        Accept: "application/json",
+        "User-Agent":
+          "MORGAN-Travelers/0.4 (transit PWA; https://morgandev.cc)",
+      },
       signal: ctrl.signal,
     });
   } catch {
