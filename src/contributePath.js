@@ -2836,17 +2836,42 @@ export function createPathContributor(ctx) {
         const localRouted = await localRoute(waypoints, avoid, 12000);
         if (localRouted && localRouted.path.length > waypoints.length) {
           seg = localRouted.path.map((p) => [p.lon, p.lat]);
+        } else {
+          console.info(
+            "[contribute] local road_route did not cover this section - trying OSRM backup",
+          );
         }
         if (!seg) {
           const routed = await densifyStopsViaOsrm(waypoints, {
             signal: loadAbort.signal,
             avoidPoints: avoid,
           });
-          // All-chord fallback (OSRM unavailable / nothing gained) — skip
-          // rather than flattening the user's line to straight chords
-          if (!routed || routed.length <= waypoints.length) continue;
-          seg = routed.map((p) => [p.lon, p.lat]);
+          if (routed) {
+            // Reject chord-heavy results: when OSRM is flaky its per-hop
+            // fallback returns straight stop-to-stop chords, which would
+            // straight-line the corridor instead of rerouting it. A real
+            // road reroute carries far more vertices and length than the
+            // waypoint polyline.
+            const wpLen =
+              pathAlongMeters(waypoints.map((w) => [w.lon, w.lat])).at(-1) ?? 0;
+            const routedLen =
+              pathAlongMeters(routed.map((p) => [p.lon, p.lat])).at(-1) ?? 0;
+            const minPts = waypoints.length * 2 - 1;
+            if (routed.length >= minPts && routedLen > wpLen * 1.05) {
+              seg = routed.map((p) => [p.lon, p.lat]);
+            } else {
+              console.info(
+                "[contribute] OSRM backup rejected: chord-heavy result",
+                {
+                  pts: routed.length,
+                  need: minPts,
+                  lenRatio: +(routedLen / (wpLen || 1)).toFixed(3),
+                },
+              );
+            }
+          }
         }
+        if (!seg) continue;
         // Keep both section anchors exactly so the splice blends in
         seg[0] = sub[0];
         seg[seg.length - 1] = sub[sub.length - 1];
