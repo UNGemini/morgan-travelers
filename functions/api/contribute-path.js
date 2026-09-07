@@ -84,6 +84,24 @@ function validateDraft(draft) {
     return { ok: false, error: "from_match and to_match required (string arrays)" };
   }
 
+  let blockers = [];
+  if (Array.isArray(d.blockers)) {
+    if (d.blockers.length > 200) {
+      return { ok: false, error: "Too many blockers (max 200)" };
+    }
+    for (let i = 0; i < d.blockers.length; i++) {
+      const c = d.blockers[i];
+      if (!Array.isArray(c) || c.length < 2) continue;
+      const lon = Number(c[0]);
+      const lat = Number(c[1]);
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+      if (lon < 113.5 || lon > 114.6 || lat < 22.0 || lat > 22.7) {
+        return { ok: false, error: `blockers[${i}] out of HK bounds` };
+      }
+      blockers.push([lon, lat]);
+    }
+  }
+
   let visualStops = [];
   if (Array.isArray(d.visual_stops)) {
     if (d.visual_stops.length > 500) {
@@ -133,6 +151,7 @@ function validateDraft(draft) {
     notes: String(d.notes || "").slice(0, 2000),
     coordinates: coords.map((c) => [Number(c[0]), Number(c[1])]),
     visual_stops: visualStops,
+    blockers,
     contributor: String(d.contributor || "").slice(0, 120),
     submitted_at: String(d.submitted_at || new Date().toISOString()),
     app_version: String(d.app_version || "").slice(0, 32),

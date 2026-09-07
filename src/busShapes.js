@@ -681,6 +681,11 @@ export function buildPathContributionDraft(fields) {
       };
     })
     .filter(Boolean);
+  /** Junction blockers — keep so exports re-open with Follow-roads avoidances */
+  const blockers = (fields.blockers || [])
+    .map((c) => [Number(c?.[0]), Number(c?.[1])])
+    .filter((c) => Number.isFinite(c[0]) && Number.isFinite(c[1]))
+    .slice(0, 200);
   const idParts = [
     String(fields.agency || "BUS").toUpperCase(),
     String(fields.route_short_name || "route").replace(/\s+/g, ""),
@@ -706,6 +711,7 @@ export function buildPathContributionDraft(fields) {
     coordinates: coords,
     // Official stop identity fixed in open data / merge; visual is map display only
     visual_stops: visualStops,
+    blockers,
     contributor: String(fields.contributor || "").trim(),
     submitted_at: new Date().toISOString(),
     app_version: "0.4.0",

@@ -2986,7 +2986,12 @@ export function createPathContributor(ctx) {
     focusIdx = -1;
     focusStopIdx = -1;
     hideHalf = null;
-    blockers = [];
+    blockers = Array.isArray(draft.blockers)
+      ? draft.blockers
+          .map((c) => [Number(c?.[0]), Number(c?.[1])])
+          .filter((c) => Number.isFinite(c[0]) && Number.isFinite(c[1]))
+          .slice(0, 200)
+      : [];
     setPlacingBlocker(false);
     points = path;
 
@@ -3734,6 +3739,7 @@ export function createPathContributor(ctx) {
       notes: String(els.notes?.value || "").trim(),
       contributor: String(els.name?.value || "").trim(),
       coordinates: points,
+      blockers: blockers.map((c) => [Number(c[0]), Number(c[1])]),
       visual_stops: stopMarkers.map((s, i) => ({
         stop_id: String(s.stopId || ""),
         name: String(s.name || ""),
@@ -4166,7 +4172,6 @@ export function createPathContributor(ctx) {
       v: 1,
       saved_at: Date.now(),
       fields,
-      blockers: blockers.map((c) => [Number(c[0]), Number(c[1])]),
       selected: [...selectedIdx].filter((i) => i >= 0 && i < maxIdx),
       offset: [...offsetIdx].filter((i) => i >= 0 && i < maxIdx),
     };
@@ -4178,7 +4183,7 @@ export function createPathContributor(ctx) {
       const n = Array.isArray(snap.fields?.coordinates)
         ? snap.fields.coordinates.length
         : 0;
-      if (n < 2 && !snap.blockers.length) {
+      if (n < 2 && !snap.fields?.blockers?.length) {
         sessionStorage.removeItem(SESSION_SNAPSHOT_KEY);
         return;
       }
@@ -4205,17 +4210,6 @@ export function createPathContributor(ctx) {
       const snap = JSON.parse(raw);
       if (!snap || snap.v !== 1 || typeof snap.fields !== "object") return false;
       applyDraftToState(snap.fields);
-      blockers = Array.isArray(snap.blockers)
-        ? snap.blockers
-            .filter(
-              (c) =>
-                Array.isArray(c) &&
-                c.length >= 2 &&
-                Number.isFinite(Number(c[0])) &&
-                Number.isFinite(Number(c[1])),
-            )
-            .map((c) => [Number(c[0]), Number(c[1])])
-        : [];
       const maxIdx = points.length;
       const setFrom = (arr) =>
         new Set(
