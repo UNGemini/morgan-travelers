@@ -2998,25 +2998,18 @@ export function createPathContributor(ctx) {
     // Form fields
     if (els.agency && draft.agency) {
       const ag = String(draft.agency).toUpperCase();
-      const opt = [...(els.agency.options || [])].find(
-        (o) =>
-          ag.includes(String(o.value).toUpperCase()) ||
-          String(o.value).toUpperCase().includes(ag),
-      );
+      const opts = [...(els.agency.options || [])];
+      const opt =
+        opts.find((o) => String(o.value).toUpperCase() === ag) ||
+        opts.find((o) => o.value && ag.includes(String(o.value).toUpperCase())) ||
+        opts.find((o) => o.value && String(o.value).toUpperCase().includes(ag));
       if (opt) els.agency.value = opt.value;
-      else if ([...els.agency.options].some((o) => o.value === "OTHER")) {
+      else if (opts.some((o) => o.value === "OTHER")) {
         els.agency.value = "OTHER";
       }
     }
     if (els.route && draft.route_short_name) {
       els.route.value = String(draft.route_short_name);
-    }
-    if (els.direction && draft.direction != null && draft.direction !== "") {
-      const d = String(draft.direction);
-      const has = [...(els.direction.options || [])].some((o) => o.value === d);
-      if (has) els.direction.value = d;
-      else if (/^i/i.test(d)) els.direction.value = "I";
-      else if (/^o/i.test(d)) els.direction.value = "O";
     }
     if (els.from) {
       const fm = draft.from_match;
@@ -3062,6 +3055,9 @@ export function createPathContributor(ctx) {
     } else {
       stopMarkers = [];
     }
+
+    // Visible search box + direction options need the route lookup — async
+    void syncRouteFieldsFromDraft(draft);
   }
 
   /**
@@ -3978,6 +3974,50 @@ export function createPathContributor(ctx) {
     if (els.dirCount) {
       els.dirCount.textContent = t("{n} directions on this route", { n: dirs.length });
     }
+  }
+
+  /**
+   * Restore the visible route search box and direction <select> for an
+   * imported/restored draft. Direction options only exist after the route
+   * search flow loads them, so this is async and fire-and-forget.
+   * @param {object} draft
+   */
+  async function syncRouteFieldsFromDraft(draft) {
+    const route = String(draft.route_short_name || "").trim();
+    if (!route || !els.direction) return;
+    if (els.routeSearch) els.routeSearch.value = route;
+    const wantDir = String(draft.direction || "").trim();
+    let dirsLoaded = false;
+    try {
+      const hits = (await searchRoutes(route)) || [];
+      if (String(els.route?.value || "").trim() !== route) return; // user moved on
+      const hit =
+        hits.find(
+          (h) => String(h.id || "").toLowerCase() === route.toLowerCase(),
+        ) || hits[0] || null;
+      if (hit) {
+        await fillDirectionsForRoute(hit);
+        dirsLoaded = true;
+      }
+    } catch (e) {
+      console.warn("[contribute] restore directions", e);
+    }
+    if (!dirsLoaded) {
+      els.direction.innerHTML = `<option value="O">${t("Outbound / O / UP / seq 1")}</option>
+        <option value="I">${t("Inbound / I / DOWN / seq 2")}</option>`;
+      els.direction.disabled = false;
+      if (els.dirCount) els.dirCount.textContent = "";
+    }
+    if (!wantDir) return;
+    const opts = [...(els.direction.options || [])];
+    const bound = wantDir.split("|")[0].toUpperCase();
+    const opt =
+      opts.find((o) => o.value === wantDir) ||
+      opts.find(
+        (o) => String(o.value).split("|")[0].toUpperCase() === bound,
+      ) ||
+      opts.find((o) => o.value === bound);
+    if (opt) els.direction.value = opt.value;
   }
 
   function hideSuggest() {
