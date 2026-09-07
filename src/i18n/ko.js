@@ -541,6 +541,7 @@ export const ko = {
   "Restart now": "지금 다시 시작",
   "Restart to load the latest data from the cloud.": "다시 시작하면 클라우드의 최신 데이터를 불러옵니다.",
   "Resume a downloaded draft (or drop a": "다운로드한 초안 재개(또는 ",
+  "Restored your in-progress edit": "편집 중인 내용을 복원했습니다",
   "Retry": "재시도",
   "Revert": "되돌리기",
   "Review the map · Confirm to keep · Revert to undo": "지도 확인 · 확인으로 유지 · 되돌리기로 실행 취소",

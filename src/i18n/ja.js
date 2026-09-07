@@ -541,6 +541,7 @@ export const ja = {
   "Restart now": "今すぐ再起動",
   "Restart to load the latest data from the cloud.": "再起動してクラウドの最新データを読み込みます。",
   "Resume a downloaded draft (or drop a": "ダウンロードした下書きを再開（または",
+  "Restored your in-progress edit": "編集中の内容を復元しました",
   "Retry": "再試行",
   "Revert": "元に戻す",
   "Review the map · Confirm to keep · Revert to undo": "地図を確認 · 確定で保持 · 戻すで元に戻す",

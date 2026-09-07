@@ -543,6 +543,7 @@ export const zhCn = {
   "Restart now": "立即重新加载",
   "Restart to load the latest data from the cloud.": "重新加载以获取云端最新数据。",
   "Resume a downloaded draft (or drop a": "恢复已下载的草稿（或将",
+  "Restored your in-progress edit": "已恢复你未完成的编辑",
   "Retry": "重试",
   "Revert": "还原",
   "Review the map · Confirm to keep · Revert to undo": "检查地图 · 确认以保留 · 还原以取消",

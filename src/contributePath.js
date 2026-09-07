@@ -1019,6 +1019,7 @@ export function createPathContributor(ctx) {
   function startGithubLogin() {
     const returnTo = `${window.location.pathname}${window.location.search || ""}${window.location.hash || ""}`;
     const safe = returnTo.startsWith("/") ? returnTo : "/";
+    if (active) saveSessionSnapshot();
     window.location.href = `/api/auth/github?return_to=${encodeURIComponent(safe)}`;
   }
 
@@ -2956,6 +2957,109 @@ export function createPathContributor(ctx) {
   }
 
   /**
+   * Apply a contribution-draft-shaped object to editor state without painting.
+   * Resets selections/history/blockers. Throws when coordinates are invalid.
+   * @param {object} draft
+   */
+  function applyDraftToState(draft) {
+    const coords = draft.coordinates;
+    if (!Array.isArray(coords) || coords.length < 2) {
+      throw new Error(t("JSON needs coordinates with at least 2 [lon,lat] points"));
+    }
+
+    /** @type {number[][]} */
+    const path = [];
+    for (const c of coords) {
+      if (!Array.isArray(c) || c.length < 2) continue;
+      const lon = Number(c[0]);
+      const lat = Number(c[1]);
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+      path.push([lon, lat]);
+    }
+    if (path.length < 2) {
+      throw new Error(t("No valid coordinates in JSON"));
+    }
+
+    clearPathHistoryStacks();
+    selectedIdx.clear();
+    offsetIdx.clear();
+    focusIdx = -1;
+    focusStopIdx = -1;
+    hideHalf = null;
+    blockers = [];
+    setPlacingBlocker(false);
+    points = path;
+
+    // Form fields
+    if (els.agency && draft.agency) {
+      const ag = String(draft.agency).toUpperCase();
+      const opt = [...(els.agency.options || [])].find(
+        (o) =>
+          ag.includes(String(o.value).toUpperCase()) ||
+          String(o.value).toUpperCase().includes(ag),
+      );
+      if (opt) els.agency.value = opt.value;
+      else if ([...els.agency.options].some((o) => o.value === "OTHER")) {
+        els.agency.value = "OTHER";
+      }
+    }
+    if (els.route && draft.route_short_name) {
+      els.route.value = String(draft.route_short_name);
+    }
+    if (els.direction && draft.direction != null && draft.direction !== "") {
+      const d = String(draft.direction);
+      const has = [...(els.direction.options || [])].some((o) => o.value === d);
+      if (has) els.direction.value = d;
+      else if (/^i/i.test(d)) els.direction.value = "I";
+      else if (/^o/i.test(d)) els.direction.value = "O";
+    }
+    if (els.from) {
+      const fm = draft.from_match;
+      els.from.value = Array.isArray(fm)
+        ? fm.join(", ")
+        : String(fm || draft.from || "");
+    }
+    if (els.to) {
+      const tm = draft.to_match;
+      els.to.value = Array.isArray(tm)
+        ? tm.join(", ")
+        : String(tm || draft.to || "");
+    }
+    if (els.notes && draft.notes != null) els.notes.value = String(draft.notes);
+    if (els.name && draft.contributor != null) {
+      els.name.value = String(draft.contributor);
+    }
+
+    // Visual stops from draft (official stays fixed when provided)
+    const vs = draft.visual_stops;
+    if (Array.isArray(vs) && vs.length) {
+      stopMarkers = vs
+        .map((s, i) => {
+          const visual = Array.isArray(s?.visual) ? s.visual : null;
+          const official = Array.isArray(s?.official) ? s.official : visual;
+          if (!visual || visual.length < 2) return null;
+          const vLon = Number(visual[0]);
+          const vLat = Number(visual[1]);
+          if (!Number.isFinite(vLon) || !Number.isFinite(vLat)) return null;
+          const oLon = Number(official?.[0] ?? vLon);
+          const oLat = Number(official?.[1] ?? vLat);
+          return {
+            stopId: String(s.stop_id || s.stopId || `import-${i}`),
+            name: String(s.name || `Stop ${i + 1}`),
+            seq: Number.isFinite(Number(s.seq)) ? Number(s.seq) : i,
+            officialLon: Number.isFinite(oLon) ? oLon : vLon,
+            officialLat: Number.isFinite(oLat) ? oLat : vLat,
+            visualLon: vLon,
+            visualLat: vLat,
+          };
+        })
+        .filter(Boolean);
+    } else {
+      stopMarkers = [];
+    }
+  }
+
+  /**
    * Import a downloaded contribution JSON so the user can continue editing.
    * @param {File | Blob | string} fileOrText
    */
@@ -2972,102 +3076,7 @@ export function createPathContributor(ctx) {
         throw new Error(t("Invalid JSON object"));
       }
 
-      const coords = draft.coordinates;
-      if (!Array.isArray(coords) || coords.length < 2) {
-        throw new Error(t("JSON needs coordinates with at least 2 [lon,lat] points"));
-      }
-
-      /** @type {number[][]} */
-      const path = [];
-      for (const c of coords) {
-        if (!Array.isArray(c) || c.length < 2) continue;
-        const lon = Number(c[0]);
-        const lat = Number(c[1]);
-        if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
-        path.push([lon, lat]);
-      }
-      if (path.length < 2) {
-        throw new Error(t("No valid coordinates in JSON"));
-      }
-
-      clearPathHistoryStacks();
-      selectedIdx.clear();
-      offsetIdx.clear();
-      focusIdx = -1;
-      focusStopIdx = -1;
-      hideHalf = null;
-      blockers = [];
-      setPlacingBlocker(false);
-      points = path;
-
-      // Form fields
-      if (els.agency && draft.agency) {
-        const ag = String(draft.agency).toUpperCase();
-        const opt = [...(els.agency.options || [])].find(
-          (o) =>
-            ag.includes(String(o.value).toUpperCase()) ||
-            String(o.value).toUpperCase().includes(ag),
-        );
-        if (opt) els.agency.value = opt.value;
-        else if ([...els.agency.options].some((o) => o.value === "OTHER")) {
-          els.agency.value = "OTHER";
-        }
-      }
-      if (els.route && draft.route_short_name) {
-        els.route.value = String(draft.route_short_name);
-      }
-      if (els.direction && draft.direction != null && draft.direction !== "") {
-        const d = String(draft.direction);
-        const has = [...(els.direction.options || [])].some((o) => o.value === d);
-        if (has) els.direction.value = d;
-        else if (/^i/i.test(d)) els.direction.value = "I";
-        else if (/^o/i.test(d)) els.direction.value = "O";
-      }
-      if (els.from) {
-        const fm = draft.from_match;
-        els.from.value = Array.isArray(fm)
-          ? fm.join(", ")
-          : String(fm || draft.from || "");
-      }
-      if (els.to) {
-        const tm = draft.to_match;
-        els.to.value = Array.isArray(tm)
-          ? tm.join(", ")
-          : String(tm || draft.to || "");
-      }
-      if (els.notes && draft.notes != null) els.notes.value = String(draft.notes);
-      if (els.name && draft.contributor != null) {
-        els.name.value = String(draft.contributor);
-      }
-
-      // Visual stops from draft (official stays fixed when provided)
-      const vs = draft.visual_stops;
-      if (Array.isArray(vs) && vs.length) {
-        stopMarkers = vs
-          .map((s, i) => {
-            const visual = Array.isArray(s?.visual) ? s.visual : null;
-            const official = Array.isArray(s?.official) ? s.official : visual;
-            if (!visual || visual.length < 2) return null;
-            const vLon = Number(visual[0]);
-            const vLat = Number(visual[1]);
-            if (!Number.isFinite(vLon) || !Number.isFinite(vLat)) return null;
-            const oLon = Number(official?.[0] ?? vLon);
-            const oLat = Number(official?.[1] ?? vLat);
-            return {
-              stopId: String(s.stop_id || s.stopId || `import-${i}`),
-              name: String(s.name || `Stop ${i + 1}`),
-              seq: Number.isFinite(Number(s.seq)) ? Number(s.seq) : i,
-              officialLon: Number.isFinite(oLon) ? oLon : vLon,
-              officialLat: Number.isFinite(oLat) ? oLat : vLat,
-              visualLon: vLon,
-              visualLat: vLat,
-            };
-          })
-          .filter(Boolean);
-      } else {
-        stopMarkers = [];
-      }
-
+      applyDraftToState(draft);
       paintDraft();
       fitToPath();
       setEditMode("path");
@@ -4132,6 +4141,96 @@ export function createPathContributor(ctx) {
     void loadPathFromSearch();
   }
 
+  // ── session snapshot: survive the GitHub OAuth redirect / refresh ──
+  // sessionStorage lives per-tab, so it crosses the github.com round-trip.
+  const SESSION_SNAPSHOT_KEY = "morgan.contrib.session.v1";
+
+  function buildSessionSnapshot() {
+    const fields = readFields();
+    if (followPending) {
+      // Snapshot the pre-preview state, not the unconfirmed Follow result
+      fields.coordinates = followPending.beforePath.map((c) => [
+        Number(c[0]),
+        Number(c[1]),
+      ]);
+      fields.visual_stops = followPending.beforeStops.map((s, i) => ({
+        stop_id: String(s.stopId || ""),
+        name: String(s.name || ""),
+        seq: Number.isFinite(s.seq) ? s.seq : i,
+        official: [Number(s.officialLon), Number(s.officialLat)],
+        visual: [Number(s.visualLon), Number(s.visualLat)],
+      }));
+    }
+    const maxIdx = fields.coordinates.length;
+    return {
+      v: 1,
+      saved_at: Date.now(),
+      fields,
+      blockers: blockers.map((c) => [Number(c[0]), Number(c[1])]),
+      selected: [...selectedIdx].filter((i) => i >= 0 && i < maxIdx),
+      offset: [...offsetIdx].filter((i) => i >= 0 && i < maxIdx),
+    };
+  }
+
+  function saveSessionSnapshot() {
+    try {
+      const snap = buildSessionSnapshot();
+      const n = Array.isArray(snap.fields?.coordinates)
+        ? snap.fields.coordinates.length
+        : 0;
+      if (n < 2 && !snap.blockers.length) {
+        sessionStorage.removeItem(SESSION_SNAPSHOT_KEY);
+        return;
+      }
+      sessionStorage.setItem(SESSION_SNAPSHOT_KEY, JSON.stringify(snap));
+    } catch {
+      /* quota / storage blocked — progress loss is the old behaviour */
+    }
+  }
+
+  function clearSessionSnapshot() {
+    try {
+      sessionStorage.removeItem(SESSION_SNAPSHOT_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** @returns {boolean} true when a snapshot was applied */
+  function restoreSessionSnapshot() {
+    try {
+      const raw = sessionStorage.getItem(SESSION_SNAPSHOT_KEY);
+      if (!raw) return false;
+      sessionStorage.removeItem(SESSION_SNAPSHOT_KEY);
+      const snap = JSON.parse(raw);
+      if (!snap || snap.v !== 1 || typeof snap.fields !== "object") return false;
+      applyDraftToState(snap.fields);
+      blockers = Array.isArray(snap.blockers)
+        ? snap.blockers
+            .filter(
+              (c) =>
+                Array.isArray(c) &&
+                c.length >= 2 &&
+                Number.isFinite(Number(c[0])) &&
+                Number.isFinite(Number(c[1])),
+            )
+            .map((c) => [Number(c[0]), Number(c[1])])
+        : [];
+      const maxIdx = points.length;
+      const setFrom = (arr) =>
+        new Set(
+          (Array.isArray(arr) ? arr : []).filter(
+            (i) => Number.isInteger(i) && i >= 0 && i < maxIdx,
+          ),
+        );
+      selectedIdx = setFrom(snap.selected);
+      offsetIdx = setFrom(snap.offset);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function open() {
     if (!els.sheet) return;
     if (!isDesktopContribute()) {
@@ -4147,6 +4246,7 @@ export function createPathContributor(ctx) {
     } catch {
       /* ignore */
     }
+    const restored = restoreSessionSnapshot();
     els.sheet.hidden = false;
     active = true;
     ensureDraftLayer();
@@ -4171,12 +4271,19 @@ export function createPathContributor(ctx) {
       }
     });
     if (els.route && !els.route.value) fillFromPlan();
+    if (restored) {
+      paintDraft();
+      fitToPath();
+    }
     updateUndoRedoButtons();
     void refreshGithubAuth();
     showToast(
       "V path · S stops · B select · R roads · X blocker · 1 start · 2 last.",
       3400,
     );
+    if (restored) {
+      showToast(t("Restored your in-progress edit"), 2800);
+    }
   }
 
   function close() {
@@ -4187,6 +4294,7 @@ export function createPathContributor(ctx) {
     dragIdx = -1;
     dragStopIdx = -1;
     clearPathHistoryStacks();
+    clearSessionSnapshot();
     document.body.classList.remove(
       "contrib-mode",
       "contrib-edit-path",
@@ -4403,6 +4511,15 @@ export function createPathContributor(ctx) {
   } catch {
     /* older Safari */
   }
+
+  // Keep a session snapshot current so an OAuth redirect or refresh
+  // never loses an in-progress edit (restored in open()).
+  window.addEventListener("pagehide", () => {
+    if (active) saveSessionSnapshot();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (active && document.visibilityState === "hidden") saveSessionSnapshot();
+  });
 
   // After OAuth callback (?gh_login=1) reopen contribute panel
   try {

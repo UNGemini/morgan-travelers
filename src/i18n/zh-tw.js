@@ -541,6 +541,7 @@ export const zhTw = {
   "Restart now": "立即重新載入",
   "Restart to load the latest data from the cloud.": "重新載入以取得雲端最新資料。",
   "Resume a downloaded draft (or drop a": "恢復已下載的草稿（或將",
+  "Restored your in-progress edit": "已還原你未完成的編輯",
   "Retry": "重試",
   "Revert": "還原",
   "Review the map · Confirm to keep · Revert to undo": "檢查地圖 · 確認以保留 · 還原以取消",
