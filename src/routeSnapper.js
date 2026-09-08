@@ -1839,6 +1839,55 @@ function osrmCorridorPlausible(path, seed, seedLen) {
 }
 
 /**
+ * Stricter corridor check for LOCAL (WASM Dijkstra) results. The local
+ * engine happily shortcuts through side streets / stubs that stay inside
+ * the OSRM tolerance band, so: denser seed sampling, tighter distance,
+ * hard length band, and both path ends must land near the seed ends
+ * (catches termini snapped onto stub roads).
+ */
+function localCorridorPlausible(path, seed, seedLen) {
+  if (!path || path.length < 2 || !seed?.length) return false;
+  const pathLen = pathLengthM(path);
+  if (!(pathLen > 0) || !Number.isFinite(pathLen)) return false;
+  if (pathLen > seedLen * 1.22 + 300) return false;
+  if (pathLen < seedLen * 0.7) return false;
+
+  const seedBox = lngLatBbox(seed);
+  if (seedBox.minLon > 113.9 && path.some(pointOnHzmbWest)) return false;
+
+  const padded = padBboxM(seedBox, 200);
+  for (const p of path) {
+    if (!pointInBbox(p, padded)) return false;
+  }
+
+  const startDev = haversineM(
+    path[0].lat,
+    path[0].lon,
+    seed[0].lat,
+    seed[0].lon,
+  );
+  const endDev = haversineM(
+    path[path.length - 1].lat,
+    path[path.length - 1].lon,
+    seed[seed.length - 1].lat,
+    seed[seed.length - 1].lon,
+  );
+  if (startDev > 70 || endDev > 70) return false;
+
+  const step = Math.max(1, Math.floor(seed.length / 32));
+  let ok = 0;
+  let n = 0;
+  let maxDev = 0;
+  for (let i = 0; i < seed.length; i += step) {
+    n += 1;
+    const d = distPointToLngLatPolylineM(seed[i], path);
+    if (d > maxDev) maxDev = d;
+    if (d <= 90) ok += 1;
+  }
+  return n > 0 && ok / n >= 0.92 && maxDev <= 220;
+}
+
+/**
  * Road-hug a dense GTFS polyline without routing every vertex.
  * Local WASM street graph first (instant + offline); OSRM is backup.
  *
@@ -1890,21 +1939,30 @@ async function snapGtfsCorridor(poly, opts = {}) {
   });
   if (controls.length < 2) return null;
 
-  // 1) Local street-graph route — instant + offline; corridor-plausible
-  try {
-    const lp = await localRoute(
-      controls,
-      [],
-      Math.min(24000, Math.round(seedLen * 1.6 + 1000)),
-    );
-    if (
-      lp?.path?.length >= 2 &&
-      osrmCorridorPlausible(lp.path, poly, seedLen)
-    ) {
-      return lp.path;
+  // 1) Local street-graph route — instant + offline. Dijkstra happily
+  // cuts corners between sparse controls, so pin it with a denser set
+  // (local calls are cheap) and the stricter local corridor check.
+  const localControls = pathControlWaypoints(poly, {
+    maxPoints: 24,
+    maxSpacingM: Math.max(300, seedLen / 16),
+    minTurnDeg: 25,
+  });
+  if (localControls.length >= 2) {
+    try {
+      const lp = await localRoute(
+        localControls,
+        [],
+        Math.min(24000, Math.round(seedLen * 1.6 + 1000)),
+      );
+      if (
+        lp?.path?.length >= 2 &&
+        localCorridorPlausible(lp.path, poly, seedLen)
+      ) {
+        return lp.path;
+      }
+    } catch (e) {
+      if (e?.name === "AbortError") throw e;
     }
-  } catch (e) {
-    if (e?.name === "AbortError") throw e;
   }
 
   // 2) OSRM backup
