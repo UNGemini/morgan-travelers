@@ -1849,53 +1849,11 @@ function osrmCorridorPlausible(path, seed, seedLen) {
 }
 
 /**
- * Stricter corridor check for LOCAL (WASM Dijkstra) results — they
- * happily shortcut through side streets / stubs that stay inside the
- * OSRM tolerance band: tighter length band, denser seed sampling, and
- * both path ends must land near the seed ends.
- */
-function localCorridorPlausible(path, seed, seedLen) {
-  if (!path || path.length < 2 || !seed?.length) return false;
-  const pathLen = pathLengthM(path);
-  if (!(pathLen > 0) || !Number.isFinite(pathLen)) return false;
-  if (pathLen > seedLen * 1.22 + 300) return false;
-  if (pathLen < seedLen * 0.7) return false;
-
-  const seedBox = lngLatBbox(seed);
-  if (seedBox.minLon > 113.9 && path.some(pointOnHzmbWest)) return false;
-
-  const padded = padBboxM(seedBox, 200);
-  for (const p of path) {
-    if (!pointInBbox(p, padded)) return false;
-  }
-
-  const startDev = haversineM(path[0].lat, path[0].lon, seed[0].lat, seed[0].lon);
-  const endDev = haversineM(
-    path[path.length - 1].lat,
-    path[path.length - 1].lon,
-    seed[seed.length - 1].lat,
-    seed[seed.length - 1].lon,
-  );
-  if (startDev > 70 || endDev > 70) return false;
-
-  const step = Math.max(1, Math.floor(seed.length / 32));
-  let ok = 0;
-  let n = 0;
-  let maxDev = 0;
-  for (let i = 0; i < seed.length; i += step) {
-    n += 1;
-    const d = distPointToLngLatPolylineM(seed[i], path);
-    if (d > maxDev) maxDev = d;
-    if (d <= 90) ok += 1;
-  }
-  return n > 0 && ok / n >= 0.92 && maxDev <= 220;
-}
-
-/**
  * Route through the actual stop sequence on the local street graph.
  * Stops are the waypoints, so the Dijkstra is forced to reach every
- * stop — between stops it picks its own roads, which the caller must
- * plausibility-check against the seed corridor.
+ * stop; the engine projects each stop onto a road edge so the result
+ * is pure road geometry, and the caller's length/coverage checks bound
+ * detours.
  * @param {Array<{lon: number, lat: number}>} stops travel order
  * @returns {Promise<LngLat[] | null>}
  */
@@ -1992,16 +1950,15 @@ async function snapGtfsCorridor(poly, opts = {}) {
   }
 
   // 0) Local stop-to-stop — stops are waypoints, so the Dijkstra is
-  // forced to reach every one; corridor check catches wrong-road legs.
+  // forced to reach every one. The engine projects stops onto road edges
+  // (pure road geometry, no darts), and localStopToStopRoute already
+  // bounds detours (length vs stop chords) and stop coverage (≤100 m).
+  // No seed-vs-path gate here: the GTFS seed can be stale/crossed/variant-
+  // mismatched while the stop sequence is what the bus actually serves.
   if (opts.stops?.length >= 2) {
     try {
       const viaStops = await localStopToStopRoute(opts.stops);
-      if (
-        viaStops?.length >= 2 &&
-        localCorridorPlausible(viaStops, poly, seedLen)
-      ) {
-        return viaStops;
-      }
+      if (viaStops?.length >= 2) return viaStops;
     } catch (e) {
       if (e?.name === "AbortError") throw e;
     }
