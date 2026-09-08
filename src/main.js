@@ -14347,6 +14347,40 @@ function etaRouteAsOption(route, stops, dir = {}, boardStop = null) {
  * Used first so a PWA opened already-offline can paint markers without
  * waiting on live operator APIs (which hang when onLine is a false positive).
  */
+/**
+ * Compare a stop sequence's end termini against a direction's orig/dest
+ * labels (word overlap — names differ in detail between operators).
+ * "forward" = starts at orig, ends at dest · "reversed" = swapped ·
+ * null = unknown (missing labels or ambiguous, e.g. circulars).
+ * @param {Array<{name?: string, nameEn?: string}> | []} seq
+ * @param {{ orig?: string, dest?: string } | null | undefined} dir
+ * @returns {"forward" | "reversed" | null}
+ */
+function seqOrientationVsDir(seq, dir) {
+  if (!seq || seq.length < 2 || !dir) return null;
+  const orig = String(dir.orig || "");
+  const dest = String(dir.dest || "");
+  if (!orig.trim() || !dest.trim()) return null;
+  const words = (s) =>
+    new Set(String(s).toLowerCase().match(/[a-z0-9]+/g) || []);
+  const nameOf = (s) => String(s?.nameEn || s?.name || "");
+  const first = words(nameOf(seq[0]));
+  const last = words(nameOf(seq[seq.length - 1]));
+  const destW = words(dest);
+  const origW = words(orig);
+  if (!destW.size || !origW.size) return null;
+  if (destW.size < 2 && origW.size < 2) return null;
+  const overlap = (a, b) =>
+    [...b].filter((w) => a.has(w)).length / b.size;
+  const forward =
+    overlap(last, destW) >= 0.5 && overlap(first, origW) >= 0.5;
+  const reversed =
+    overlap(first, destW) >= 0.5 && overlap(last, origW) >= 0.5;
+  if (forward && !reversed) return "forward";
+  if (reversed && !forward) return "reversed";
+  return null;
+}
+
 async function loadDownloadedBusStops(route, bound, co) {
   const busCo = co || (route.kind === "bus" ? "kmb" : "");
   if (
@@ -14434,9 +14468,28 @@ async function loadEtaRouteStops(route) {
   // true on a cold start, and those fetches hang. ETA ids strip the GTFS prefix.
   const downloaded = await loadDownloadedBusStops(route, bound, co);
   if (downloaded.length >= 2) {
-    if (!departureSwitch) return downloaded;
-    const wantLoop = etaIsCircularDir(dir) || dir?.variant === "loop";
-    if (stopListIsLoop(downloaded) === wantLoop) return downloaded;
+    if (!departureSwitch) {
+      // Operator direction revisions can swap a route's O/I sequences after
+      // the offline pack was built (Citybus did this for a batch of routes).
+      // Trust the pack only when it actually runs orig → dest; if clearly
+      // reversed, the opposite bound holds the right sequence, and online we
+      // can fall through to the live branches entirely.
+      const orientation = seqOrientationVsDir(downloaded, dir);
+      if (orientation !== "reversed") return downloaded;
+      const flipped = await loadDownloadedBusStops(
+        route,
+        bound === "I" ? "O" : "I",
+        co,
+      );
+      if (flipped.length >= 2 && seqOrientationVsDir(flipped, dir) !== "reversed") {
+        return flipped;
+      }
+      if (skipLiveEta) return downloaded;
+      // Online: live operator branches below have current sequences
+    } else {
+      const wantLoop = etaIsCircularDir(dir) || dir?.variant === "loop";
+      if (stopListIsLoop(downloaded) === wantLoop) return downloaded;
+    }
   }
 
   // Load official stop sequence from operator APIs first (names + ETA ids).
