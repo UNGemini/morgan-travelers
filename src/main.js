@@ -5867,12 +5867,12 @@ function stopsGeoFromPlan(plan) {
 
 /**
  * Max distance (m) to snap a bus stop onto the densified route line.
- * 150 m: bus lines are now stop-anchored (built through every stop), so a
- * far projection means the stop's GTFS coord sits off-road (layby / bay /
- * interchange forecourt) and the line shows the road the bus actually uses.
- * Keeps rejecting only genuinely mispaced stops.
+ * 100 m: bus lines are stop-anchored and car-park aisles are excluded from
+ * the road graph, so the line follows the real kerb road; the cap covers
+ * laybys / bay / forecourt offsets without yanking markers onto a
+ * different parallel road.
  */
-const STOP_SNAP_MAX_M = 150;
+const STOP_SNAP_MAX_M = 100;
 /** Platforms sit off track centreline — allow a bit more than kerbside bus. */
 const PLATFORM_SNAP_MAX_M = 120;
 
