@@ -594,18 +594,21 @@ export function saveLiveBusMorePref(v) {
 }
 
 /**
- * OSRM Zoom Chord (Beta) — snap non-contributed GTFS corridors onto OSM
- * roads when zooming. Default **off**: OSRM often takes the wrong
- * carriageway at junctions. Contributed overrides never use this path.
+ * Zoom Chord (Beta) — road-snap non-contributed GTFS corridors when
+ * zooming: local street graph first, OSRM as backup. Default **off**:
+ * wrong-carriageway picks at junctions used to be common. Contributed
+ * overrides never use this path.
  */
-export const OSRM_ZOOM_CHORD_STORAGE_KEY = "morgan.osrmZoomChord";
+export const ZOOM_CHORD_STORAGE_KEY =
+  // value predates the WASM rename — keep so existing prefs survive
+  "morgan.osrmZoomChord";
 
 /**
- * @returns {boolean} user opted into OSRM zoom-chord on GTFS bus shapes
+ * @returns {boolean} user opted into zoom-chord road snapping on GTFS bus shapes
  */
-export function loadOsrmZoomChordPref() {
+export function loadZoomChordPref() {
   try {
-    const raw = localStorage.getItem(OSRM_ZOOM_CHORD_STORAGE_KEY);
+    const raw = localStorage.getItem(ZOOM_CHORD_STORAGE_KEY);
     if (raw === "1" || raw === "0") return raw === "1";
   } catch {
     /* ignore */
@@ -617,10 +620,10 @@ export function loadOsrmZoomChordPref() {
  * @param {boolean} v
  * @returns {boolean}
  */
-export function saveOsrmZoomChordPref(v) {
+export function saveZoomChordPref(v) {
   const next = !!v;
   try {
-    localStorage.setItem(OSRM_ZOOM_CHORD_STORAGE_KEY, next ? "1" : "0");
+    localStorage.setItem(ZOOM_CHORD_STORAGE_KEY, next ? "1" : "0");
   } catch {
     /* ignore */
   }

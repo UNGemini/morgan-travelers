@@ -1639,8 +1639,8 @@ export async function buildTransitPolyline(opt, opts = {}) {
             }
           } else {
             try {
-              const { loadOsrmZoomChordPref } = await import("./preferences.js");
-              if (loadOsrmZoomChordPref()) {
+              const { loadZoomChordPref } = await import("./preferences.js");
+              if (loadZoomChordPref()) {
                 const snapped = await snapGtfsCorridor(poly, { ...opts, stops });
                 if (snapped?.length >= 2) return densifyAlongPolyline(snapped);
               }

@@ -69,8 +69,8 @@ import {
   saveLiveBusPref,
   loadLiveBusMorePref,
   saveLiveBusMorePref,
-  loadOsrmZoomChordPref,
-  saveOsrmZoomChordPref,
+  loadZoomChordPref,
+  saveZoomChordPref,
   loadBetaBannerPref,
   saveBetaBannerPref,
 } from "./preferences.js";
@@ -18057,19 +18057,19 @@ function initLiveBusPrefUi() {
 }
 initLiveBusPrefUi();
 
-function initOsrmZoomChordPrefUi() {
+function initZoomChordPrefUi() {
   const tgl = document.getElementById("osrm-zoom-chord-toggle");
   if (!tgl) return;
-  tgl.checked = loadOsrmZoomChordPref();
+  tgl.checked = loadZoomChordPref();
   tgl.addEventListener("change", () => {
-    const next = saveOsrmZoomChordPref(!!tgl.checked);
+    const next = saveZoomChordPref(!!tgl.checked);
     showToast(
-      next ? t("OSRM Zoom Chord enabled") : t("OSRM Zoom Chord disabled"),
+      next ? t("Zoom Chord enabled") : t("Zoom Chord disabled"),
       1800,
     );
   });
 }
-initOsrmZoomChordPrefUi();
+initZoomChordPrefUi();
 
 // ── Language settings ────────────────────────────────────────────────────────
 /** Wire the Language dropdown to the saved preference (initLang applied at boot). */

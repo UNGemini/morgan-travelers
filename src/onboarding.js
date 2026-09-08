@@ -12,12 +12,12 @@ import {
   loadDataSourcePref,
   loadLiveBusMorePref,
   loadLiveBusPref,
-  loadOsrmZoomChordPref,
+  loadZoomChordPref,
   saveBetaBannerPref,
   saveDataCachePref,
   saveDataSourcePref,
   saveLiveBusPref,
-  saveOsrmZoomChordPref,
+  saveZoomChordPref,
 } from "./preferences.js";
 import {
   FARE_TYPE_HINTS,
@@ -99,11 +99,11 @@ const BETA_SECTIONS = [
   },
   {
     id: "osrm-zoom-chord",
-    titleKey: "OSRM Zoom Chord",
+    titleKey: "Zoom Chord",
     descKey:
-      "On non-contributed bus routes, snap the GTFS line onto OpenStreetMap roads when you zoom in. OSRM can pick the wrong carriageway at junctions — leave off unless you need it.",
-    loadEnabled: loadOsrmZoomChordPref,
-    saveEnabled: saveOsrmZoomChordPref,
+      "On non-contributed bus routes, road-snap the GTFS line onto OpenStreetMap roads when you zoom in. Uses the on-device street graph with OSRM only as backup.",
+    loadEnabled: loadZoomChordPref,
+    saveEnabled: saveZoomChordPref,
     subs: [],
   },
   {
