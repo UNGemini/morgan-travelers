@@ -1839,57 +1839,11 @@ function osrmCorridorPlausible(path, seed, seedLen) {
 }
 
 /**
- * Stricter corridor check for LOCAL (WASM Dijkstra) results. The local
- * engine happily shortcuts through side streets / stubs that stay inside
- * the OSRM tolerance band, so: denser seed sampling, tighter distance,
- * hard length band, and both path ends must land near the seed ends
- * (catches termini snapped onto stub roads).
- */
-function localCorridorPlausible(path, seed, seedLen) {
-  if (!path || path.length < 2 || !seed?.length) return false;
-  const pathLen = pathLengthM(path);
-  if (!(pathLen > 0) || !Number.isFinite(pathLen)) return false;
-  if (pathLen > seedLen * 1.22 + 300) return false;
-  if (pathLen < seedLen * 0.7) return false;
-
-  const seedBox = lngLatBbox(seed);
-  if (seedBox.minLon > 113.9 && path.some(pointOnHzmbWest)) return false;
-
-  const padded = padBboxM(seedBox, 200);
-  for (const p of path) {
-    if (!pointInBbox(p, padded)) return false;
-  }
-
-  const startDev = haversineM(
-    path[0].lat,
-    path[0].lon,
-    seed[0].lat,
-    seed[0].lon,
-  );
-  const endDev = haversineM(
-    path[path.length - 1].lat,
-    path[path.length - 1].lon,
-    seed[seed.length - 1].lat,
-    seed[seed.length - 1].lon,
-  );
-  if (startDev > 70 || endDev > 70) return false;
-
-  const step = Math.max(1, Math.floor(seed.length / 32));
-  let ok = 0;
-  let n = 0;
-  let maxDev = 0;
-  for (let i = 0; i < seed.length; i += step) {
-    n += 1;
-    const d = distPointToLngLatPolylineM(seed[i], path);
-    if (d > maxDev) maxDev = d;
-    if (d <= 90) ok += 1;
-  }
-  return n > 0 && ok / n >= 0.92 && maxDev <= 220;
-}
-
-/**
  * Road-hug a dense GTFS polyline without routing every vertex.
- * Local WASM street graph first (instant + offline); OSRM is backup.
+ *
+ * LOCAL (WASM) is only trusted for chord fills between anchored endpoints —
+ * free corridor routing between sparse controls lets the Dijkstra dive
+ * into service roads / stubs, so whole-corridor snapping stays OSRM-only.
  *
  * CLK short shapes (S64C AM/PM): fill long GTFS hops with 2-point routes
  * so Shun Tung / Yu Tung follow the kerb. Matching the raw vertices is
@@ -1898,7 +1852,9 @@ function localCorridorPlausible(path, seed, seedLen) {
  * CLK long circulars (S64 ~23 km): do not route the whole
  * loop (10–24 waypoints shortcut GTC/cargo). Keep the operator line.
  *
- * Elsewhere: few route waypoints. Returns null → GTFS interpolation.
+ * Elsewhere: fill long straight chords locally (keeps every GTFS vertex,
+ * so stops can never be bypassed), else OSRM corridor snap.
+ * Returns null → GTFS interpolation.
  *
  * @param {LngLat[]} poly
  * @param {{ signal?: AbortSignal }} [opts]
@@ -1932,41 +1888,34 @@ async function snapGtfsCorridor(poly, opts = {}) {
     return null;
   }
 
+  // 1) Local street graph — chord fills only (≥260 m, anchored ends,
+  // every original vertex preserved so stop order cannot change).
+  const stats = { filled: false };
+  try {
+    const filled = await fillGtfsHopsOnRoads(
+      poly,
+      opts.signal,
+      260,
+      online,
+      stats,
+    );
+    if (stats.filled && filled?.length >= 2) {
+      if (!(lngLatBbox(poly).minLon > 113.9 && filled.some(pointOnHzmbWest))) {
+        return filled;
+      }
+    }
+  } catch (e) {
+    if (e?.name === "AbortError") throw e;
+  }
+
+  // 2) OSRM corridor snap (offline → GTFS interpolation)
+  if (!online) return null;
   const controls = pathControlWaypoints(poly, {
     maxPoints: 10,
     maxSpacingM: Math.max(500, seedLen / 8),
     minTurnDeg: 25,
   });
   if (controls.length < 2) return null;
-
-  // 1) Local street-graph route — instant + offline. Dijkstra happily
-  // cuts corners between sparse controls, so pin it with a denser set
-  // (local calls are cheap) and the stricter local corridor check.
-  const localControls = pathControlWaypoints(poly, {
-    maxPoints: 24,
-    maxSpacingM: Math.max(300, seedLen / 16),
-    minTurnDeg: 25,
-  });
-  if (localControls.length >= 2) {
-    try {
-      const lp = await localRoute(
-        localControls,
-        [],
-        Math.min(24000, Math.round(seedLen * 1.6 + 1000)),
-      );
-      if (
-        lp?.path?.length >= 2 &&
-        localCorridorPlausible(lp.path, poly, seedLen)
-      ) {
-        return lp.path;
-      }
-    } catch (e) {
-      if (e?.name === "AbortError") throw e;
-    }
-  }
-
-  // 2) OSRM backup
-  if (!online) return null;
   try {
     const routed = await osrmRoute(controls, opts.signal, {});
     if (
@@ -1991,9 +1940,10 @@ async function snapGtfsCorridor(poly, opts = {}) {
  * @param {AbortSignal} [signal]
  * @param {number} minHopM
  * @param {boolean} [online] false skips the OSRM backup
+ * @param {{ filled?: boolean }} [stats] set true when any hop was replaced
  * @returns {Promise<LngLat[] | null>}
  */
-async function fillGtfsHopsOnRoads(poly, signal, minHopM, online = true) {
+async function fillGtfsHopsOnRoads(poly, signal, minHopM, online = true, stats = null) {
   if (!poly || poly.length < 2) return null;
 
   /** @type {Array<{ i: number, j: number, a: LngLat, b: LngLat, chord: number }>} */
@@ -2044,6 +1994,15 @@ async function fillGtfsHopsOnRoads(poly, signal, minHopM, online = true) {
     const hopOk = (p) =>
       p.length >= 2 &&
       osrmHopPlausible(job.a, job.b, p) &&
+      // Ends must land on the requested endpoints — keeps the line on
+      // the GTFS vertex (and any stop sitting on it), never a stub nearby
+      haversineM(p[0].lat, p[0].lon, job.a.lat, job.a.lon) <= 60 &&
+      haversineM(
+        p[p.length - 1].lat,
+        p[p.length - 1].lon,
+        job.b.lat,
+        job.b.lon,
+      ) <= 60 &&
       maxLateralDeviationM(p, job.a, job.b) <= 130 &&
       pathLengthM(p) <= job.chord * 2.8 + 280;
 
@@ -2080,6 +2039,7 @@ async function fillGtfsHopsOnRoads(poly, signal, minHopM, online = true) {
   for (let k = 0; k < jobs.length; k++) {
     if (routed[k]?.length >= 2) byI.set(jobs[k].i, routed[k]);
   }
+  if (stats && byI.size > 0) stats.filled = true;
 
   /** @type {LngLat[]} */
   const out = [{ lon: poly[0].lon, lat: poly[0].lat }];
