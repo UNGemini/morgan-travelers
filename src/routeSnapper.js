@@ -1641,12 +1641,12 @@ export async function buildTransitPolyline(opt, opts = {}) {
             try {
               const { loadOsrmZoomChordPref } = await import("./preferences.js");
               if (loadOsrmZoomChordPref()) {
-                const snapped = await snapGtfsCorridorViaOsrm(poly, opts);
+                const snapped = await snapGtfsCorridor(poly, opts);
                 if (snapped?.length >= 2) return densifyAlongPolyline(snapped);
               }
             } catch (e) {
               if (e?.name === "AbortError") throw e;
-              console.warn("[routeSnapper] GTFS corridor OSRM", e);
+              console.warn("[routeSnapper] GTFS corridor road snap", e);
             }
           }
           return densifyAlongPolyline(poly);
@@ -1840,25 +1840,25 @@ function osrmCorridorPlausible(path, seed, seedLen) {
 
 /**
  * Road-hug a dense GTFS polyline without routing every vertex.
+ * Local WASM street graph first (instant + offline); OSRM is backup.
  *
- * CLK short shapes (S64C AM/PM): fill long GTFS hops with 2-point /route
+ * CLK short shapes (S64C AM/PM): fill long GTFS hops with 2-point routes
  * so Shun Tung / Yu Tung follow the kerb. Matching the raw vertices is
  * wrong — S64C PM drops a point in the roundabout island.
  *
- * CLK long circulars (S64 ~23 km): do not /route or /match the whole
+ * CLK long circulars (S64 ~23 km): do not route the whole
  * loop (10–24 waypoints shortcut GTC/cargo). Keep the operator line.
  *
- * Elsewhere: few /route waypoints. Returns null → GTFS interpolation.
+ * Elsewhere: few route waypoints. Returns null → GTFS interpolation.
  *
  * @param {LngLat[]} poly
  * @param {{ signal?: AbortSignal }} [opts]
  * @returns {Promise<LngLat[] | null>}
  */
-async function snapGtfsCorridorViaOsrm(poly, opts = {}) {
+async function snapGtfsCorridor(poly, opts = {}) {
   if (!poly || poly.length < 2) return null;
-  if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    return null;
-  }
+  const online =
+    typeof navigator === "undefined" || navigator.onLine !== false;
   const seedLen = pathLengthM(poly);
   if (!(seedLen > 120)) return null;
 
@@ -1870,7 +1870,7 @@ async function snapGtfsCorridorViaOsrm(poly, opts = {}) {
       // Per-hop checks already reject Link Road. Do not require the
       // whole path to pass corridor-plausible — one fat cargo hop
       // used to discard the Yu Tung / Shun Tung fills too.
-      const filled = await fillGtfsHopsViaOsrm(poly, opts.signal, 80);
+      const filled = await fillGtfsHopsOnRoads(poly, opts.signal, 80, online);
       if (filled?.length >= 2) {
         if (lngLatBbox(poly).minLon > 113.9 && filled.some(pointOnHzmbWest)) {
           return null;
@@ -1889,6 +1889,26 @@ async function snapGtfsCorridorViaOsrm(poly, opts = {}) {
     minTurnDeg: 25,
   });
   if (controls.length < 2) return null;
+
+  // 1) Local street-graph route — instant + offline; corridor-plausible
+  try {
+    const lp = await localRoute(
+      controls,
+      [],
+      Math.min(24000, Math.round(seedLen * 1.6 + 1000)),
+    );
+    if (
+      lp?.path?.length >= 2 &&
+      osrmCorridorPlausible(lp.path, poly, seedLen)
+    ) {
+      return lp.path;
+    }
+  } catch (e) {
+    if (e?.name === "AbortError") throw e;
+  }
+
+  // 2) OSRM backup
+  if (!online) return null;
   try {
     const routed = await osrmRoute(controls, opts.signal, {});
     if (
@@ -1905,15 +1925,17 @@ async function snapGtfsCorridorViaOsrm(poly, opts = {}) {
 }
 
 /**
- * Replace long / colinear GTFS chords with a 2-point OSRM drive (roundabout
- * kerb, Yu Tung corner). Tight radius + lateral cap so Link Road cannot win.
+ * Replace long / colinear GTFS chords with a 2-point drive (roundabout
+ * kerb, Yu Tung corner). Local street graph first; OSRM backup.
+ * Tight radius + lateral cap so Link Road cannot win.
  *
  * @param {LngLat[]} poly
  * @param {AbortSignal} [signal]
  * @param {number} minHopM
+ * @param {boolean} [online] false skips the OSRM backup
  * @returns {Promise<LngLat[] | null>}
  */
-async function fillGtfsHopsViaOsrm(poly, signal, minHopM) {
+async function fillGtfsHopsOnRoads(poly, signal, minHopM, online = true) {
   if (!poly || poly.length < 2) return null;
 
   /** @type {Array<{ i: number, j: number, a: LngLat, b: LngLat, chord: number }>} */
@@ -1960,21 +1982,38 @@ async function fillGtfsHopsViaOsrm(poly, signal, minHopM) {
 
   const routed = await mapPool(jobs, 3, async (job) => {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    /** @type {(p: LngLat[]) => boolean} */
+    const hopOk = (p) =>
+      p.length >= 2 &&
+      osrmHopPlausible(job.a, job.b, p) &&
+      maxLateralDeviationM(p, job.a, job.b) <= 130 &&
+      pathLengthM(p) <= job.chord * 2.8 + 280;
+
+    // 1) Local street-graph route — instant + offline
+    try {
+      const lp = await localRoute(
+        [job.a, job.b],
+        [],
+        Math.round(job.chord * 2.8 + 500),
+      );
+      if (lp?.path && hopOk(lp.path)) return lp.path;
+    } catch (e) {
+      if (e?.name === "AbortError") throw e;
+    }
+
+    // 2) OSRM backup — a single slow hop must not abort the fills
+    if (!online) return null;
     let path = null;
     try {
       path = await osrmRoute([job.a, job.b], signal, {
         radiusesM: 60,
       });
     } catch (e) {
-      // A single slow hop must not abort the Yu Tung / roundabout fills.
       if (e?.name === "AbortError") throw e;
       path = null;
     }
     if (!path || path.length < 2) return null;
-    if (!osrmHopPlausible(job.a, job.b, path)) return null;
-    if (maxLateralDeviationM(path, job.a, job.b) > 130) return null;
-    const len = pathLengthM(path);
-    if (len > job.chord * 2.8 + 280) return null;
+    if (!hopOk(path)) return null;
     return path;
   });
 
