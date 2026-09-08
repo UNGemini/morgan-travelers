@@ -5867,11 +5867,12 @@ function stopsGeoFromPlan(plan) {
 
 /**
  * Max distance (m) to snap a bus stop onto the densified route line.
- * Keep tight: OSRM sometimes draws airport legs on HZMB Hong Kong Link Road
- * parallel to Chek Lap Kok South Road; a large threshold pulls the pin onto
- * the wrong road. Prefer official kerbside coords when the line is far.
+ * 150 m: bus lines are now stop-anchored (built through every stop), so a
+ * far projection means the stop's GTFS coord sits off-road (layby / bay /
+ * interchange forecourt) and the line shows the road the bus actually uses.
+ * Keeps rejecting only genuinely mispaced stops.
  */
-const STOP_SNAP_MAX_M = 95;
+const STOP_SNAP_MAX_M = 150;
 /** Platforms sit off track centreline — allow a bit more than kerbside bus. */
 const PLATFORM_SNAP_MAX_M = 120;
 
