@@ -1641,7 +1641,7 @@ export async function buildTransitPolyline(opt, opts = {}) {
             try {
               const { loadOsrmZoomChordPref } = await import("./preferences.js");
               if (loadOsrmZoomChordPref()) {
-                const snapped = await snapGtfsCorridor(poly, opts);
+                const snapped = await snapGtfsCorridor(poly, { ...opts, stops });
                 if (snapped?.length >= 2) return densifyAlongPolyline(snapped);
               }
             } catch (e) {
@@ -1658,7 +1658,17 @@ export async function buildTransitPolyline(opt, opts = {}) {
     }
   }
 
-  // Road-following for bus / surface modes (needs the live OSRM proxy)
+  // Road-following for bus / surface modes — local stop-to-stop first
+  // (offline-capable), OSRM densify as backup.
+  if ((!isRail && !isFerry) || opts.forceOsrm) {
+    try {
+      const viaStops = await localStopToStopRoute(stops);
+      if (viaStops?.length >= 2) return densifyAlongPolyline(viaStops);
+    } catch (e) {
+      if (e?.name === "AbortError") throw e;
+      console.warn("[routeSnapper] local stop-to-stop failed", e);
+    }
+  }
   if (
     ((!isRail && !isFerry) || opts.forceOsrm) &&
     !(typeof navigator !== "undefined" && navigator.onLine === false)
@@ -1839,6 +1849,95 @@ function osrmCorridorPlausible(path, seed, seedLen) {
 }
 
 /**
+ * Stricter corridor check for LOCAL (WASM Dijkstra) results — they
+ * happily shortcut through side streets / stubs that stay inside the
+ * OSRM tolerance band: tighter length band, denser seed sampling, and
+ * both path ends must land near the seed ends.
+ */
+function localCorridorPlausible(path, seed, seedLen) {
+  if (!path || path.length < 2 || !seed?.length) return false;
+  const pathLen = pathLengthM(path);
+  if (!(pathLen > 0) || !Number.isFinite(pathLen)) return false;
+  if (pathLen > seedLen * 1.22 + 300) return false;
+  if (pathLen < seedLen * 0.7) return false;
+
+  const seedBox = lngLatBbox(seed);
+  if (seedBox.minLon > 113.9 && path.some(pointOnHzmbWest)) return false;
+
+  const padded = padBboxM(seedBox, 200);
+  for (const p of path) {
+    if (!pointInBbox(p, padded)) return false;
+  }
+
+  const startDev = haversineM(path[0].lat, path[0].lon, seed[0].lat, seed[0].lon);
+  const endDev = haversineM(
+    path[path.length - 1].lat,
+    path[path.length - 1].lon,
+    seed[seed.length - 1].lat,
+    seed[seed.length - 1].lon,
+  );
+  if (startDev > 70 || endDev > 70) return false;
+
+  const step = Math.max(1, Math.floor(seed.length / 32));
+  let ok = 0;
+  let n = 0;
+  let maxDev = 0;
+  for (let i = 0; i < seed.length; i += step) {
+    n += 1;
+    const d = distPointToLngLatPolylineM(seed[i], path);
+    if (d > maxDev) maxDev = d;
+    if (d <= 90) ok += 1;
+  }
+  return n > 0 && ok / n >= 0.92 && maxDev <= 220;
+}
+
+/**
+ * Route through the actual stop sequence on the local street graph.
+ * Stops are the waypoints, so the Dijkstra is forced to reach every
+ * stop — between stops it picks its own roads, which the caller must
+ * plausibility-check against the seed corridor.
+ * @param {Array<{lon: number, lat: number}>} stops travel order
+ * @returns {Promise<LngLat[] | null>}
+ */
+async function localStopToStopRoute(stops) {
+  if (!stops || stops.length < 2) return null;
+  const engine = await localRoad();
+  if (!engine?.road_route) return null;
+  let longestGap = 0;
+  let chordSum = 0;
+  for (let i = 0; i < stops.length - 1; i++) {
+    const d = haversineM(
+      stops[i].lat,
+      stops[i].lon,
+      stops[i + 1].lat,
+      stops[i + 1].lon,
+    );
+    if (d > longestGap) longestGap = d;
+    chordSum += d;
+  }
+  if (!(chordSum > 120)) return null;
+  try {
+    const out = await localRoute(
+      stops,
+      [],
+      Math.min(24000, Math.round(longestGap * 2 + 800)),
+    );
+    if (!out?.path || out.path.length < 2) return null;
+    const meters = out.meters || pathLengthM(out.path);
+    // Road distance vs stop-chord sum: allow winding, reject detours
+    if (meters > chordSum * 2.2 + 600) return null;
+    if (meters < chordSum * 0.8) return null;
+    for (const s of stops) {
+      if (distPointToLngLatPolylineM(s, out.path) > 70) return null;
+    }
+    return out.path;
+  } catch (e) {
+    if (e?.name === "AbortError") throw e;
+    return null;
+  }
+}
+
+/**
  * Road-hug a dense GTFS polyline without routing every vertex.
  *
  * LOCAL (WASM) is only trusted for chord fills between anchored endpoints —
@@ -1886,6 +1985,22 @@ async function snapGtfsCorridor(poly, opts = {}) {
       if (e?.name === "AbortError") throw e;
     }
     return null;
+  }
+
+  // 0) Local stop-to-stop — stops are waypoints, so the Dijkstra is
+  // forced to reach every one; corridor check catches wrong-road legs.
+  if (opts.stops?.length >= 2) {
+    try {
+      const viaStops = await localStopToStopRoute(opts.stops);
+      if (
+        viaStops?.length >= 2 &&
+        localCorridorPlausible(viaStops, poly, seedLen)
+      ) {
+        return viaStops;
+      }
+    } catch (e) {
+      if (e?.name === "AbortError") throw e;
+    }
   }
 
   // 1) Local street graph — chord fills only (≥260 m, anchored ends,
