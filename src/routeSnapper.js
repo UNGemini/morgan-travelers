@@ -1630,6 +1630,13 @@ export async function buildTransitPolyline(opt, opts = {}) {
           // on CLK: S64C fills long hops via 2-point /route; S64's long
           // circular stays on the operator line (whole-loop OSRM breaks it).
           if (gtfs.sparse) {
+            // Local stop-to-stop first — offline-capable, no rate limits
+            try {
+              const viaStops = await localStopToStopRoute(poly);
+              if (viaStops?.length >= 2) return densifyAlongPolyline(viaStops);
+            } catch (e) {
+              if (e?.name === "AbortError") throw e;
+            }
             try {
               const dens = await densifyStopsViaOsrm(poly, opts);
               if (dens?.length >= 2) return densifyAlongPolyline(dens);
