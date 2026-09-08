@@ -1927,8 +1927,12 @@ async function localStopToStopRoute(stops) {
     // Road distance vs stop-chord sum: allow winding, reject detours
     if (meters > chordSum * 2.2 + 600) return null;
     if (meters < chordSum * 0.8) return null;
+    // The engine projects waypoints onto road edges — the path is pure road
+    // geometry, so an off-road GTFS stop sits this far off the line. Cap at
+    // the marker snap allowance: beyond it the stop data is misplaced and
+    // OSRM/GTFS fallbacks take over.
     for (const s of stops) {
-      if (distPointToLngLatPolylineM(s, out.path) > 70) return null;
+      if (distPointToLngLatPolylineM(s, out.path) > 100) return null;
     }
     return out.path;
   } catch (e) {
