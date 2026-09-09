@@ -1035,7 +1035,7 @@ function distPointToLngLatPolylineM(p, line) {
 }
 
 /** @param {LngLat} p @param {LngLat} a @param {LngLat} b */
-function distPointToLngLatSegmentM(p, a, b) {
+export function distPointToLngLatSegmentM(p, a, b) {
   const lat0 = ((p.lat + a.lat + b.lat) / 3) * (Math.PI / 180);
   const cos = Math.cos(lat0);
   const mLat = 111320;

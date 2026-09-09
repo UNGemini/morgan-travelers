@@ -18,6 +18,7 @@ import {
 } from "./busShapes.js";
 import {
   densifyStopsViaOsrm,
+  distPointToLngLatSegmentM,
   localRoute,
   pathControlWaypoints,
   projectStops,
@@ -2493,16 +2494,45 @@ export function createPathContributor(ctx) {
   }
 
   /** Re-project visual pins onto current path (keeps official fixed). */
-  function reprojectVisualStops() {
+  /**
+   * Re-anchor visible stop pins onto the current path (official coords
+   * stay fixed). When `nearCoords` is given, only pins that already sit
+   * near those coordinates — i.e. on a recalculated section — move;
+   * pins elsewhere keep their position.
+   * @param {number[][]} [nearCoords] [lon, lat] points limiting the scope
+   */
+  function reprojectVisualStops(nearCoords = null) {
     if (points.length < 2 || !stopMarkers.length) return;
     const visPts = visiblePathCoords();
     const routeLine = visPts.map((c) => ({ lon: c[0], lat: c[1] }));
     const visIdx = stopMarkers
       .map((_, i) => i)
       .filter((i) => isStopVisible(i));
+    const scoped =
+      !nearCoords || !nearCoords.length
+        ? visIdx
+        : visIdx.filter((i) => {
+            const s = stopMarkers[i];
+            const lon = Number(s.visualLon ?? s.lon);
+            const lat = Number(s.visualLat ?? s.lat);
+            if (!Number.isFinite(lon) || !Number.isFinite(lat)) return false;
+            // within 80 m of any recalculated segment?
+            for (let k = 0; k + 1 < nearCoords.length; k++) {
+              if (
+                distPointToLngLatSegmentM(
+                  { lon, lat },
+                  { lon: nearCoords[k][0], lat: nearCoords[k][1] },
+                  { lon: nearCoords[k + 1][0], lat: nearCoords[k + 1][1] },
+                ) <= 80
+              ) {
+                return true;
+              }
+            }
+            return false;
+          });
     const projected = projectStops(
       routeLine,
-      visIdx.map((i) => {
+      scoped.map((i) => {
         const s = stopMarkers[i];
         return {
           id: s.stopId || String(i),
@@ -2511,7 +2541,7 @@ export function createPathContributor(ctx) {
         };
       }),
     );
-    const byVis = new Map(visIdx.map((i, k) => [i, projected[k]]));
+    const byVis = new Map(scoped.map((i, k) => [i, projected[k]]));
     stopMarkers = stopMarkers.map((s, i) => {
       const p = byVis.get(i);
       if (!p || !Number.isFinite(p.lon) || !Number.isFinite(p.lat)) return s;
@@ -2896,7 +2926,10 @@ export function createPathContributor(ctx) {
 
       // Preview: apply but require Confirm / Revert (same as Follow roads)
       points = after;
-      if (stopMarkers.length) reprojectVisualStops();
+      // Reproject only pins near the recalculated sections — pins on the
+      // untouched parts of the path keep their position
+      if (stopMarkers.length)
+        reprojectVisualStops(recalcCoords.length >= 2 ? recalcCoords : null);
       else paintDraft();
       fitCoords(recalcCoords.length >= 2 ? recalcCoords : points);
       setEditMode("path");
