@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-07",
+  "updated_at": "2026-09-09",
   "note": "Contributed routes live in bus-shapes/<id>.json (see split_index). This stub is not the route list.",
   "split_index": "bus-shapes/index.json",
   "files": [
@@ -7,7 +7,8 @@
     "nlb_38_yat_tung_estate_yat_tung_estate.json",
     "ctb_s52p_yat_tung_estate_kui_yat_house_yat_tung_e.json",
     "kmb_e31_yat_tung_estate_bus_term_tsuen_wan_discovery_par.json",
-    "kmb_e36a_kui_yat_house_yuen_long_tak_yip_stree.json"
+    "kmb_e36a_kui_yat_house_yuen_long_tak_yip_stree.json",
+    "kmb_s64c_yat_tung_estate_bus_term_yat_tung_estate_bus_term.json"
   ],
   "routes": []
 }
