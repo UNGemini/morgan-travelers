@@ -15566,6 +15566,8 @@ async function renderEtaRouteDetailBody(route, ctx) {
         const isEtaStop = i === boardIndex;
         const isBefore = i < boardIndex;
         const reach = reachMins[i];
+        const reachT =
+          reach != null ? Date.now() + Math.max(0, reach) * 60_000 : null;
         let fareHkd = null;
         if (isBusFamily && fareBaseOpt && !isLast) {
           fareHkd = estimateBusBoardFare(fareBaseOpt, named, i, ticket);
@@ -15587,7 +15589,7 @@ async function renderEtaRouteDetailBody(route, ctx) {
         }
         const roleHtml =
           reach != null
-            ? `<span class="rt-stop-role rt-stop-eta-mins${isBefore ? " is-past" : ""}">${escapeHtml(formatStopReachLabel(reach, fareHkd))}</span>`
+            ? `<span class="rt-stop-role rt-stop-eta-mins${isBefore ? " is-past" : ""}" data-eta-stop-idx="${i}" data-eta-t="${reachT}"${fareHkd != null ? ` data-eta-fare="${fareHkd}"` : ""}>${escapeHtml(formatStopReachLabel(reach, fareHkd))}</span>`
             : "";
         // Circular multi-visit: “2/2” so pin/list don’t collapse same stopId
         const visitHtml =
@@ -15951,6 +15953,25 @@ async function refreshEtaRouteDetailEta() {
     updatedEl.dataset.fetchedAt = Number.isFinite(t) ? String(t) : "";
     updatedEl.textContent = formatUpdatedAgo(etaResult?.fetchedAt);
   }
+  // Re-baseline the stop-list reach times from the fresh board ETA so the
+  // ticking labels track the live wait instead of drifting from the render
+  try {
+    const wait = etaResult?.slots?.[0]?.waitMins;
+    const reach = etaStopReachMinutes(
+      ctx.named,
+      ctx.boardIndex,
+      wait,
+      ctx.route.kind,
+    );
+    for (const el of root.querySelectorAll(".rt-stop-eta-mins[data-eta-stop-idx]")) {
+      const i = Number(el.dataset.etaStopIdx);
+      const m = reach[i];
+      if (!Number.isFinite(m)) continue;
+      el.dataset.etaT = String(Date.now() + Math.max(0, m) * 60_000);
+    }
+  } catch {
+    /* keep the previous baseline — next tick still counts down */
+  }
 }
 
 // Route-detail ETA card: silent refresh every minute while the page is open
@@ -15971,6 +15992,17 @@ setInterval(() => {
   const now = Date.now();
   let soonest = Infinity;
   let soonestEl = null;
+  // Stop-list reach labels tick down from their absolute ETA timestamps
+  for (const el of document.querySelectorAll(".rt-stop-eta-mins[data-eta-t]")) {
+    const t = Number(el.dataset.etaT || 0);
+    if (!Number.isFinite(t) || t <= 0) continue;
+    const mins = Math.max(0, Math.round((t - now) / 60_000));
+    const fare = el.dataset.etaFare;
+    el.textContent = formatStopReachLabel(
+      mins,
+      fare != null && fare !== "" ? Number(fare) : null,
+    );
+  }
   for (const el of document.querySelectorAll(".wheels-eta-wait[data-eta-t]")) {
     const t = Number(el.dataset.etaT || 0);
     if (!Number.isFinite(t) || t <= 0) continue;
