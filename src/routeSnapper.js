@@ -1943,8 +1943,7 @@ async function snapGtfsCorridor(poly, opts = {}) {
       // Per-hop checks already reject Link Road. Do not require the
       // whole path to pass corridor-plausible — one fat cargo hop
       // used to discard the Yu Tung / Shun Tung fills too.
-      // OSRM-first: the airport's service-road maze defeats local picks.
-      const filled = await fillGtfsHopsOnRoads(poly, opts.signal, 80, online, null, true);
+      const filled = await fillGtfsHopsOnRoads(poly, opts.signal, 80, online);
       if (filled?.length >= 2) {
         if (lngLatBbox(poly).minLon > 113.9 && filled.some(pointOnHzmbWest)) {
           return null;
@@ -2017,27 +2016,19 @@ async function snapGtfsCorridor(poly, opts = {}) {
 
 /**
  * Replace long / colinear GTFS chords with a 2-point drive (roundabout
- * kerb, Yu Tung corner). Local street graph first; OSRM backup — or
- * OSRM-first on CLK, where the service-road maze makes local Dijkstra
- * picks unreliable. Local hops must hug the chord (tight lateral/length);
- * OSRM keeps the looser band. Ends must land on the requested endpoints.
+ * kerb, Yu Tung corner). Local street graph first — instant, offline,
+ * no rate limits; OSRM only as backup. Local hops must hug the chord
+ * (tight lateral/length + anchored ends, so a wrong-road pick is
+ * rejected rather than painted); OSRM keeps the looser band.
  *
  * @param {LngLat[]} poly
  * @param {AbortSignal} [signal]
  * @param {number} minHopM
  * @param {boolean} [online] false skips the OSRM backup
  * @param {{ filled?: boolean }} [stats] set true when any hop was replaced
- * @param {boolean} [preferOsrm] OSRM first (CLK), local fallback
  * @returns {Promise<LngLat[] | null>}
  */
-async function fillGtfsHopsOnRoads(
-  poly,
-  signal,
-  minHopM,
-  online = true,
-  stats = null,
-  preferOsrm = false,
-) {
+async function fillGtfsHopsOnRoads(poly, signal, minHopM, online = true, stats = null) {
   if (!poly || poly.length < 2) return null;
 
   /** @type {Array<{ i: number, j: number, a: LngLat, b: LngLat, chord: number }>} */
@@ -2126,9 +2117,9 @@ async function fillGtfsHopsOnRoads(
         return null;
       }
     };
-    return preferOsrm
-      ? (await osrmFill()) ?? (await localFill())
-      : (await localFill()) ?? (await osrmFill());
+    // WASM first, always — OSRM is the temporary replacement, never the
+    // primary (it 429s under load and dies offline).
+    return (await localFill()) ?? (await osrmFill());
   });
 
   /** @type {Map<number, LngLat[]>} */
