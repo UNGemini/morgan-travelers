@@ -149,8 +149,15 @@ export async function openOverridesPullRequest(opts) {
   const safeId = String(draft.id || `path_${Date.now()}`)
     .replace(/[^a-zA-Z0-9._-]+/g, "_")
     .slice(0, 80);
-  const branch = `contrib/${safeId}`.slice(0, 100);
-  const filePath = `pending/${safeId}.json`;
+  // Unique per submission: same-route resubmissions must never touch the
+  // same branch or pending file — the publish flow deletes pending files
+  // when promoting them, so a reused path conflicts (modify/delete) against
+  // main on every re-contribution. New unique files cannot conflict, and
+  // merge-pending.mjs publishes by the draft's own id, so the published
+  // bus-shapes/<id>.json still lands under the route identity.
+  const stamp = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14);
+  const branch = `contrib/${safeId}-${stamp}`.slice(0, 100);
+  const filePath = `pending/${safeId}.${stamp}.json`;
   const contentPath = filePath.split("/").map(encodeURIComponent).join("/");
   const bodyJson = JSON.stringify(draft, null, 2) + "\n";
   const contentB64 = b64encode(bodyJson);
