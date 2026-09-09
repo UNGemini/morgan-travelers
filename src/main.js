@@ -14955,6 +14955,22 @@ async function paintEtaRouteOnMap(route, stops, opts = {}) {
       .map((s) => [s.lon, s.lat]);
   }
 
+  // Departure-switch diagnostics: dump the exact stop list the markers are
+  // painted from, so variant cross-contamination is visible in the console.
+  if (etaHasDepartureSwitch(etaRouteDirections(route, { full: true }))) {
+    console.debug(
+      "[eta] paint stops",
+      route.id,
+      dir?.bound,
+      dir?.serviceType ?? "",
+      JSON.stringify(
+        (stops || [])
+          .filter((s) => Number.isFinite(s.lon) && Number.isFinite(s.lat))
+          .map((s) => [s.name?.slice(0, 18), Math.round(s.lon * 1e5) / 1e5, Math.round(s.lat * 1e5) / 1e5]),
+      ),
+    );
+  }
+
   const stopFeats = stops
     .filter(
       (s) => !s._polylineOnly && Number.isFinite(s.lon) && Number.isFinite(s.lat),
