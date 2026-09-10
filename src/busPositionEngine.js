@@ -909,9 +909,14 @@ export class BusPositionEngine {
    * collects a pile.
    *
    * A frequency fill (see freqAheadSynths) is only a placeholder for a train
-   * the feed cannot see yet, and a departed train is a dead-reckoned estimate
-   * whose row the feed has already dropped — both yield to a real marker
-   * within half a headway of them, and the feed wins over the estimate.
+   * the feed cannot see yet, so it yields to either of the other two within
+   * half a headway of it.
+   *
+   * A departed train outranks a feed row: it is the marker the user watched
+   * dwelling at the stop, and handing that train over to the row a station
+   * down the line changes the badge under them (the row and the estimate are
+   * the same train by construction, so they only collide when they are within
+   * a marker gap of each other).
    * @param {Array<{ d: number, etaT?: number, fill?: boolean, departed?: boolean }>} vehicles
    */
   collapseCoLocatedRail(vehicles) {
@@ -920,8 +925,8 @@ export class BusPositionEngine {
     const vAvg = this.ctx?.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr;
     const hw = Number(this.headwaySec) || 0;
     const takeoverM = Math.max(RAIL_MIN_GAP_M, (hw * vAvg) / 2);
-    // Feed rows first, then departed estimates, then fills.
-    const rank = (v) => (v.fill ? 2 : v.departed ? 1 : 0);
+    // Departed trains first (keep the watched marker), then feed rows, then fills.
+    const rank = (v) => (v.fill ? 2 : v.departed ? 0 : 1);
     const order = vehicles
       .filter((v) => Number.isFinite(v.d) && Number.isFinite(v.etaT))
       .sort((a, b) => rank(a) - rank(b) || a.etaT - b.etaT);
@@ -929,8 +934,12 @@ export class BusPositionEngine {
     const drop = new Set();
     for (const v of order) {
       const dup = kept.some((k) => {
-        const bothFeed = !k.fill && !k.departed && !v.fill && !v.departed;
-        const tol = bothFeed ? RAIL_MIN_GAP_M : takeoverM;
+        // Two markers of the same kind only collide when they are one train at
+        // the same place; across kinds the comparison is half a headway wide,
+        // so a single train is never drawn twice.
+        const sameKind =
+          (!!k.departed === !!v.departed) && (!!k.fill === !!v.fill);
+        const tol = sameKind ? RAIL_MIN_GAP_M : takeoverM;
         return Math.abs(k.d - v.d) <= tol;
       });
       if (dup) drop.add(v);
