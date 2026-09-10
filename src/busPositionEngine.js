@@ -96,6 +96,12 @@ const RAIL_V_MAX = 22;
 const RAIL_V_AVG = { mtr: 9, lrt: 6.5 };
 /** Station dwell added to each rail hop walked back (s). */
 const RAIL_DWELL_S = 25;
+/**
+ * "The feed says Now" band (s) for a rail row whose ETA sits at the station it
+ * came from: at the first station that is the train standing at the platform,
+ * and the only case where a row there is placed instead of dropped.
+ */
+const RAIL_PLATFORM_S = 90;
 /** Floor on a rail hop so two platforms in one station don't collapse. */
 const RAIL_MIN_HOP_S = 20;
 /**
@@ -856,6 +862,12 @@ export class BusPositionEngine {
       d = dPrev;
       i -= 1;
     }
+    // A budget that outlives the line is not a train behind this anchor: at
+    // the first station it is a departure still on the opposite leg, mid-line
+    // it is an ETA longer than the whole line. Nothing to place — except
+    // inside the "the feed says Now" band, where the train is standing at the
+    // station the row came from.
+    if (i === 0 && t > 0 && remainSec > RAIL_PLATFORM_S) return NaN;
     return Math.max(0, d);
   }
 
@@ -1150,16 +1162,16 @@ export class BusPositionEngine {
   /**
    * Stop indices whose ETA rows anchor the estimate.
    * Bus + fetchMore: nearest (±1, ±2) and every 5th stop.
-   * MTR + fetchMore: stations ≥ RAIL_FETCH_GAP_M apart, plus origin & last
-   *   (TCL/TML/AEL hops are kilometres, not 5-stop index steps).
+   * MTR + fetchMore: stations ≥ RAIL_FETCH_GAP_M apart, plus the origin, the
+   *   stop after it, and the stop before the terminus (TCL/TML/AEL hops are
+   *   kilometres, not 5-stop index steps).
    * MTR without fetchMore: board only — extras come from frequency + last train.
    *
-   * A station's feed lists the trains still upcoming there, so the two ends of
-   * the line go blind: the origin's rows are departures (trains on the other
-   * leg) and the terminus's are opposite-direction departures, which leaves
-   * the last hop — and everything that already passed the board stop — with
-   * no station to be listed at. Anchor the stops next to both ends so the
-   * whole line can fill in.
+   * A station's feed lists the trains still upcoming there, so the very ends
+   * of the line go blind: the origin's rows are departures (trains on the other
+   * leg) and the terminus's are opposite-direction departures, which leaves the
+   * last hop, and everything that already passed the board stop, with no
+   * station to be listed at.
    */
   anchorStopIndices(ctx) {
     const n = ctx.stops?.length || 0;
@@ -1170,10 +1182,15 @@ export class BusPositionEngine {
     const dists = ctx.stopDistM || [];
     if (rail) {
       if (ctx.fetchMore) {
-        set.add(n - 1);
-        if (n >= 2) set.add(n - 2);
+        // The terminus's own feed lists opposite-direction departures only
+        // (Tsuen Wan returns "DOWN dest CEN"), so it anchors nothing; the stop
+        // before it is what covers the last hop. The stop after the origin
+        // covers the trains that have just left it.
+        if (n >= 2) {
+          set.add(n - 2);
+          set.add(1);
+        }
         set.add(0);
-        if (n >= 2) set.add(1);
         const gapWalk = (from, to, step) => {
           let last = from;
           for (let i = from + step; step > 0 ? i <= to : i >= to; i += step) {
@@ -1974,6 +1991,10 @@ export class BusPositionEngine {
       const T = remainingSec(s.etaT, now);
       if (T > 0) {
         const d = this.walkBackFromDist(fromD, T);
+        // Rail rows whose ETA outlives the line have no place on it — see
+        // railProgressBack. They are still kept in this.synth so the next
+        // poll can re-anchor them.
+        if (!Number.isFinite(d)) continue;
         s.posD = d;
         out.push({
           id: `synth:${s.rank}`,
