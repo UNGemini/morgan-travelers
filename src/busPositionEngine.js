@@ -104,6 +104,8 @@ const RAIL_DWELL_S = 25;
 const RAIL_PLATFORM_S = 90;
 /** Floor on a rail hop so two platforms in one station don't collapse. */
 const RAIL_MIN_HOP_S = 20;
+/** A marker holds at the terminus this long before it leaves the board (s). */
+const RAIL_TERMINUS_S = 30;
 /**
  * Rail marker gap (m). Rail markers are ETA-anchored, so their spacing
  * already follows the headway — this only separates genuine overlaps (two
@@ -1498,21 +1500,24 @@ export class BusPositionEngine {
     if (extra <= 0) return [];
     const dirSign = endD >= boardD ? 1 : -1;
     const vAvg = ctx.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr;
-    const lo = Math.min(originD ?? endD, endD);
-    const hi = Math.max(originD ?? endD, endD);
     // Trains pass the board stop every headway: the last one went by at P, and
     // each earlier pass is another headway back. Anchoring on the pass time
     // (not on `now`) is what lets the fill keep rolling between polls.
     const hwMs = hw * 1000;
     const back = Math.ceil((t0 - now) / hwMs);
     const lastPass = t0 - back * hwMs;
+    const runToEndM = Math.abs(endD - boardD);
     const out = [];
     for (let k = 1; k <= extra; k++) {
       const passAt = lastPass - (k - 1) * hwMs;
       // Spaced one headway apart at the line's average speed — not at line
       // speed, which would overshoot the terminus.
-      const pos = boardD + dirSign * ((now - passAt) / 1000) * vAvg;
-      if (pos < lo || pos > hi) continue;
+      const runM = ((now - passAt) / 1000) * vAvg;
+      // A train that has reached the terminus is held there for the dwell and
+      // then taken off the board, so the marker clears instead of sticking at
+      // the end of the line.
+      if (runM > runToEndM + vAvg * RAIL_TERMINUS_S) continue;
+      const pos = boardD + dirSign * Math.min(runM, runToEndM);
       out.push({
         etaT: t0 + k * hwMs,
         dest,
@@ -1524,6 +1529,25 @@ export class BusPositionEngine {
       });
     }
     return out;
+  }
+
+  /**
+   * Where a fill train is now: it runs from the board stop at the line's
+   * average speed and waits at the terminus rather than overshooting it.
+   * @param {number} passAt epoch it passed the board stop
+   * @param {number} now
+   */
+  fillAheadDist(passAt, now) {
+    const ctx = this.ctx;
+    const boardDist = ctx?.stopDistM?.[ctx.boardStopIndex];
+    const endDist = ctx?.stopDistM?.[ctx.stops.length - 1];
+    if (!Number.isFinite(boardDist) || !Number.isFinite(endDist)) return NaN;
+    const runMaxM = Math.abs(endDist - boardDist);
+    const vAvg = ctx.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr;
+    const runM = Math.max(0, ((now - passAt) / 1000) * vAvg);
+    return (
+      boardDist + (endDist >= boardDist ? 1 : -1) * Math.min(runM, runMaxM)
+    );
   }
 
   /**
@@ -1937,7 +1961,6 @@ export class BusPositionEngine {
     // re-anchored at another stop (fetch-more / cached rows). Once a matched
     // ETA expires the trip dwells and drops out of the set automatically.
     const boardDist = ctx.stopDistM?.[ctx.boardStopIndex];
-    const fillDir = (ctx.stopDistM?.[ctx.stops.length - 1] ?? boardDist) >= boardDist ? 1 : -1;
     const schedArrAt = (pd, trip, d) => {
       const k = this.patternIdxForDist(pd, d);
       return k ? trip.startEpoch + (pd.offsRows[k.idx][1]) * 1000 : null;
@@ -2029,12 +2052,10 @@ export class BusPositionEngine {
       if (s.fixedD && Number.isFinite(s.d)) {
         // A fill runs on from where it passed the board stop, so the marker
         // keeps moving towards the terminus instead of waiting at the stop.
-        const d = Number.isFinite(s.passAt)
-          ? boardDist +
-            fillDir *
-              ((now - s.passAt) / 1000) *
-              (ctx.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr)
-          : s.d;
+        const ahead = Number.isFinite(s.passAt)
+          ? this.fillAheadDist(s.passAt, now)
+          : NaN;
+        const d = Number.isFinite(ahead) ? ahead : s.d;
         s.posD = d;
         out.push({
           id: `synth:${s.rank}`,
