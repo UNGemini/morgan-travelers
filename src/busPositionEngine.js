@@ -654,7 +654,20 @@ export class BusPositionEngine {
       }
       this.ctx.boardStopIndex = patch.boardStopIndex;
     }
-    if (patch.shape?.coords?.length >= 2) this.ctx.shape = patch.shape;
+    if (patch.shape?.coords?.length >= 2) {
+      // A different shape means a different distance frame: the adopted
+      // line (e.g. the WASM zoom-chord path) stretches/shifts along-m vs
+      // the shape cachePatterns projected onto, so pattern distances must
+      // be rebuilt or markers drift off the drawn path.
+      const c = patch.shape.coords;
+      const key = `${c.length}:${c[0]?.lon ?? ""},${c[0]?.lat ?? ""}`;
+      if (key !== this.shapeKey) {
+        this.ctx.shape = patch.shape;
+        this.cachePatterns();
+      } else {
+        this.ctx.shape = patch.shape;
+      }
+    }
     this.syncPatternBoard();
   }
 
@@ -1030,6 +1043,10 @@ export class BusPositionEngine {
         boardOffSec: boardIdx >= 0 ? rows[boardIdx][1] : 0,
       });
     }
+    const sc = ctx.shape?.coords;
+    this.shapeKey = sc
+      ? `${sc.length}:${sc[0]?.lon ?? ""},${sc[0]?.lat ?? ""}`
+      : "";
     console.info(
       "[buspos] schedule patterns",
       this.routeKey,
