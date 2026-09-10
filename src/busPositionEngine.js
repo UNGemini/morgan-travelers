@@ -106,6 +106,8 @@ const RAIL_PLATFORM_S = 90;
 const RAIL_MIN_HOP_S = 20;
 /** A marker holds at the terminus this long before it leaves the board (s). */
 const RAIL_TERMINUS_S = 30;
+/** Cap on rail trains kept running after their feed row expired. */
+const DEPARTED_MAX = 8;
 /**
  * Rail marker gap (m). Rail markers are ETA-anchored, so their spacing
  * already follows the headway — this only separates genuine overlaps (two
@@ -612,6 +614,13 @@ export class BusPositionEngine {
     this.constraints = new Map();
     /** @type {Array<{ rank: number, etaT: number, dest: string, arrD: number, arrAt: number }>} unmatched ETAs (synth buses) */
     this.synth = [];
+    /**
+     * Rail trains that finished their dwell and rolled on. Their feed row is
+     * gone the moment they arrive, so nothing re-creates them — without this
+     * the marker blinks out at the stop while a frequency fill appears further
+     * down the line. @type {Array<{ rank: number, fromD: number, passAt: number }>}
+     */
+    this.departed = [];
     /** @type {Map<string, { delaySec: number, arrD: number, arrAt: number, stopIdx: number, dwellEnd?: number }>} trip id → arrival bookkeeping (see updateTripState) */
     this.tripState = new Map();
     /** @type {Map<number, Array<any>>} stop index → raw (unnormalized) feed rows from the last poll — the dwell-release signal */
@@ -676,6 +685,7 @@ export class BusPositionEngine {
     this.etaMap.clear();
     this.constraints.clear();
     this.synth = [];
+    this.departed = [];
     this.tripState.clear();
     this.trafficIndex = null;
     this.lastEmit = null;
@@ -713,6 +723,7 @@ export class BusPositionEngine {
         this.tripEtas.clear();
         this.tripState.clear();
         this.synth = [];
+        this.departed = [];
       }
       this.ctx.boardStopIndex = patch.boardStopIndex;
     }
@@ -884,9 +895,10 @@ export class BusPositionEngine {
    * collects a pile.
    *
    * A frequency fill (see freqAheadSynths) is only a placeholder for a train
-   * the feed cannot see yet, so it yields to a real marker within half a
-   * headway of it.
-   * @param {Array<{ d: number, etaT?: number, fill?: boolean }>} vehicles
+   * the feed cannot see yet, and a departed train is a dead-reckoned estimate
+   * whose row the feed has already dropped — both yield to a real marker
+   * within half a headway of them, and the feed wins over the estimate.
+   * @param {Array<{ d: number, etaT?: number, fill?: boolean, departed?: boolean }>} vehicles
    */
   collapseCoLocatedRail(vehicles) {
     const rail = this.ctx?.op === "mtr" || this.ctx?.op === "lrt";
@@ -894,14 +906,16 @@ export class BusPositionEngine {
     const vAvg = this.ctx?.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr;
     const hw = Number(this.headwaySec) || 0;
     const takeoverM = Math.max(RAIL_MIN_GAP_M, (hw * vAvg) / 2);
+    // Feed rows first, then departed estimates, then fills.
+    const rank = (v) => (v.fill ? 2 : v.departed ? 1 : 0);
     const order = vehicles
       .filter((v) => Number.isFinite(v.d) && Number.isFinite(v.etaT))
-      .sort((a, b) => (a.fill ? 1 : 0) - (b.fill ? 1 : 0) || a.etaT - b.etaT);
+      .sort((a, b) => rank(a) - rank(b) || a.etaT - b.etaT);
     const kept = [];
     const drop = new Set();
     for (const v of order) {
       const dup = kept.some((k) => {
-        const bothFeed = !k.fill && !v.fill;
+        const bothFeed = !k.fill && !k.departed && !v.fill && !v.departed;
         const tol = bothFeed ? RAIL_MIN_GAP_M : takeoverM;
         return Math.abs(k.d - v.d) <= tol;
       });
@@ -1532,6 +1546,41 @@ export class BusPositionEngine {
   }
 
   /**
+   * Emit the rail trains that finished their dwell and rolled on: they keep
+   * their marker id and run at the line's average speed from the station they
+   * left, hold through the terminus dwell, then leave the board.
+   * @param {Array<object>} out vehicles to add to
+   * @param {number} now
+   */
+  advanceDepartedRail(out, now) {
+    if (!this.departed.length) return;
+    const ctx = this.ctx;
+    const boardDist = ctx?.stopDistM?.[ctx.boardStopIndex];
+    const endDist = ctx?.stopDistM?.[ctx.stops.length - 1];
+    if (!Number.isFinite(boardDist) || !Number.isFinite(endDist)) {
+      this.departed = [];
+      return;
+    }
+    const vAvg = ctx.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr;
+    const keep = [];
+    for (const dep of this.departed) {
+      const runMaxM = Math.abs(endDist - dep.fromD);
+      const runM = Math.max(0, ((now - dep.passAt) / 1000) * vAvg);
+      if (runM > runMaxM + vAvg * RAIL_TERMINUS_S) continue;
+      keep.push(dep);
+      out.push({
+        id: `synth:${dep.rank}`,
+        d: dep.fromD + (endDist >= dep.fromD ? 1 : -1) * Math.min(runM, runMaxM),
+        etaT: now,
+        departed: true,
+        confidence: CONF_ETA,
+        anchored: true,
+      });
+    }
+    this.departed = keep;
+  }
+
+  /**
    * Where a fill train is now: it runs from the board stop at the line's
    * average speed and waits at the terminus rather than overshooting it.
    * @param {number} passAt epoch it passed the board stop
@@ -1812,6 +1861,7 @@ export class BusPositionEngine {
   computePositions(now) {
     const ctx = this.ctx;
     if (!ctx) return;
+    const rail = ctx.op === "mtr" || ctx.op === "lrt";
     /** @type {Array<{ id: string, d: number, confidence: number, anchored: boolean }>} */
     const out = [];
     const trips = this.activeTrips(now);
@@ -2087,11 +2137,14 @@ export class BusPositionEngine {
         continue;
       }
       if (s.arrD < 0) {
-        s.arrD = boardDist;
+        // Hold it at the station the row came from — not always the board
+        // stop, since fetch-more anchors rows at stations down the line too.
+        s.arrD = fromD;
         s.arrAt = s.etaT + NOW_SLACK_MS;
       }
       const held = this.rowStillListed(ctx.boardStopIndex, s.etaT);
-      if (now < s.arrAt + (held ? DWELL_MAX_MS : DWELL_MS)) {
+      const dwellMs = held ? DWELL_MAX_MS : DWELL_MS;
+      if (now < s.arrAt + dwellMs) {
         out.push({
           id: `synth:${s.rank}`,
           d: s.arrD,
@@ -2099,11 +2152,26 @@ export class BusPositionEngine {
           confidence: CONF_ETA,
           anchored: true,
         });
+        continue;
+      }
+      // Dwell over: it rolls on. The feed dropped its row when it arrived, so
+      // nothing else would place it — hand it to the departed list and let the
+      // *same* marker keep running towards the terminus.
+      if (
+        rail &&
+        !this.departed.some((dep) => dep.rank === s.rank) &&
+        this.departed.length < DEPARTED_MAX
+      ) {
+        this.departed.push({
+          rank: s.rank,
+          fromD: s.arrD,
+          passAt: s.arrAt + dwellMs,
+        });
       }
     }
+    this.advanceDepartedRail(out, now);
     this.collapseCoLocatedRail(out);
     this.antiClump(out);
-    const rail = ctx.op === "mtr" || ctx.op === "lrt";
     if (rail && !(this.headwaySec >= HEADWAY_MIN_S)) {
       this.headwaySec = 240;
     }
