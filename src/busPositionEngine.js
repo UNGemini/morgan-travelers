@@ -86,8 +86,27 @@ import { MTR_PATTERNS } from "./data/mtrRuntime.js";
 const V_TYP = 8.3;
 /** Fastest metro hop (m/s, ~80 km/h) — min travel time = distance / this. */
 const RAIL_V_MAX = 22;
+/**
+ * Speed a rail train really averages over a hop, dwell included (m/s):
+ * TWL covers Central→Tsuen Wan in ~30 min, LRT hops are short but stop
+ * often. Walking an ETA budget back at line speed instead of this places
+ * every train several stations too far behind (a 3-minute train landed on
+ * Cheung Sha Wan instead of Mei Foo).
+ */
+const RAIL_V_AVG = { mtr: 9, lrt: 6.5 };
+/** Station dwell added to each rail hop walked back (s). */
+const RAIL_DWELL_S = 25;
 /** Floor on a rail hop so two platforms in one station don't collapse. */
 const RAIL_MIN_HOP_S = 20;
+/**
+ * Rail marker gap (m). Rail markers are ETA-anchored, so their spacing
+ * already follows the headway — this only separates genuine overlaps (two
+ * trains dwelling at one station), where a platform-length gap is enough.
+ * A headway-sized gap here would drag trains kilometres off their ETA.
+ */
+const RAIL_MIN_GAP_M = 400;
+/** A marker must not be drawn sitting this close to the next stop (m). */
+const NEXT_STOP_GUARD_M = 150;
 /** Fetch-more: extra MTR stations when the gap from the last fetch is this far. */
 const RAIL_FETCH_GAP_M = 3500;
 /**
@@ -764,14 +783,16 @@ export class BusPositionEngine {
 
   /**
    * Place an MTR/LRT train by progress along the rail polyline.
-   * Min travel Tmin = max(RAIL_MIN_HOP_S, D / RAIL_V_MAX). Average speed on
-   * the current hop is D / max(ETA remaining, Tmin). If remaining time
-   * exceeds Tmin the hop is already behind the train — consume Tmin and
-   * walk the previous hop. Never uses the road traffic speed map.
+   * Min travel Tmin = max(RAIL_MIN_HOP_S, D / RAIL_V_AVG) + dwell, i.e. the
+   * hop at the speed the line really averages. Average speed on the current
+   * hop is D / max(ETA remaining, Tmin). If remaining time exceeds Tmin the
+   * hop is already behind the train — consume Tmin and walk the previous
+   * hop. Never uses the road traffic speed map.
    */
   railProgressBack(fromDist, remainSec) {
     const dists = this.ctx?.stopDistM;
     if (!dists?.length) return Math.max(0, fromDist);
+    const vAvg = this.ctx?.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr;
     let i = dists.length - 1;
     while (i > 0 && dists[i] > fromDist + 0.5) i -= 1;
     let d = Math.min(fromDist, dists[i] ?? fromDist);
@@ -782,7 +803,9 @@ export class BusPositionEngine {
       const span = Math.max(1e-3, dCur - dPrev);
       const fromOnHop = Math.max(0, Math.min(1, (d - dPrev) / span));
       const D = span * fromOnHop;
-      const tMin = Math.max(RAIL_MIN_HOP_S * fromOnHop, D / RAIL_V_MAX);
+      const tMin =
+        Math.max(RAIL_MIN_HOP_S * fromOnHop, D / vAvg) +
+        RAIL_DWELL_S * fromOnHop;
       if (tMin <= 1e-6) {
         d = dPrev;
         i -= 1;
@@ -816,14 +839,11 @@ export class BusPositionEngine {
       return Infinity;
     })();
     const rail = ctx?.op === "mtr" || ctx?.op === "lrt";
-    // Rail: separate trains by their real headway distance, not a bare
-    // 150 m — on a 2-minute metro headway the model can legitimately
-    // dwell-queue two trains at one station, and 150 m renders as badges
-    // stacked on top of each other. hw × vmax / 2 ≈ half the physical gap.
-    const hw = Number(this.headwaySec) || 0;
-    const minM = rail
-      ? Math.max(150, hw > 0 ? hw * RAIL_V_MAX * 0.5 : 0)
-      : CLUMP_MIN_M;
+    // Rail markers are ETA-anchored, so their spacing already follows the
+    // headway — this only separates genuine overlaps (two trains dwelling at
+    // one station), where a platform-length gap is enough.
+    const minM = rail ? RAIL_MIN_GAP_M : CLUMP_MIN_M;
+    const capM = rail ? NEXT_STOP_GUARD_M : CLUMP_MIN_M;
     const sorted = [...vehicles].filter((v) => Number.isFinite(v.d));
     sorted.sort((a, b) => a.d - b.d);
     for (let i = sorted.length - 1; i > 0; i--) {
@@ -840,8 +860,8 @@ export class BusPositionEngine {
       if (!Number.isFinite(v.d)) continue;
       if (Number.isFinite(nextStopDist) && v.d > boardDist - 0.5) {
         /* at/after board: leave */
-      } else if (Number.isFinite(nextStopDist) && v.d >= nextStopDist - minM) {
-        v.d = Math.max(0, nextStopDist - minM);
+      } else if (Number.isFinite(nextStopDist) && v.d >= nextStopDist - capM) {
+        v.d = Math.max(0, nextStopDist - capM);
       }
     }
   }
@@ -1356,7 +1376,9 @@ export class BusPositionEngine {
     );
     if (extra <= 0) return [];
     const dirSign = endD >= boardD ? 1 : -1;
-    const spacing = hw * RAIL_V_MAX;
+    // Trains sit one headway apart at the line's average speed, not at line
+    // speed — otherwise the fill-ahead markers overshoot the terminus.
+    const spacing = hw * (ctx.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr);
     const out = [];
     for (let k = 1; k <= extra; k++) {
       const pos = boardD + dirSign * k * spacing;
