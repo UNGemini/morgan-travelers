@@ -792,7 +792,7 @@ export class BusPositionEngine {
   railProgressBack(fromDist, remainSec) {
     const dists = this.ctx?.stopDistM;
     if (!dists?.length) return Math.max(0, fromDist);
-    const vAvg = this.ctx?.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr;
+    const hopV = this.ctx?.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr;
     let i = dists.length - 1;
     while (i > 0 && dists[i] > fromDist + 0.5) i -= 1;
     let d = Math.min(fromDist, dists[i] ?? fromDist);
@@ -804,7 +804,7 @@ export class BusPositionEngine {
       const fromOnHop = Math.max(0, Math.min(1, (d - dPrev) / span));
       const D = span * fromOnHop;
       const tMin =
-        Math.max(RAIL_MIN_HOP_S * fromOnHop, D / vAvg) +
+        Math.max(RAIL_MIN_HOP_S * fromOnHop, D / hopV) +
         RAIL_DWELL_S * fromOnHop;
       if (tMin <= 1e-6) {
         d = dPrev;
