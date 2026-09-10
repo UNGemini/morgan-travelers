@@ -47,6 +47,29 @@ function nameMatches(text, needles) {
 }
 
 /**
+ * True when a contribution was drawn for the query's OPPOSITE bound — its
+ * OD is the clean swap (or its direction letter contradicts). Such a shape
+ * must not serve this bound: the direction-specific approaches differ, and
+ * the monotonic stop projection then piles this bound's stops at one end of
+ * the path (E36A To-Tung-Chung drawing the Yuen Long-bound contribution).
+ * @param {object} r contribution / published shape
+ * @param {string} from query origin label
+ * @param {string} to query destination label
+ * @param {string} [bound] query direction ("O"/"I", optionally "O|2")
+ */
+function overrideIsReverseBound(r, from, to, bound) {
+  const rB = String(r?.direction || "").toUpperCase().split("|")[0];
+  const qB = String(bound || "").toUpperCase().split("|")[0];
+  if ((rB === "O" || rB === "I") && (qB === "O" || qB === "I")) {
+    return rB !== qB;
+  }
+  if (!r?.from_match?.length || !r?.to_match?.length) return false;
+  // Circular contributions share both ends — never "reversed"
+  if (nameMatches(r.from_match[0], r.to_match[0])) return false;
+  return nameMatches(to, r.from_match) && nameMatches(from, r.to_match);
+}
+
+/**
  * @param {object} opt route option from RAPTOR
  */
 function routeBlob(opt) {
@@ -129,6 +152,13 @@ export function matchBusShapeOverride(opt) {
     if (!agencyOk && exactRoute) {
       // Still allow only if agency completely unknown on either side
       if (r.agency && b.agency) continue;
+    }
+
+    // Opposite-bound contributions must not serve this bound (see
+    // overrideIsReverseBound) — the "single published shape for this route
+    // number" shortcut below used to hand them over anyway.
+    if (overrideIsReverseBound(r, b.from, b.to, opt?.bound || opt?.direction)) {
+      continue;
     }
 
     if (Array.isArray(r.route_id_match) && r.route_id_match.length) {
@@ -497,6 +527,11 @@ export function matchBusShapeForRoute(query) {
     const rShort = String(r.route_short_name || "").trim().toUpperCase();
     if (!short || !rShort || rShort !== short) continue;
 
+    // Opposite-bound contributions must not serve this bound (their
+    // direction-specific approaches differ) — the single-shape fallback
+    // below used to apply them to both bounds.
+    if (overrideIsReverseBound(r, from, to, query.direction)) continue;
+
     let score = 40; // route number match
 
     if (agency) {
@@ -561,6 +596,7 @@ export function matchBusShapeForRoute(query) {
       }
       const rShort = String(r.route_short_name || "").trim().toUpperCase();
       if (rShort !== short) return false;
+      if (overrideIsReverseBound(r, from, to, query.direction)) return false;
       if (!agency || !r.agency) return true;
       const ag = String(r.agency).toUpperCase();
       return (
