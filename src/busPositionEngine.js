@@ -860,26 +860,31 @@ export class BusPositionEngine {
   }
 
   /**
-   * Every rail row whose walk-back runs off the start of the line clamps to
-   * distance 0 — trains that have not entered the corridor yet, which is
-   * every row fetched at the origin (and any row whose ETA exceeds the whole
-   * line). Keep the frontmost and drop the rest: a terminus otherwise
-   * collects a stack of badges on one point.
-   * @param {Array<{ d: number }>} vehicles
+   * Rail feed rows carry no train id, so one train listed at two stations
+   * arrives as two synthetic vehicles whose walk-backs land within a few
+   * hundred metres of each other — and every row whose ETA runs past the
+   * start of the line clamps onto the origin. Keep the earliest ETA (its
+   * station is the nearest, so its walk-back is the tightest) and drop any
+   * marker sitting closer than a marker gap to one already kept: a duplicate
+   * badge that close reads as an extra train, and a terminus otherwise
+   * collects a pile.
+   * @param {Array<{ d: number, etaT?: number }>} vehicles
    */
-  collapseOriginStack(vehicles) {
+  collapseCoLocatedRail(vehicles) {
     const rail = this.ctx?.op === "mtr" || this.ctx?.op === "lrt";
     if (!rail) return;
-    let keep = null;
-    for (const v of vehicles) {
-      if (!Number.isFinite(v.d) || v.d > RAIL_MIN_GAP_M) continue;
-      if (!keep || v.d > keep.d) keep = v;
+    const order = vehicles
+      .filter((v) => Number.isFinite(v.d) && Number.isFinite(v.etaT))
+      .sort((a, b) => a.etaT - b.etaT);
+    const kept = [];
+    const drop = new Set();
+    for (const v of order) {
+      if (kept.some((k) => Math.abs(k.d - v.d) <= RAIL_MIN_GAP_M)) drop.add(v);
+      else kept.push(v);
     }
-    if (!keep) return;
+    if (!drop.size) return;
     for (let i = vehicles.length - 1; i >= 0; i--) {
-      const v = vehicles[i];
-      if (v === keep) continue;
-      if (Number.isFinite(v.d) && v.d <= RAIL_MIN_GAP_M) vehicles.splice(i, 1);
+      if (drop.has(vehicles[i])) vehicles.splice(i, 1);
     }
   }
 
@@ -1949,6 +1954,7 @@ export class BusPositionEngine {
         out.push({
           id: `synth:${s.rank}`,
           d: s.d,
+          etaT: s.etaT,
           confidence: CONF_ETA,
           anchored: true,
         });
@@ -1963,6 +1969,7 @@ export class BusPositionEngine {
         out.push({
           id: `synth:${s.rank}`,
           d,
+          etaT: s.etaT,
           confidence: CONF_ETA,
           anchored: true,
         });
@@ -1977,12 +1984,13 @@ export class BusPositionEngine {
         out.push({
           id: `synth:${s.rank}`,
           d: s.arrD,
+          etaT: s.etaT,
           confidence: CONF_ETA,
           anchored: true,
         });
       }
     }
-    this.collapseOriginStack(out);
+    this.collapseCoLocatedRail(out);
     this.antiClump(out);
     const rail = ctx.op === "mtr" || ctx.op === "lrt";
     if (rail && !(this.headwaySec >= HEADWAY_MIN_S)) {
