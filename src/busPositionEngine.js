@@ -338,15 +338,55 @@ function mtrHeadwayInfo(ctx, now) {
   return { hw, maxPerHour, lastMins, pat };
 }
 
-/** Metro cruise used to match the same train across successive stations. */
-const RAIL_V_TYP = 16;
+/** Slack on a rail "same train" match, on top of the travel-time model (s). */
+const RAIL_DEDUPE_SLACK_S = 45;
 
 /**
- * MTR/LRT list the same train at every station. Collapse rows whose
- * along-track gap and ETA delta match one moving train.
- * @param {Array<{ etaT: number, dest: string, d: number }>} rows
+ * Travel time between two along-track distances, dwell included: the gap at
+ * the line's average speed plus one dwell per stop between the two.
+ * @param {number} d0 @param {number} d1 @param {number[]} [dists] @param {number} vAvg
  */
-function dedupeRailSynthRows(rows) {
+function railTravelSec(d0, d1, dists, vAvg) {
+  const dd = Math.abs(d1 - d0);
+  if (!(dd > 0)) return 0;
+  const lo = Math.min(d0, d1);
+  const hi = Math.max(d0, d1);
+  let hops = 0;
+  for (const d of dists || []) {
+    if (d > lo + 0.5 && d < hi - 0.5) hops += 1;
+  }
+  return dd / vAvg + RAIL_DWELL_S * hops;
+}
+
+/**
+ * This row's ETA belongs to the same train as `t`'s? The farther station's
+ * ETA must be LATER by the travel time between the two, dwell included.
+ */
+function railSameTrain(r, t, dists, vAvg) {
+  const rd = Number.isFinite(r.d) ? r.d : 0;
+  const td = Number.isFinite(t.d) ? t.d : 0;
+  const nearer = rd <= td ? r : t;
+  const farther = nearer === r ? t : r;
+  // Minute-rounded feeds can report the farther station level with or a
+  // hair before the nearer one; anything beyond that is not one train.
+  const dt = (farther.etaT - nearer.etaT) / 1000;
+  if (dt < -RAIL_DEDUPE_SLACK_S) return false;
+  const expect = railTravelSec(nearer.d || 0, farther.d || 0, dists, vAvg);
+  return Math.abs(dt - expect) <= RAIL_DEDUPE_SLACK_S + expect * 0.2;
+}
+
+/**
+ * MTR/LRT list the same train at every station. Collapse rows that describe
+ * one moving train. The travel model matters: an ETA delta walked at line
+ * speed, with slack scaled by the gap, made rows from stations kilometres
+ * apart look like one train — with fetch-more the trains approaching the
+ * board stop were swallowed by far rows at the line's origin, and the markers
+ * left on the map contradicted the ETA cards.
+ * @param {Array<{ etaT: number, dest: string, d: number }>} rows
+ * @param {number[]} [dists] along-track stop distances (counts dwell stops)
+ * @param {number} [vAvg] line average speed (m/s)
+ */
+function dedupeRailSynthRows(rows, dists, vAvg = RAIL_V_AVG.mtr) {
   if (!rows?.length) return [];
   if (rows.length === 1) return rows;
   const groups = new Map();
@@ -362,12 +402,7 @@ function dedupeRailSynthRows(rows) {
     );
     const kept = [];
     for (const r of list) {
-      const mate = kept.find((t) => {
-        const dd = Math.abs((r.d || 0) - (t.d || 0));
-        const dt = Math.abs(r.etaT - t.etaT) / 1000;
-        const expect = dd / RAIL_V_TYP;
-        return Math.abs(dt - expect) < 75 + expect * 0.5;
-      });
+      const mate = kept.find((t) => railSameTrain(r, t, dists, vAvg));
       if (!mate) {
         kept.push({ ...r });
       } else if (r.etaT < mate.etaT) {
@@ -1298,7 +1333,13 @@ export class BusPositionEngine {
           rows.push({ etaT: eta.t, dest: eta.dest, d });
         }
       }
-      synthRows.push(...dedupeRailSynthRows(rows));
+      synthRows.push(
+        ...dedupeRailSynthRows(
+          rows,
+          ctx.stopDistM,
+          ctx.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr,
+        ),
+      );
       if (!ctx.fetchMore) {
         synthRows.push(...this.freqAheadSynths(ctx, synthRows, now));
       }
