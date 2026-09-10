@@ -860,6 +860,30 @@ export class BusPositionEngine {
   }
 
   /**
+   * Every rail row whose walk-back runs off the start of the line clamps to
+   * distance 0 — trains that have not entered the corridor yet, which is
+   * every row fetched at the origin (and any row whose ETA exceeds the whole
+   * line). Keep the frontmost and drop the rest: a terminus otherwise
+   * collects a stack of badges on one point.
+   * @param {Array<{ d: number }>} vehicles
+   */
+  collapseOriginStack(vehicles) {
+    const rail = this.ctx?.op === "mtr" || this.ctx?.op === "lrt";
+    if (!rail) return;
+    let keep = null;
+    for (const v of vehicles) {
+      if (!Number.isFinite(v.d) || v.d > RAIL_MIN_GAP_M) continue;
+      if (!keep || v.d > keep.d) keep = v;
+    }
+    if (!keep) return;
+    for (let i = vehicles.length - 1; i >= 0; i--) {
+      const v = vehicles[i];
+      if (v === keep) continue;
+      if (Number.isFinite(v.d) && v.d <= RAIL_MIN_GAP_M) vehicles.splice(i, 1);
+    }
+  }
+
+  /**
    * Along-track spacer: rear vehicle is pushed back so the gap is ≥ CLUMP_MIN_M.
    * Also cap a marker so it cannot sit on/past the next stop while still in slack.
    * @param {Array<{ d: number }>} vehicles
@@ -1958,6 +1982,7 @@ export class BusPositionEngine {
         });
       }
     }
+    this.collapseOriginStack(out);
     this.antiClump(out);
     const rail = ctx.op === "mtr" || ctx.op === "lrt";
     if (rail && !(this.headwaySec >= HEADWAY_MIN_S)) {
