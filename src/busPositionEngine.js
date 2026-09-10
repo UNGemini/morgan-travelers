@@ -1153,6 +1153,13 @@ export class BusPositionEngine {
    * MTR + fetchMore: stations ≥ RAIL_FETCH_GAP_M apart, plus origin & last
    *   (TCL/TML/AEL hops are kilometres, not 5-stop index steps).
    * MTR without fetchMore: board only — extras come from frequency + last train.
+   *
+   * A station's feed lists the trains still upcoming there, so the two ends of
+   * the line go blind: the origin's rows are departures (trains on the other
+   * leg) and the terminus's are opposite-direction departures, which leaves
+   * the last hop — and everything that already passed the board stop — with
+   * no station to be listed at. Anchor the stops next to both ends so the
+   * whole line can fill in.
    */
   anchorStopIndices(ctx) {
     const n = ctx.stops?.length || 0;
@@ -1164,7 +1171,9 @@ export class BusPositionEngine {
     if (rail) {
       if (ctx.fetchMore) {
         set.add(n - 1);
-        if (b > 0) set.add(0);
+        if (n >= 2) set.add(n - 2);
+        set.add(0);
+        if (n >= 2) set.add(1);
         const gapWalk = (from, to, step) => {
           let last = from;
           for (let i = from + step; step > 0 ? i <= to : i >= to; i += step) {
