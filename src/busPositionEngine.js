@@ -880,18 +880,30 @@ export class BusPositionEngine {
    * marker sitting closer than a marker gap to one already kept: a duplicate
    * badge that close reads as an extra train, and a terminus otherwise
    * collects a pile.
-   * @param {Array<{ d: number, etaT?: number }>} vehicles
+   *
+   * A frequency fill (see freqAheadSynths) is only a placeholder for a train
+   * the feed cannot see yet, so it yields to a real marker within half a
+   * headway of it.
+   * @param {Array<{ d: number, etaT?: number, fill?: boolean }>} vehicles
    */
   collapseCoLocatedRail(vehicles) {
     const rail = this.ctx?.op === "mtr" || this.ctx?.op === "lrt";
     if (!rail) return;
+    const vAvg = this.ctx?.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr;
+    const hw = Number(this.headwaySec) || 0;
+    const takeoverM = Math.max(RAIL_MIN_GAP_M, (hw * vAvg) / 2);
     const order = vehicles
       .filter((v) => Number.isFinite(v.d) && Number.isFinite(v.etaT))
-      .sort((a, b) => a.etaT - b.etaT);
+      .sort((a, b) => (a.fill ? 1 : 0) - (b.fill ? 1 : 0) || a.etaT - b.etaT);
     const kept = [];
     const drop = new Set();
     for (const v of order) {
-      if (kept.some((k) => Math.abs(k.d - v.d) <= RAIL_MIN_GAP_M)) drop.add(v);
+      const dup = kept.some((k) => {
+        const bothFeed = !k.fill && !v.fill;
+        const tol = bothFeed ? RAIL_MIN_GAP_M : takeoverM;
+        return Math.abs(k.d - v.d) <= tol;
+      });
+      if (dup) drop.add(v);
       else kept.push(v);
     }
     if (!drop.size) return;
@@ -1302,6 +1314,10 @@ export class BusPositionEngine {
       } else {
         const info = mtrHeadwayInfo(ctx, now);
         this.headwaySec = info.hw;
+        // The band's nominal headway is a floor, not what the line is doing:
+        // take the tightest gap the board stop's own feed shows, so the trains
+        // filled in ahead of it are spaced like the service actually running.
+        this.observeEtaHeadway(boardRows);
       }
       this.matchAnchors(ctx, stopEtas, now);
       this.hasPolled = true;
@@ -1395,9 +1411,16 @@ export class BusPositionEngine {
           ctx.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr,
         ),
       );
-      if (!ctx.fetchMore) {
-        synthRows.push(...this.freqAheadSynths(ctx, synthRows, now));
-      }
+      // The board stop's own arrivals seed the chain of trains ahead of it;
+      // only its rows count as "live" for that, or the far stations' rows
+      // would eat the spare slots.
+      const boardList = stopEtas.get(ctx.boardStopIndex) || [];
+      synthRows.push(
+        ...this.freqAheadSynths(ctx, synthRows, now, {
+          count: boardList.length,
+          firstT: boardList[0]?.t,
+        }),
+      );
     }
     this.synth = this.reidentifySynth(synthRows, now);
     this.updateTripState(trips, prevConstraints, now);
@@ -1439,58 +1462,79 @@ export class BusPositionEngine {
   }
 
   /**
-   * Stable identity for synthetic buses across polls. Ranks were positional,
-   * so when the soonest synth arrived the next bus inherited its rank and the
-   * marker glided onto the wrong bus. Re-matching keeps a rank on the same
-   * bus: same destination wins, otherwise the nearest ETA; fresh ranks stay
-   * monotonic so a live marker's id is never recycled. Arrived synths are
-   * kept through their dwell at the stop, then dropped (the feed dropped
-   * their row anyway).
+   * Trains ahead of the board stop — the stretch the board stop's feed cannot
+   * list, because they have already passed it. They are spaced by the headway
+   * the board stop's own feed shows and dead-reckoned forward from the moment
+   * each passed the board stop, so they keep running towards the terminus
+   * instead of sitting still, and a real feed row from a station down the line
+   * replaces its placeholder (see collapseCoLocatedRail).
    */
-  /**
-   * When fetch-more is off, place extra trains ahead of the board stop using
-   * line headway and max trains/hour, clipped by last-train time so we don't
-   * invent ghosts after service ends.
-   */
-  freqAheadSynths(ctx, liveRows, now) {
+  freqAheadSynths(ctx, liveRows, now, board) {
     const info = mtrHeadwayInfo(ctx, now);
-    const hw = info.hw;
-    const maxPerHour = info.maxPerHour;
+    const hw = Math.max(
+      60,
+      Math.min(info.hw, Number(this.headwaySec) || info.hw),
+    );
+    const maxPerHour = Math.max(1, Math.round(3600 / hw));
     const mins = hkServiceMins(now);
     const remainServiceSec = Math.max(0, (info.lastMins - mins) * 60);
     const boardD = ctx.stopDistM?.[ctx.boardStopIndex];
     const endD = ctx.stopDistM?.[ctx.stops.length - 1];
+    const originD = ctx.stopDistM?.[0];
     if (!Number.isFinite(boardD) || !Number.isFinite(endD) || hw < 60) {
       return [];
     }
+    // The chain hangs off the board stop's own next arrival: everything ahead
+    // of it passed one headway earlier per place.
+    const t0 = Number(board?.firstT);
+    if (!Number.isFinite(t0)) return [];
     if (remainServiceSec < hw * 0.5) return [];
     const dest = String(liveRows[0]?.dest || ctx.headsign || "");
-    const liveN = liveRows.length;
+    const liveN = board?.count ?? liveRows.length;
     const extra = Math.max(
       0,
       Math.min(maxPerHour - liveN, Math.floor(remainServiceSec / hw) - liveN),
     );
     if (extra <= 0) return [];
     const dirSign = endD >= boardD ? 1 : -1;
-    // Trains sit one headway apart at the line's average speed, not at line
-    // speed — otherwise the fill-ahead markers overshoot the terminus.
-    const spacing = hw * (ctx.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr);
+    const vAvg = ctx.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr;
+    const lo = Math.min(originD ?? endD, endD);
+    const hi = Math.max(originD ?? endD, endD);
+    // Trains pass the board stop every headway: the last one went by at P, and
+    // each earlier pass is another headway back. Anchoring on the pass time
+    // (not on `now`) is what lets the fill keep rolling between polls.
+    const hwMs = hw * 1000;
+    const back = Math.ceil((t0 - now) / hwMs);
+    const lastPass = t0 - back * hwMs;
     const out = [];
     for (let k = 1; k <= extra; k++) {
-      const pos = boardD + dirSign * k * spacing;
-      if (dirSign > 0 && pos >= endD - 80) break;
-      if (dirSign < 0 && pos <= endD + 80) break;
+      const passAt = lastPass - (k - 1) * hwMs;
+      // Spaced one headway apart at the line's average speed — not at line
+      // speed, which would overshoot the terminus.
+      const pos = boardD + dirSign * ((now - passAt) / 1000) * vAvg;
+      if (pos < lo || pos > hi) continue;
       out.push({
-        etaT: now + k * hw * 1000,
+        etaT: t0 + k * hwMs,
         dest,
         d: pos,
         posD: pos,
         fixedD: true,
+        fill: true,
+        passAt,
       });
     }
     return out;
   }
 
+  /**
+   * Stable identity for synthetic buses across polls. Ranks were positional,
+   * so when the soonest synth arrived the next bus inherited its rank and the
+   * marker glided onto the wrong bus. Re-matching keeps a rank on the same
+   * bus: same destination wins, otherwise the nearest position; fresh ranks
+   * stay monotonic so a live marker's id is never recycled. Arrived synths are
+   * kept through their dwell at the stop, then dropped (the feed dropped
+   * their row anyway).
+   */
   reidentifySynth(rows, now) {
     const prev = this.synth;
     const livePrev = [];
@@ -1550,6 +1594,10 @@ export class BusPositionEngine {
         d: r.d,
         posD: impliedPos(r),
         fixedD: !!r.fixedD,
+        fill: !!r.fill,
+        // A fill keeps its original pass time — it is the same train rolling
+        // on, and re-deriving it from the feed each poll would restart it.
+        passAt: r.fill && s.fill ? s.passAt : r.passAt,
       });
     }
     for (let j = 0; j < rows.length; j++) {
@@ -1564,6 +1612,8 @@ export class BusPositionEngine {
         d: r.d,
         posD: impliedPos(r),
         fixedD: !!r.fixedD,
+        fill: !!r.fill,
+        passAt: r.passAt,
       });
     }
     let nextRank = 1;
@@ -1887,6 +1937,7 @@ export class BusPositionEngine {
     // re-anchored at another stop (fetch-more / cached rows). Once a matched
     // ETA expires the trip dwells and drops out of the set automatically.
     const boardDist = ctx.stopDistM?.[ctx.boardStopIndex];
+    const fillDir = (ctx.stopDistM?.[ctx.stops.length - 1] ?? boardDist) >= boardDist ? 1 : -1;
     const schedArrAt = (pd, trip, d) => {
       const k = this.patternIdxForDist(pd, d);
       return k ? trip.startEpoch + (pd.offsRows[k.idx][1]) * 1000 : null;
@@ -1976,11 +2027,20 @@ export class BusPositionEngine {
     // (same rule as real trips), then drops (the feed dropped its row anyway).
     for (const s of this.synth) {
       if (s.fixedD && Number.isFinite(s.d)) {
-        s.posD = s.d;
+        // A fill runs on from where it passed the board stop, so the marker
+        // keeps moving towards the terminus instead of waiting at the stop.
+        const d = Number.isFinite(s.passAt)
+          ? boardDist +
+            fillDir *
+              ((now - s.passAt) / 1000) *
+              (ctx.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr)
+          : s.d;
+        s.posD = d;
         out.push({
           id: `synth:${s.rank}`,
-          d: s.d,
+          d,
           etaT: s.etaT,
+          fill: !!s.fill,
           confidence: CONF_ETA,
           anchored: true,
         });
