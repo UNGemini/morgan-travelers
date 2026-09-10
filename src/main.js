@@ -15007,14 +15007,16 @@ async function paintEtaRouteOnMap(route, stops, opts = {}) {
   // stops onto the drawn polyline (same projection the trip plan uses). Display
   // only — official coords / identity stay; stops far from the line keep their
   // official position (parallel-road guard). Contributed visual_stops win.
-  if (lineCoords.length >= 2) {
+  // Rail is exempt: MTR/LRT station coords are authoritative, and the drawn
+  // line can be a chord/road fallback — projecting stations onto it drags
+  // them onto nearby roads (Kwai Hing onto Tai Wo Hau Road).
+  if (lineCoords.length >= 2 && !isRail) {
     try {
       const line = lineCoords.map((c) => ({
         lon: Number(c[0]),
         lat: Number(c[1]),
       }));
-      const isRailKind = route.kind === "mtr" || route.kind === "lrt";
-      const maxErr = isRailKind ? PLATFORM_SNAP_MAX_M : STOP_SNAP_MAX_M;
+      const maxErr = STOP_SNAP_MAX_M;
       const targets = stopFeats
         .map((f, i) => ({
           f,
