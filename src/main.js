@@ -15566,8 +15566,8 @@ async function renderEtaRouteDetailBody(route, ctx) {
         const isEtaStop = i === boardIndex;
         const isBefore = i < boardIndex;
         const reach = reachMins[i];
-        const reachT =
-          reach != null ? Date.now() + Math.max(0, reach) * 60_000 : null;
+        // Negative reach (stops the bus already passed) is valid — keep it
+        const reachT = reach != null ? Date.now() + reach * 60_000 : null;
         let fareHkd = null;
         if (isBusFamily && fareBaseOpt && !isLast) {
           fareHkd = estimateBusBoardFare(fareBaseOpt, named, i, ticket);
@@ -15967,7 +15967,7 @@ async function refreshEtaRouteDetailEta() {
       const i = Number(el.dataset.etaStopIdx);
       const m = reach[i];
       if (!Number.isFinite(m)) continue;
-      el.dataset.etaT = String(Date.now() + Math.max(0, m) * 60_000);
+      el.dataset.etaT = String(Date.now() + m * 60_000);
     }
   } catch {
     /* keep the previous baseline — next tick still counts down */
@@ -15992,11 +15992,12 @@ setInterval(() => {
   const now = Date.now();
   let soonest = Infinity;
   let soonestEl = null;
-  // Stop-list reach labels tick down from their absolute ETA timestamps
+  // Stop-list reach labels tick down from their absolute ETA timestamps.
+  // Negatives are valid (the bus already passed that stop on the loop).
   for (const el of document.querySelectorAll(".rt-stop-eta-mins[data-eta-t]")) {
     const t = Number(el.dataset.etaT || 0);
     if (!Number.isFinite(t) || t <= 0) continue;
-    const mins = Math.max(0, Math.round((t - now) / 60_000));
+    const mins = Math.round((t - now) / 60_000);
     const fare = el.dataset.etaFare;
     el.textContent = formatStopReachLabel(
       mins,
