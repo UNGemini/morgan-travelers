@@ -816,7 +816,14 @@ export class BusPositionEngine {
       return Infinity;
     })();
     const rail = ctx?.op === "mtr" || ctx?.op === "lrt";
-    const minM = rail ? 150 : CLUMP_MIN_M;
+    // Rail: separate trains by their real headway distance, not a bare
+    // 150 m — on a 2-minute metro headway the model can legitimately
+    // dwell-queue two trains at one station, and 150 m renders as badges
+    // stacked on top of each other. hw × vmax / 2 ≈ half the physical gap.
+    const hw = Number(this.headwaySec) || 0;
+    const minM = rail
+      ? Math.max(150, hw > 0 ? hw * RAIL_V_MAX * 0.5 : 0)
+      : CLUMP_MIN_M;
     const sorted = [...vehicles].filter((v) => Number.isFinite(v.d));
     sorted.sort((a, b) => a.d - b.d);
     for (let i = sorted.length - 1; i > 0; i--) {
