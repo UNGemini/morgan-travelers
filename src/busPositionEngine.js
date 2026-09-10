@@ -109,6 +109,12 @@ const RAIL_TERMINUS_S = 30;
 /** Cap on rail trains kept running after their feed row expired. */
 const DEPARTED_MAX = 8;
 /**
+ * Rail synth treatments that hand a train over to the departed list once its
+ * feed row goes: the row disappears when the train arrives, so it must be
+ * remembered this far out or the handoff never happens (s).
+ */
+const RAIL_PENDING_S = 120;
+/**
  * Rail marker gap (m). Rail markers are ETA-anchored, so their spacing
  * already follows the headway — this only separates genuine overlaps (two
  * trains dwelling at one station), where a platform-length gap is enough.
@@ -621,6 +627,12 @@ export class BusPositionEngine {
      * down the line. @type {Array<{ rank: number, fromD: number, passAt: number }>}
      */
     this.departed = [];
+    /**
+     * Rail synths due at their anchor: the feed drops the row the moment the
+     * train arrives, so the train must be remembered while it is still listed
+     * or it can never be handed to `departed`. @type {Map<number, { fromD: number, etaT: number }>}
+     */
+    this.pending = new Map();
     /** @type {Map<string, { delaySec: number, arrD: number, arrAt: number, stopIdx: number, dwellEnd?: number }>} trip id → arrival bookkeeping (see updateTripState) */
     this.tripState = new Map();
     /** @type {Map<number, Array<any>>} stop index → raw (unnormalized) feed rows from the last poll — the dwell-release signal */
@@ -686,6 +698,7 @@ export class BusPositionEngine {
     this.constraints.clear();
     this.synth = [];
     this.departed = [];
+    this.pending.clear();
     this.tripState.clear();
     this.trafficIndex = null;
     this.lastEmit = null;
@@ -724,6 +737,7 @@ export class BusPositionEngine {
         this.tripState.clear();
         this.synth = [];
         this.departed = [];
+        this.pending.clear();
       }
       this.ctx.boardStopIndex = patch.boardStopIndex;
     }
@@ -2126,6 +2140,12 @@ export class BusPositionEngine {
         // railProgressBack. They are still kept in this.synth so the next
         // poll can re-anchor them.
         if (!Number.isFinite(d)) continue;
+        // Nearly due: remember it, because the feed drops the row on arrival
+        // and the train would otherwise vanish at the stop instead of running
+        // on (see the departure handoff below).
+        if (rail && T <= RAIL_PENDING_S) {
+          this.pending.set(s.rank, { fromD, etaT: s.etaT });
+        }
         s.posD = d;
         out.push({
           id: `synth:${s.rank}`,
@@ -2142,6 +2162,7 @@ export class BusPositionEngine {
         s.arrD = fromD;
         s.arrAt = s.etaT + NOW_SLACK_MS;
       }
+      if (rail) this.pending.set(s.rank, { fromD: s.arrD, etaT: s.etaT });
       const held = this.rowStillListed(ctx.boardStopIndex, s.etaT);
       const dwellMs = held ? DWELL_MAX_MS : DWELL_MS;
       if (now < s.arrAt + dwellMs) {
@@ -2152,21 +2173,27 @@ export class BusPositionEngine {
           confidence: CONF_ETA,
           anchored: true,
         });
-        continue;
       }
-      // Dwell over: it rolls on. The feed dropped its row when it arrived, so
-      // nothing else would place it — hand it to the departed list and let the
-      // *same* marker keep running towards the terminus.
-      if (
-        rail &&
-        !this.departed.some((dep) => dep.rank === s.rank) &&
-        this.departed.length < DEPARTED_MAX
-      ) {
-        this.departed.push({
-          rank: s.rank,
-          fromD: s.arrD,
-          passAt: s.arrAt + dwellMs,
-        });
+    }
+    // A rail synth that is gone from the feed but was due has arrived and
+    // rolled on: keep it running towards the terminus under the same marker
+    // id, instead of letting the marker blink out at the stop while a
+    // frequency fill appears further down the line.
+    if (rail && this.pending.size) {
+      const live = new Set(this.synth.map((s) => s.rank));
+      for (const [rank, info] of this.pending) {
+        if (live.has(rank)) continue;
+        this.pending.delete(rank);
+        if (
+          !this.departed.some((dep) => dep.rank === rank) &&
+          this.departed.length < DEPARTED_MAX
+        ) {
+          this.departed.push({
+            rank,
+            fromD: info.fromD,
+            passAt: info.etaT + DWELL_MS,
+          });
+        }
       }
     }
     this.advanceDepartedRail(out, now);
