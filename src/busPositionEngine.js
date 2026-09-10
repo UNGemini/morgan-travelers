@@ -640,6 +640,18 @@ export class BusPositionEngine {
     if (patch.fetchMore != null) this.ctx.fetchMore = patch.fetchMore;
     if (patch.headsign != null) this.ctx.headsign = patch.headsign;
     if (Number.isInteger(patch.boardStopIndex)) {
+      if (patch.boardStopIndex !== this.ctx.boardStopIndex) {
+        // Board switch = re-anchor. Constraints matched against the old
+        // stop go stale (feeds often never list the trip at the new stop),
+        // and the lagging predicted position then duplicates the new
+        // stop's synth — same bus, two markers. Learned delay state goes
+        // too: it re-derives from the fresh constraint within a poll.
+        this.constraints.clear();
+        this.etaMap.clear();
+        this.tripEtas.clear();
+        this.tripState.clear();
+        this.synth = [];
+      }
       this.ctx.boardStopIndex = patch.boardStopIndex;
     }
     if (patch.shape?.coords?.length >= 2) this.ctx.shape = patch.shape;
