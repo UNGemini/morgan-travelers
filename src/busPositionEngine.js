@@ -1684,10 +1684,17 @@ export class BusPositionEngine {
             ? Math.abs(sd - rd)
             : 4000;
         const dt = Math.abs(s.etaT - r.etaT);
+        // Staying on the same anchor costs nothing extra: switching anchor
+        // moves the walk-back by the minute-rounding noise (up to a kilometre),
+        // which shows up as a marker jerking backwards.
+        const anchorShift =
+          Number.isFinite(s.d) && Number.isFinite(r.d)
+            ? Math.abs(s.d - r.d)
+            : 0;
         pairs.push({
           i,
           j,
-          cost: destPen + dd * 4 + dt / 20,
+          cost: destPen + dd * 4 + anchorShift * 1.5 + dt / 20,
           dd,
           dt,
         });
@@ -1710,8 +1717,11 @@ export class BusPositionEngine {
         rank: s.rank,
         etaT: r.etaT,
         dest: r.dest,
-        arrD: -1,
-        arrAt: 0,
+        // Keep an arrival that already happened: the feed re-lists a stopped
+        // train as "Now" for up to a minute, and resetting here dropped the
+        // marker back behind the station it had just reached.
+        arrD: Number.isFinite(s.arrD) ? s.arrD : -1,
+        arrAt: Number.isFinite(s.arrAt) ? s.arrAt : 0,
         d: r.d,
         posD: impliedPos(r),
         fixedD: !!r.fixedD,
