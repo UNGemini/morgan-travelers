@@ -260,6 +260,17 @@ function routeShort(opt) {
 }
 
 /**
+ * Loose name comparison for stop / destination names
+ * ("Tung Chung (Yat Tung Estate)" vs "tung chung yat tung estate").
+ * @param {unknown} s
+ */
+function normEtaName(s) {
+  return String(s ?? "")
+    .toLowerCase()
+    .replace(/[\s()（）[\]{}',.\-–—·]/g, "");
+}
+
+/**
  * KMB direction + service type from trip_id like KMB-E31-I-1-287
  * @param {object} [opt]
  * @returns {{ dir: string | null, serviceType: number }}
@@ -1080,7 +1091,30 @@ async function fetchCtbEta(opt, board) {
   }
   // The CTB API answers with BOTH directions at a stop (a Yat Tung Estate
   // stop returns Aircraft Maintenance Area departures too), so rows must be
-  // filtered to the direction being viewed. Rows with no dir are kept.
+  // filtered to the direction being viewed. A CTB option's ids do not always
+  // encode the direction, so when they don't, read it off the rows: the ones
+  // heading for the stop this direction ends at share their dir. Once the dir
+  // is known every row of that direction stays, including short-turn variants
+  // ("Special to Tung Chung Station") whose destination differs.
+  let dir = kmbTripMeta(opt).dir;
+  if (!dir) {
+    const want = normEtaName(opt?.to?.stop_name || opt?.to?.name || "");
+    const scored = new Map();
+    if (want) {
+      for (const r of rows) {
+        const rd = String(r?.dir || "").toUpperCase();
+        if (!rd) continue;
+        const dest = normEtaName(r?.dest_en || r?.dest_tc || "");
+        if (!dest) continue;
+        if (dest.includes(want) || want.includes(dest)) {
+          scored.set(rd, (scored.get(rd) || 0) + 1);
+        }
+      }
+    }
+    if (scored.size) {
+      dir = [...scored.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    }
+  }
   if (dir) {
     rows = rows.filter((r) => {
       const d = String(r?.dir || "").toUpperCase();
