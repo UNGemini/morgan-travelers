@@ -323,6 +323,11 @@ function lrtLoopRows(routeId) {
   else if (same(b[b.length - 1], a[0])) chain = [...b, ...a.slice(1)];
   if (!chain) return null;
   if (chain.length > 3 && same(chain[0], chain[chain.length - 1])) chain.pop();
+  // A loop never revisits a stop. 761P also chains end-to-start, but it is an
+  // out-and-back: its second "direction" retraces the same stops, so the
+  // repeated-key check keeps it (and every other linear route) as it was.
+  const keys = chain.map(key);
+  if (new Set(keys).size !== keys.length) return null;
   if (chain.length < 6) return null;
   return chain.map((row, i) => ({ ...row, seq: i + 1 }));
 }
