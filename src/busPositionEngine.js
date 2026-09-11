@@ -1396,7 +1396,19 @@ export class BusPositionEngine {
         // no service patterns at all (src/data/mtrRuntime.js covers the nine
         // heavy-rail lines only), so there `hw` is a 240 s placeholder — the
         // live rows are the only timetable and may widen it too.
+        const prevHw = this.headwaySec;
         this.observeEtaHeadway(boardRows, ctx.op === "lrt" || !info.pat);
+        // Visible on change only: "which frequency is this line running on?"
+        // is otherwise unanswerable from the app.
+        if (this.headwaySec !== prevHw) {
+          console.info(
+            "[buspos] headway",
+            this.routeKey,
+            this.headwaySec,
+            "s",
+            info.pat ? "from bands+feed" : "from live feed only",
+          );
+        }
       }
       this.matchAnchors(ctx, stopEtas, now);
       this.hasPolled = true;
