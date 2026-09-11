@@ -137,6 +137,8 @@ const RAIL_MAX_STEP_M = 400;
  * stays well inside this.
  */
 const BUS_MAX_STEP_M = 250;
+/** Rounding slack allowed the other way, in metres (m). */
+const BUS_BACK_TOL_M = 30;
 /**
  * Rail synth treatments that hand a train over to the departed list once its
  * feed row goes: the row disappears when the train arrives, so it must be
@@ -1634,9 +1636,12 @@ export class BusPositionEngine {
   }
 
   /**
-   * Cap how far a bus marker moves in one poll. A refreshed, minute-rounded
-   * row or a change in the speed model can otherwise step a bus marker a few
-   * hundred metres at once, which reads as the bus hopping or reversing.
+   * Cap how far a bus marker moves in one poll, and never let it reverse.
+   * Refreshed rows are minute rounded and the speed model moves with traffic,
+   * so the walk-back position steps a few hundred metres at once — live S52
+   * showed −391 m and +253 m steps. A bus only ever covers ground, so a
+   * backward correction shows as standing still (up to BUS_BACK_TOL_M of
+   * rounding slack) and is caught up as the bus moves on.
    * @param {string} id @param {number} next
    */
   limitBusStep(id, next) {
@@ -1645,8 +1650,9 @@ export class BusPositionEngine {
     this.shownPos.set(id, next);
     if (!Number.isFinite(prev)) return next;
     const delta = next - prev;
-    if (Math.abs(delta) <= BUS_MAX_STEP_M) return next;
-    return prev + Math.sign(delta) * BUS_MAX_STEP_M;
+    if (delta > BUS_MAX_STEP_M) return prev + BUS_MAX_STEP_M;
+    if (delta < -BUS_BACK_TOL_M) return prev - BUS_BACK_TOL_M;
+    return next;
   }
 
   /**
