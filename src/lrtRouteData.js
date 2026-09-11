@@ -292,11 +292,57 @@ export async function ensureLrtRouteData(opts = {}) {
 }
 
 /**
+ * Circular LRT routes (705/706, Tin Shui Wai) run a loop, but the open data
+ * splits each loop into two arcs listed as directions 1 and 2 — so the app
+ * offered a "destination" for each half of the same circle. Detect that shape
+ * (the arcs chain end → start and are not each other's reverse, which is how a
+ * plain linear route lists its two directions) and return the whole loop in
+ * travel order, with sequence numbers restarted.
+ * @param {string} routeId
+ * @returns {LrtRouteStopRow[] | null}
+ */
+function lrtLoopRows(routeId) {
+  const r = String(routeId || "").toUpperCase();
+  const rows = (rowsCache || []).filter((x) => x.route === r);
+  if (rows.length < 6) return null;
+  const a = rows
+    .filter((x) => String(x.direction) === "1")
+    .sort((p, q) => p.seq - q.seq);
+  const b = rows
+    .filter((x) => String(x.direction) === "2")
+    .sort((p, q) => p.seq - q.seq);
+  if (!a.length || !b.length) return null;
+  const key = (row) => `${row?.stopId || ""}|${row?.stopCode || ""}`;
+  const same = (p, q) => !!p && !!q && key(p) !== "|" && key(p) === key(q);
+  if (a.length === b.length) {
+    const rev = [...b].reverse();
+    if (a.every((row, i) => same(row, rev[i]))) return null;
+  }
+  let chain = null;
+  if (same(a[a.length - 1], b[0])) chain = [...a, ...b.slice(1)];
+  else if (same(b[b.length - 1], a[0])) chain = [...b, ...a.slice(1)];
+  if (!chain) return null;
+  if (chain.length > 3 && same(chain[0], chain[chain.length - 1])) chain.pop();
+  if (chain.length < 6) return null;
+  return chain.map((row, i) => ({ ...row, seq: i + 1 }));
+}
+
+/**
  * @param {string} routeId
  * @returns {Array<{ dest: string, destZh?: string, bound: string, orig?: string }>}
  */
 export function lrtRouteDirections(routeId) {
   const r = String(routeId || "").toUpperCase();
+  const loop = lrtLoopRows(r);
+  if (loop) {
+    const first = loop[0];
+    const name = first.nameEn || first.nameZh || `Light Rail ${r}`;
+    const zh = first.nameZh || name;
+    // "↺" marks the loop: the same stop it starts and ends at.
+    return [
+      { bound: "O", dest: `${name} ↺`, destZh: `${zh} ↺`, orig: name },
+    ];
+  }
   const rows = (rowsCache || []).filter((x) => x.route === r);
   if (!rows.length) return [{ dest: `Light Rail ${r}`, bound: "lrt" }];
 
@@ -392,9 +438,13 @@ export function lrtStopSequence(routeId, bound = "O") {
     csvDir = "2";
   else if (b === "LRT" || b === "LINE") csvDir = "1";
 
-  let list = (rowsCache || []).filter(
-    (x) => x.route === r && String(x.direction) === csvDir,
-  );
+  // A circular route has one direction: the whole loop (see lrtLoopRows).
+  const loop = lrtLoopRows(r);
+  let list = loop
+    ? loop
+    : (rowsCache || []).filter(
+        (x) => x.route === r && String(x.direction) === csvDir,
+      );
   if (!list.length) {
     // fallback any direction for this route
     list = (rowsCache || []).filter((x) => x.route === r);
