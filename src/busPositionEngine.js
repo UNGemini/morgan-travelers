@@ -130,6 +130,14 @@ const RAIL_MATCH_MAX_MS = 3 * 60_000;
  */
 const RAIL_MAX_STEP_M = 400;
 /**
+ * The same cap for buses (m). Their rows refresh a minute at a time and the
+ * speed model moves with traffic, so a marker could step a few hundred metres
+ * at once — live S52 showed −391 m and +253 m steps between polls, which reads
+ * as the bus hopping backwards. Real motion (a few m/s over a 20–30 s poll)
+ * stays well inside this.
+ */
+const BUS_MAX_STEP_M = 250;
+/**
  * Rail synth treatments that hand a train over to the departed list once its
  * feed row goes: the row disappears when the train arrives, so it must be
  * remembered this far out or the handoff never happens (s).
@@ -654,6 +662,8 @@ export class BusPositionEngine {
      * or it can never be handed to `departed`. @type {Map<number, { fromD: number, etaT: number }>}
      */
     this.pending = new Map();
+    /** @type {Map<string, number>} trip id → last emitted along-route distance (step cap) */
+    this.shownPos = new Map();
     /** @type {Map<string, { delaySec: number, arrD: number, arrAt: number, stopIdx: number, dwellEnd?: number }>} trip id → arrival bookkeeping (see updateTripState) */
     this.tripState = new Map();
     /** @type {Map<number, Array<any>>} stop index → raw (unnormalized) feed rows from the last poll — the dwell-release signal */
@@ -720,6 +730,7 @@ export class BusPositionEngine {
     this.synth = [];
     this.departed = [];
     this.pending.clear();
+    this.shownPos.clear();
     this.tripState.clear();
     this.trafficIndex = null;
     this.lastEmit = null;
@@ -1623,6 +1634,22 @@ export class BusPositionEngine {
   }
 
   /**
+   * Cap how far a bus marker moves in one poll. A refreshed, minute-rounded
+   * row or a change in the speed model can otherwise step a bus marker a few
+   * hundred metres at once, which reads as the bus hopping or reversing.
+   * @param {string} id @param {number} next
+   */
+  limitBusStep(id, next) {
+    if (!Number.isFinite(next)) return next;
+    const prev = this.shownPos.get(id);
+    this.shownPos.set(id, next);
+    if (!Number.isFinite(prev)) return next;
+    const delta = next - prev;
+    if (Math.abs(delta) <= BUS_MAX_STEP_M) return next;
+    return prev + Math.sign(delta) * BUS_MAX_STEP_M;
+  }
+
+  /**
    * Cap how far a rail marker moves in one poll: refreshed rows are minute
    * rounded and a vehicle's anchor can change, so the raw implied position can
    * jump a kilometre. Corrections land over a few polls instead.
@@ -1829,6 +1856,9 @@ export class BusPositionEngine {
     const active = new Set(trips.map((t) => t.id));
     for (const id of [...this.tripState.keys()]) {
       if (!active.has(id)) this.tripState.delete(id);
+    }
+    for (const id of [...this.shownPos.keys()]) {
+      if (!active.has(id)) this.shownPos.delete(id);
     }
     const schedArrAt = (trip, d) => {
       const pd = this.patternDists.get(trip.patIdx);
@@ -2297,6 +2327,14 @@ export class BusPositionEngine {
           });
         }
       }
+    }
+    // Buses: ease each step (see limitBusStep). Trips are pushed by the
+    // schedule pass and their d is rewritten by the anchor passes, so this
+    // runs last, just before the rail-only passes.
+    for (const v of out) {
+      if (!v.trip) continue;
+      const eased = this.limitBusStep(v.id, v.d);
+      if (Number.isFinite(eased)) v.d = eased;
     }
     this.advanceDepartedRail(out, now);
     this.collapseCoLocatedRail(out);
