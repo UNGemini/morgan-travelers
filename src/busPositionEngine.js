@@ -81,6 +81,7 @@ import {
   enumerateTrips,
 } from "./busSchedules.js";
 import { MTR_PATTERNS } from "./data/mtrRuntime.js";
+import { lrtLastMins } from "./data/lrtServiceHours.js";
 
 /** Typical bus speed for synthetic/fallback anchoring (m/s, ~30 km/h). */
 const V_TYP = 8.3;
@@ -380,7 +381,15 @@ function mtrHeadwayInfo(ctx, now) {
       break;
     }
   }
-  if (!bands.length) hw = 240;
+  if (!bands.length) {
+    hw = 240;
+    // LRT has no service patterns at all, so the last-train time comes from
+    // the published service hours: it is what ends synthetic (fill) trains,
+    // and the placeholder 01:00 both cut the last half hour and outlived
+    // nothing. Frequency is not published there — the live feed gives that.
+    const published = lrtLastMins(ctx?.routeShort);
+    if (published) lastMins = published;
+  }
   const maxPerHour = Math.max(1, Math.round(3600 / hw));
   return { hw, maxPerHour, lastMins, pat };
 }
