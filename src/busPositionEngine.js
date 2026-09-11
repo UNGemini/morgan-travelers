@@ -115,6 +115,21 @@ const RAIL_TERMINUS_S = 30;
 /** Cap on rail trains kept running after their feed row expired. */
 const DEPARTED_MAX = 8;
 /**
+ * A rail match has to stay plausible (m). The feed carries no train id, so a
+ * loose bound let one train's marker be handed to the row of another train
+ * kilometres away — the badge then flew across the map on the next refresh.
+ */
+const RAIL_MATCH_MAX_M = 1500;
+/** Same, in time: a rail row more than this later is a different train (ms). */
+const RAIL_MATCH_MAX_MS = 3 * 60_000;
+/**
+ * How far a rail marker may move in one poll (m). Refreshed rows are minute
+ * rounded and the anchor behind a train can change, so the raw implied
+ * position can jump a kilometre; corrections land over a few polls instead of
+ * the marker flying.
+ */
+const RAIL_MAX_STEP_M = 400;
+/**
  * Rail synth treatments that hand a train over to the departed list once its
  * feed row goes: the row disappears when the train arrives, so it must be
  * remembered this far out or the handoff never happens (s).
@@ -1608,6 +1623,22 @@ export class BusPositionEngine {
   }
 
   /**
+   * Cap how far a rail marker moves in one poll: refreshed rows are minute
+   * rounded and a vehicle's anchor can change, so the raw implied position can
+   * jump a kilometre. Corrections land over a few polls instead.
+   * @param {{ shownD?: number }} s @param {number} next
+   */
+  limitRailStep(s, next) {
+    const rail = this.ctx?.op === "mtr" || this.ctx?.op === "lrt";
+    if (!rail || !Number.isFinite(next)) return next;
+    const prev = s.shownD;
+    if (!Number.isFinite(prev)) return next;
+    const delta = next - prev;
+    if (Math.abs(delta) <= RAIL_MAX_STEP_M) return next;
+    return prev + Math.sign(delta) * RAIL_MAX_STEP_M;
+  }
+
+  /**
    * Distance a rail train has reached `elapsedSec` after leaving `fromD`: each
    * hop is run at the line's average speed and each platform ahead costs a
    * dwell, so a marker waits at stops instead of crawling straight through
@@ -1700,6 +1731,7 @@ export class BusPositionEngine {
         });
       }
     }
+    const rail = this.ctx?.op === "mtr" || this.ctx?.op === "lrt";
     pairs.sort((a, b) => a.cost - b.cost);
     const takenPrev = new Set();
     const takenNew = new Set();
@@ -1709,6 +1741,9 @@ export class BusPositionEngine {
       // A new 2-min train must not inherit the 12-min train's marker.
       if (p.dd > 10_000 && p.dt > 120_000) continue;
       if (p.dt > 8 * 60_000) continue;
+      // Rail: anything beyond a plausible step is a different train, so the
+      // marker is left to expire rather than gliding onto it.
+      if (rail && (p.dd > RAIL_MATCH_MAX_M || p.dt > RAIL_MATCH_MAX_MS)) continue;
       takenPrev.add(p.i);
       takenNew.add(p.j);
       const s = livePrev[p.i];
@@ -1726,6 +1761,7 @@ export class BusPositionEngine {
         posD: impliedPos(r),
         fixedD: !!r.fixedD,
         fill: !!r.fill,
+        shownD: s.shownD,
         // A fill keeps its original pass time — it is the same train rolling
         // on, and re-deriving it from the feed each poll would restart it.
         passAt: r.fill && s.fill ? s.passAt : r.passAt,
@@ -1747,9 +1783,17 @@ export class BusPositionEngine {
         passAt: r.passAt,
       });
     }
-    let nextRank = 1;
-    for (const s of prev) nextRank = Math.max(nextRank, s.rank + 1);
+    // Marker ids are never recycled. Ranks used to be re-issued to whichever
+    // train needed one next, so a marker that had just left the board could
+    // hand its badge to an unrelated train — which the display then glided
+    // across the map. The counter is seeded from the clock so even a restarted
+    // engine cannot re-issue an id that is still on the board.
+    if (!Number.isFinite(this.nextRank) || this.nextRank <= 0) {
+      this.nextRank = (Date.now() % 1_000_000) + 1;
+    }
+    let nextRank = this.nextRank;
     for (const s of out) if (!s.rank) s.rank = nextRank++;
+    this.nextRank = nextRank;
     const takenRanks = new Set(out.map((s) => s.rank));
     for (const s of prev) {
       if (takenRanks.has(s.rank)) continue;
@@ -2163,7 +2207,11 @@ export class BusPositionEngine {
         const ahead = Number.isFinite(s.passAt)
           ? this.fillAheadDist(s.passAt, now)
           : NaN;
-        const d = Number.isFinite(ahead) ? ahead : s.d;
+        // Ease these too: a headway change re-phases the whole chain and would
+        // otherwise step every phantom marker sideways at once.
+        const eased = this.limitRailStep(s, Number.isFinite(ahead) ? ahead : s.d);
+        const d = Number.isFinite(eased) ? eased : s.d;
+        if (Number.isFinite(d)) s.shownD = d;
         s.posD = d;
         out.push({
           id: `synth:${s.rank}`,
@@ -2191,9 +2239,13 @@ export class BusPositionEngine {
           this.pending.set(s.rank, { fromD, etaT: s.etaT });
         }
         s.posD = d;
+        // Rail: ease to the refreshed position instead of letting the marker
+        // jump a kilometre when the row's anchor or minute changes.
+        const shown = this.limitRailStep(s, d);
+        if (Number.isFinite(shown)) s.shownD = shown;
         out.push({
           id: `synth:${s.rank}`,
-          d,
+          d: Number.isFinite(shown) ? shown : d,
           etaT: s.etaT,
           confidence: CONF_ETA,
           anchored: true,
