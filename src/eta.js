@@ -1009,9 +1009,14 @@ async function fetchKmbEta(opt, board) {
       };
     }
   }
+  // Keep only this direction's rows. The old fallback ("no row matched, so
+  // show everything") put the opposite direction's bus on the panel whenever
+  // the direction could not be mapped.
   if (dir) {
-    const filtered = rows.filter((r) => String(r.dir || "").toUpperCase() === dir);
-    if (filtered.length) rows = filtered;
+    rows = rows.filter((r) => {
+      const d = String(r?.dir || "").toUpperCase();
+      return !d || d === dir;
+    });
   }
   setRawEtaRows("kmb", route, serviceType, stopId, rows);
   const now = Date.now();
@@ -1055,6 +1060,7 @@ async function fetchCtbEta(opt, board) {
     candidates.push(stopId.padStart(6, "0"));
     candidates.push(String(Number(stopId)));
   }
+  const { dir } = kmbTripMeta(opt);
   let rows = [];
   let usedStop = stopId;
   for (const sid of [...new Set(candidates)]) {
@@ -1071,6 +1077,15 @@ async function fetchCtbEta(opt, board) {
     } catch {
       /* try next */
     }
+  }
+  // The CTB API answers with BOTH directions at a stop (a Yat Tung Estate
+  // stop returns Aircraft Maintenance Area departures too), so rows must be
+  // filtered to the direction being viewed. Rows with no dir are kept.
+  if (dir) {
+    rows = rows.filter((r) => {
+      const d = String(r?.dir || "").toUpperCase();
+      return !d || d === dir;
+    });
   }
   setRawEtaRows("ctb", route, 1, usedStop, rows);
   const now = Date.now();
