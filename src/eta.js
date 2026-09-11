@@ -260,6 +260,16 @@ function routeShort(opt) {
 }
 
 /**
+ * Direction letter of an MTR Bus stop id (K12-U010 → "U"). The API returns
+ * both directions in one stop list, so this is how they are told apart.
+ * @param {unknown} id
+ */
+function mtrBusDirOf(id) {
+  const m = /-([A-Z])\d+$/i.exec(String(id ?? "").trim());
+  return m ? m[1].toUpperCase() : "";
+}
+
+/**
  * Loose name comparison for stop / destination names
  * ("Tung Chung (Yat Tung Estate)" vs "tung chung yat tung estate").
  * @param {unknown} s
@@ -1233,7 +1243,11 @@ async function nlbRouteIdsForOption(routeNo, opt) {
       })
       .sort((a, b) => b.score - a.score);
     if (scored[0]?.score > 0) {
-      return [...new Set(scored.map((s) => s.id))];
+      // Only the variants that actually matched this direction. Returning the
+      // whole list let fetchNlbEta fall through to the opposite direction's
+      // route id when ours had no buses due, putting its arrivals on the panel.
+      const keep = scored.filter((s) => s.score > 0).map((s) => s.id);
+      if (keep.length) return [...new Set(keep)];
     }
   }
   return list.map((v) => v.routeId);
@@ -1974,13 +1988,20 @@ async function fetchMtrBusEta(opt, board) {
         null;
       if (matchedStop?.bus) busRows = matchedStop.bus;
     }
-    // Fallback: first stop with buses (e.g. non-service at this stop)
+    // Fallback: the first stop with buses IN THE SAME DIRECTION. The API
+    // lists both directions' stops (K12-D010… then K12-U010…), so the old
+    // "first stop with buses" fallback answered with the opposite direction's
+    // buses whenever the board stop had none due.
     if (!busRows.length) {
-      for (const s of stops) {
-        if (Array.isArray(s.bus) && s.bus.length) {
-          busRows = s.bus;
-          if (!matchedStop) matchedStop = s;
-          break;
+      const wantDir = mtrBusDirOf(stopId);
+      if (wantDir) {
+        for (const s of stops) {
+          if (mtrBusDirOf(s.busStopId) !== wantDir) continue;
+          if (Array.isArray(s.bus) && s.bus.length) {
+            busRows = s.bus;
+            if (!matchedStop) matchedStop = s;
+            break;
+          }
         }
       }
     }
