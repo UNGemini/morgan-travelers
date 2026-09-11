@@ -1071,7 +1071,7 @@ async function fetchCtbEta(opt, board) {
     candidates.push(stopId.padStart(6, "0"));
     candidates.push(String(Number(stopId)));
   }
-  const { dir } = kmbTripMeta(opt);
+  const { dir: idDir } = kmbTripMeta(opt);
   let rows = [];
   let usedStop = stopId;
   for (const sid of [...new Set(candidates)]) {
@@ -1096,7 +1096,7 @@ async function fetchCtbEta(opt, board) {
   // heading for the stop this direction ends at share their dir. Once the dir
   // is known every row of that direction stays, including short-turn variants
   // ("Special to Tung Chung Station") whose destination differs.
-  let dir = kmbTripMeta(opt).dir;
+  let dir = idDir;
   if (!dir) {
     const want = normEtaName(opt?.to?.stop_name || opt?.to?.name || "");
     const scored = new Map();
