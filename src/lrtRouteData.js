@@ -322,11 +322,15 @@ function lrtLoopRows(routeId) {
   if (same(a[a.length - 1], b[0])) chain = [...a, ...b.slice(1)];
   else if (same(b[b.length - 1], a[0])) chain = [...b, ...a.slice(1)];
   if (!chain) return null;
-  if (chain.length > 3 && same(chain[0], chain[chain.length - 1])) chain.pop();
-  // A loop never revisits a stop. 761P also chains end-to-start, but it is an
-  // out-and-back: its second "direction" retraces the same stops, so the
-  // repeated-key check keeps it (and every other linear route) as it was.
-  const keys = chain.map(key);
+  // A loop has to close back on its first stop, and that closing leg is part
+  // of the route (Tin Yiu → Tin Shui Wai on 705, Tin Tsz → Tin Shui Wai on
+  // 706) — dropping it left the stop list and the drawn line open.
+  if (!same(chain[0], chain[chain.length - 1])) return null;
+  // Apart from that closing stop nothing may repeat. 761P also chains
+  // end-to-start, but it is an out-and-back whose second direction retraces
+  // the same stops, so it keeps its two directions.
+  const body = chain.slice(0, -1);
+  const keys = body.map(key);
   if (new Set(keys).size !== keys.length) return null;
   if (chain.length < 6) return null;
   return chain.map((row, i) => ({ ...row, seq: i + 1 }));
