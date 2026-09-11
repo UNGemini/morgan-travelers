@@ -14900,7 +14900,7 @@ async function paintEtaRouteOnMap(route, stops, opts = {}) {
   ) {
     try {
       const { densifyAlongBasemapRail } = await import("./railSnapper.js");
-      const pts = (stops || [])
+      const ptsAll = (stops || [])
         .filter(
           (s) =>
             Number.isFinite(s.lon) &&
@@ -14908,13 +14908,37 @@ async function paintEtaRouteOnMap(route, stops, opts = {}) {
             !s._polylineOnly,
         )
         .map((s) => ({ lon: s.lon, lat: s.lat, id: s.stopId || s.code }));
+      // A circular route repeats its origin at the end of the stop list so the
+      // panel can show the closing leg — but a repeated stop makes the basemap
+      // snapper give up (one point), which left 705/706 drawn as bare stop
+      // chords. Densify the unique stops, then the closing leg itself, and
+      // stitch the two so the track path still comes back round.
+      const seenIds = new Set();
+      const pts = ptsAll.filter((p) => {
+        const k = String(p.id ?? `${p.lon},${p.lat}`);
+        if (seenIds.has(k)) return false;
+        seenIds.add(k);
+        return true;
+      });
+      const closesLoop =
+        ptsAll.length > pts.length &&
+        ptsAll.length >= 6 &&
+        String(ptsAll[0].id) === String(ptsAll[ptsAll.length - 1].id);
       if (pts.length >= 2 && typeof densifyAlongBasemapRail === "function") {
-        const poly = await densifyAlongBasemapRail(pts, {
+        const railOpt = {
           mode: route.kind === "lrt" ? "tram" : "subway",
           route_short_name: route.id,
           route_name: route.label || route.id,
           route_id: `${route.kind}-${route.id}`,
-        });
+        };
+        let poly = await densifyAlongBasemapRail(pts, railOpt);
+        if (closesLoop && poly?.length >= 2) {
+          const leg = await densifyAlongBasemapRail(
+            [pts[pts.length - 1], pts[0]],
+            railOpt,
+          );
+          if (leg?.length >= 2) poly = [...poly, ...leg.slice(1)];
+        }
         if (poly?.length >= 2) {
           lineCoords = poly
             .map((p) => [Number(p.lon), Number(p.lat)])
