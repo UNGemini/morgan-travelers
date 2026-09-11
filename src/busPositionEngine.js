@@ -1130,7 +1130,7 @@ export class BusPositionEngine {
    * Tighten headway from consecutive board-stop ETAs (live max frequency).
    * Never widens the GTFS value — a sparse 3-row feed is not a timetable.
    */
-  observeEtaHeadway(etas) {
+  observeEtaHeadway(etas, replace = false) {
     if (!etas || etas.length < 2) return;
     const diffs = [];
     for (let i = 1; i < etas.length; i++) {
@@ -1138,7 +1138,10 @@ export class BusPositionEngine {
     }
     const hw = this.tightestHeadway(diffs);
     if (!hw) return;
-    this.headwaySec = this.headwaySec ? Math.min(this.headwaySec, hw) : hw;
+    // `replace` is for lines with no service patterns at all (LRT): the live
+    // rows are then the only frequency evidence, so they may widen or tighten.
+    this.headwaySec =
+      replace || !this.headwaySec ? hw : Math.min(this.headwaySec, hw);
   }
 
   /** Baseline refresh of the traffic index (5-min TTL cache inside). */
@@ -1388,9 +1391,12 @@ export class BusPositionEngine {
         const info = mtrHeadwayInfo(ctx, now);
         this.headwaySec = info.hw;
         // The band's nominal headway is a floor, not what the line is doing:
-        // take the tightest gap the board stop's own feed shows, so the trains
-        // filled in ahead of it are spaced like the service actually running.
-        this.observeEtaHeadway(boardRows);
+        // take the gap the board stop's own feed shows, so the trains filled
+        // in ahead of it are spaced like the service actually running. LRT has
+        // no service patterns at all (src/data/mtrRuntime.js covers the nine
+        // heavy-rail lines only), so there `hw` is a 240 s placeholder — the
+        // live rows are the only timetable and may widen it too.
+        this.observeEtaHeadway(boardRows, ctx.op === "lrt" || !info.pat);
       }
       this.matchAnchors(ctx, stopEtas, now);
       this.hasPolled = true;
