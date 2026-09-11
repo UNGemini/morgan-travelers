@@ -17499,7 +17499,13 @@ function busPosCheapSigOf(st) {
     bound === "LINE" ? String(st.kind || "") : bound,
     String(dir?.serviceType ?? dir?.service_type ?? ""),
     String(dir?.routeId || ""),
-    st.named.length,
+    // The stops themselves, not how many there are: a silent ETA refresh that
+    // rebuilds the same list must not restart the engine. A restart throws
+    // away the trains already running past the board stop and re-anchors
+    // everything, which shows up as markers blinking out mid-run.
+    st.named
+      .map((s) => s.stopId || s.stationCode || s.code || s.name || "")
+      .join(","),
     st.fetchMore ? "more" : "",
   ].join("|");
 }
