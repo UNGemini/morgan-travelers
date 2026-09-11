@@ -15220,9 +15220,12 @@ function estimateEtaRouteRideSeconds(stops, kind) {
       segs++;
     }
   }
-  // Typical HK average including dwell: bus ~18 km/h, rail faster
+  // Typical HK average including dwell: bus ~18 km/h, rail faster. MTR is
+  // 11 m/s — measured against the live next-train feed, Tsuen Wan Line hops
+  // run at ~10 m/s door to door, and 9 made the stop-list times and every
+  // marker placed from them drift late down the line.
   const mps =
-    kind === "mtr" ? 9 : kind === "lrt" ? 6.5 : kind === "mtr_bus" ? 5.5 : 5;
+    kind === "mtr" ? 11 : kind === "lrt" ? 6.5 : kind === "mtr_bus" ? 5.5 : 5;
   const dwellSec =
     Math.max(0, stops.length - 1) *
     (kind === "mtr" || kind === "lrt" ? 25 : 18);

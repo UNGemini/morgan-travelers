@@ -93,9 +93,15 @@ const RAIL_V_MAX = 22;
  * every train several stations too far behind (a 3-minute train landed on
  * Cheung Sha Wan instead of Mei Foo).
  */
-const RAIL_V_AVG = { mtr: 9, lrt: 6.5 };
+const RAIL_V_AVG = { mtr: 11, lrt: 6.5 };
 /** Station dwell added to each rail hop walked back (s). */
 const RAIL_DWELL_S = 25;
+/**
+ * How long a marker waits at a rail platform before rolling on (s). The feed
+ * lists a train as "Now" while it stands there; left uncapped the marker sat
+ * at the board stop for the whole 1–2 minute Now window.
+ */
+const RAIL_PLATFORM_DWELL_S = 30;
 /**
  * "The feed says Now" band (s) for a rail row whose ETA sits at the station it
  * came from: at the first station that is the train standing at the platform,
@@ -1519,7 +1525,6 @@ export class BusPositionEngine {
     const remainServiceSec = Math.max(0, (info.lastMins - mins) * 60);
     const boardD = ctx.stopDistM?.[ctx.boardStopIndex];
     const endD = ctx.stopDistM?.[ctx.stops.length - 1];
-    const originD = ctx.stopDistM?.[0];
     if (!Number.isFinite(boardD) || !Number.isFinite(endD) || hw < 60) {
       return [];
     }
@@ -1535,7 +1540,6 @@ export class BusPositionEngine {
       Math.min(maxPerHour - liveN, Math.floor(remainServiceSec / hw) - liveN),
     );
     if (extra <= 0) return [];
-    const dirSign = endD >= boardD ? 1 : -1;
     const vAvg = ctx.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr;
     // Trains pass the board stop every headway: the last one went by at P, and
     // each earlier pass is another headway back. Anchoring on the pass time
@@ -1543,18 +1547,16 @@ export class BusPositionEngine {
     const hwMs = hw * 1000;
     const back = Math.ceil((t0 - now) / hwMs);
     const lastPass = t0 - back * hwMs;
-    const runToEndM = Math.abs(endD - boardD);
+    const runToEndSec = railTravelSec(boardD, endD, ctx.stopDistM, vAvg);
     const out = [];
     for (let k = 1; k <= extra; k++) {
       const passAt = lastPass - (k - 1) * hwMs;
-      // Spaced one headway apart at the line's average speed — not at line
-      // speed, which would overshoot the terminus.
-      const runM = ((now - passAt) / 1000) * vAvg;
-      // A train that has reached the terminus is held there for the dwell and
-      // then taken off the board, so the marker clears instead of sticking at
-      // the end of the line.
-      if (runM > runToEndM + vAvg * RAIL_TERMINUS_S) continue;
-      const pos = boardD + dirSign * Math.min(runM, runToEndM);
+      const elapsed = (now - passAt) / 1000;
+      // Held at the terminus for the turn-round, then taken off the board, so
+      // the marker clears instead of sticking at the end of the line.
+      if (elapsed > runToEndSec + RAIL_TERMINUS_S) continue;
+      const pos = this.railForwardDist(boardD, elapsed);
+      if (!Number.isFinite(pos)) continue;
       out.push({
         etaT: t0 + k * hwMs,
         dest,
@@ -1587,13 +1589,15 @@ export class BusPositionEngine {
     const vAvg = ctx.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr;
     const keep = [];
     for (const dep of this.departed) {
-      const runMaxM = Math.abs(endDist - dep.fromD);
-      const runM = Math.max(0, ((now - dep.passAt) / 1000) * vAvg);
-      if (runM > runMaxM + vAvg * RAIL_TERMINUS_S) continue;
+      const elapsed = (now - dep.passAt) / 1000;
+      const runToEndSec = railTravelSec(dep.fromD, endDist, ctx.stopDistM, vAvg);
+      if (elapsed > runToEndSec + RAIL_TERMINUS_S) continue;
+      const d = this.railForwardDist(dep.fromD, elapsed);
+      if (!Number.isFinite(d)) continue;
       keep.push(dep);
       out.push({
         id: `synth:${dep.rank}`,
-        d: dep.fromD + (endDist >= dep.fromD ? 1 : -1) * Math.min(runM, runMaxM),
+        d,
         etaT: now,
         departed: true,
         confidence: CONF_ETA,
@@ -1604,22 +1608,43 @@ export class BusPositionEngine {
   }
 
   /**
+   * Distance a rail train has reached `elapsedSec` after leaving `fromD`: each
+   * hop is run at the line's average speed and each platform ahead costs a
+   * dwell, so a marker waits at stops instead of crawling straight through
+   * them. The hop total matches the ETA model, so arrival times still line up.
+   * @param {number} fromD @param {number} elapsedSec
+   */
+  railForwardDist(fromD, elapsedSec) {
+    const dists = this.ctx?.stopDistM;
+    if (!dists?.length || !Number.isFinite(fromD)) return NaN;
+    const vAvg = this.ctx.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr;
+    const dir = dists[dists.length - 1] >= dists[0] ? 1 : -1;
+    let d = fromD;
+    let t = Math.max(0, elapsedSec);
+    let i = 0;
+    while (i < dists.length && dir * (dists[i] - d) <= 0.5) i += 1;
+    while (i < dists.length) {
+      const tHop = Math.abs(dists[i] - d) / vAvg;
+      if (t < tHop) return d + dir * t * vAvg;
+      t -= tHop;
+      d = dists[i];
+      if (t < RAIL_DWELL_S) return d;
+      t -= RAIL_DWELL_S;
+      i += 1;
+    }
+    return d;
+  }
+
+  /**
    * Where a fill train is now: it runs from the board stop at the line's
    * average speed and waits at the terminus rather than overshooting it.
    * @param {number} passAt epoch it passed the board stop
    * @param {number} now
    */
   fillAheadDist(passAt, now) {
-    const ctx = this.ctx;
-    const boardDist = ctx?.stopDistM?.[ctx.boardStopIndex];
-    const endDist = ctx?.stopDistM?.[ctx.stops.length - 1];
-    if (!Number.isFinite(boardDist) || !Number.isFinite(endDist)) return NaN;
-    const runMaxM = Math.abs(endDist - boardDist);
-    const vAvg = ctx.op === "lrt" ? RAIL_V_AVG.lrt : RAIL_V_AVG.mtr;
-    const runM = Math.max(0, ((now - passAt) / 1000) * vAvg);
-    return (
-      boardDist + (endDist >= boardDist ? 1 : -1) * Math.min(runM, runMaxM)
-    );
+    const boardDist = this.ctx?.stopDistM?.[this.ctx.boardStopIndex];
+    if (!Number.isFinite(boardDist)) return NaN;
+    return this.railForwardDist(boardDist, (now - passAt) / 1000);
   }
 
   /**
@@ -2173,7 +2198,13 @@ export class BusPositionEngine {
       }
       if (rail) this.pending.set(s.rank, { fromD: s.arrD, etaT: s.etaT });
       const held = this.rowStillListed(ctx.boardStopIndex, s.etaT);
-      const dwellMs = held ? DWELL_MAX_MS : DWELL_MS;
+      // A metro platform stop is short: cap the hold at the real dwell so the
+      // marker leaves instead of sitting through the feed's whole Now window.
+      const dwellMs = rail
+        ? RAIL_PLATFORM_DWELL_S * 1000
+        : held
+          ? DWELL_MAX_MS
+          : DWELL_MS;
       if (now < s.arrAt + dwellMs) {
         out.push({
           id: `synth:${s.rank}`,
@@ -2200,7 +2231,7 @@ export class BusPositionEngine {
           this.departed.push({
             rank,
             fromD: info.fromD,
-            passAt: info.etaT + DWELL_MS,
+            passAt: info.etaT + RAIL_PLATFORM_DWELL_S * 1000,
           });
         }
       }
