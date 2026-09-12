@@ -89,12 +89,12 @@ const V_TYP = 8.3;
 const RAIL_V_MAX = 22;
 /**
  * Speed a rail train really averages over a hop, dwell included (m/s):
- * TWL covers Central→Tsuen Wan in ~30 min, LRT hops are short but stop
- * often. Walking an ETA budget back at line speed instead of this places
- * every train several stations too far behind (a 3-minute train landed on
- * Cheung Sha Wan instead of Mei Foo).
+ * TWL covers Central→Tsuen Wan in ~30 min (11 m/s fits the published ~2 min
+ * per hop). LRT hops are shorter and its countdown feed reads ~1 min per hop
+ * on a ~470 m average hop, so 9 m/s with the shared 25 s dwell lands on that;
+ * 6.5 made every hop ~20-30 s long and left markers 1-3 min behind the train.
  */
-const RAIL_V_AVG = { mtr: 11, lrt: 6.5 };
+const RAIL_V_AVG = { mtr: 11, lrt: 9 };
 /** Station dwell added to each rail hop walked back (s). */
 const RAIL_DWELL_S = 25;
 /**
