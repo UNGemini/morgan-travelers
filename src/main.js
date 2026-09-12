@@ -2903,8 +2903,10 @@ const map = new MapLibreMap({
       protomaps: {
         type: "vector",
         url: `pmtiles://${PMTILES_URL}`,
+        // OSM requires the exact credit "© OpenStreetMap contributors",
+        // linked to the copyright page — not just "OpenStreetMap".
         attribution:
-          '<a href="https://protomaps.com">Protomaps</a> © <a href="https://openstreetmap.org">OpenStreetMap</a>',
+          '<a href="https://protomaps.com">Protomaps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>',
       },
     },
     layers: layers("protomaps", namedFlavor("dark"), { lang: "en" }),
