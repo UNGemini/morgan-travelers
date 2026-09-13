@@ -281,6 +281,42 @@ function normEtaName(s) {
 }
 
 /**
+ * Direction letter of the rows a panel should show, read off their own
+ * destinations. An operator answers with both directions at a stop the two
+ * share (a terminus pole, or a single-bay stop like S52's) and neither the
+ * option's ids nor a stored bound always says which one is being viewed. The
+ * rows bound for the stop this direction ends at carry that direction's
+ * letter, so match on `to`/`headsign`.
+ * @param {Array<object>} rows @param {object} opt
+ * @returns {string} "O" | "I" | ""
+ */
+function inferEtaDirFromRows(rows, opt) {
+  const to = opt?.to;
+  const want = normEtaName(
+    (typeof to === "string" ? to : to?.stop_name || to?.name || "") ||
+      opt?.headsign ||
+      "",
+  );
+  if (!want) return "";
+  const scored = new Map();
+  for (const r of rows || []) {
+    const rd = String(r?.dir || "").toUpperCase();
+    if (!rd) continue;
+    const dest = normEtaName(r?.dest_en || r?.dest_tc || "");
+    if (!dest) continue;
+    if (dest.includes(want) || want.includes(dest)) {
+      scored.set(rd, (scored.get(rd) || 0) + 1);
+    }
+  }
+  if (!scored.size) return "";
+  const ranked = [...scored.entries()].sort((a, b) => b[1] - a[1]);
+  // A tie (a circular route's two arcs can share a destination name) is no
+  // evidence at all — leave it unfiltered rather than guess.
+  if (ranked.length > 1 && ranked[0][1] === ranked[1][1]) return "";
+  return ranked[0][0];
+}
+
+/**
  * KMB direction + service type from trip_id like KMB-E31-I-1-287
  * @param {object} [opt]
  * @returns {{ dir: string | null, serviceType: number }}
@@ -295,6 +331,10 @@ function kmbTripMeta(opt) {
   const rid = String(opt?.route_id || "");
   if (/-I(?:-|$)/i.test(rid) || /inbound/i.test(trip)) return { dir: "I", serviceType: 1 };
   if (/-O(?:-|$)/i.test(rid) || /outbound/i.test(trip)) return { dir: "O", serviceType: 1 };
+  // A route-detail board carries the bound it is showing ("LWB-E37" carries
+  // none in its ids), and the KMB/LWB route API uses exactly O/I for it.
+  const bound = String(opt?.bound || "").toUpperCase();
+  if (bound === "O" || bound === "I") return { dir: bound, serviceType: 1 };
   return { dir: null, serviceType: 1 };
 }
 
@@ -1032,11 +1072,15 @@ async function fetchKmbEta(opt, board) {
   }
   // Keep only this direction's rows. The old fallback ("no row matched, so
   // show everything") put the opposite direction's bus on the panel whenever
-  // the direction could not be mapped.
-  if (dir) {
+  // the direction could not be mapped. Both directions answer at a stop they
+  // share (E37's Tin Shui Wai Town Centre pole returns outbound departures to
+  // the airport alongside inbound arrivals at the stop being viewed), so when
+  // the ids and the bound are both silent, read the letter off the rows.
+  const keepDir = dir || inferEtaDirFromRows(rows, opt);
+  if (keepDir) {
     rows = rows.filter((r) => {
       const d = String(r?.dir || "").toUpperCase();
-      return !d || d === dir;
+      return !d || d === keepDir;
     });
   }
   setRawEtaRows("kmb", route, serviceType, stopId, rows);
@@ -1102,29 +1146,10 @@ async function fetchCtbEta(opt, board) {
   // The CTB API answers with BOTH directions at a stop (a Yat Tung Estate
   // stop returns Aircraft Maintenance Area departures too), so rows must be
   // filtered to the direction being viewed. A CTB option's ids do not always
-  // encode the direction, so when they don't, read it off the rows: the ones
-  // heading for the stop this direction ends at share their dir. Once the dir
-  // is known every row of that direction stays, including short-turn variants
-  // ("Special to Tung Chung Station") whose destination differs.
-  let dir = idDir;
-  if (!dir) {
-    const want = normEtaName(opt?.to?.stop_name || opt?.to?.name || "");
-    const scored = new Map();
-    if (want) {
-      for (const r of rows) {
-        const rd = String(r?.dir || "").toUpperCase();
-        if (!rd) continue;
-        const dest = normEtaName(r?.dest_en || r?.dest_tc || "");
-        if (!dest) continue;
-        if (dest.includes(want) || want.includes(dest)) {
-          scored.set(rd, (scored.get(rd) || 0) + 1);
-        }
-      }
-    }
-    if (scored.size) {
-      dir = [...scored.entries()].sort((a, b) => b[1] - a[1])[0][0];
-    }
-  }
+  // encode the direction, so when they don't, read it off the rows. Once the
+  // dir is known every row of that direction stays, including short-turn
+  // variants ("Special to Tung Chung Station") whose destination differs.
+  const dir = idDir || inferEtaDirFromRows(rows, opt);
   if (dir) {
     rows = rows.filter((r) => {
       const d = String(r?.dir || "").toUpperCase();
