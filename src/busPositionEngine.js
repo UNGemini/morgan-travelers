@@ -61,8 +61,10 @@
  * Multi-stop anchoring (fetch-more option + passive reuse):
  *   - With ctx.fetchMore the poll also fetches ETA rows for the nearest stops
  *     and every 5th stop ahead and behind the board stop; each stop's rows
- *     match trips by their scheduled arrival AT THAT STOP, and the soonest
- *     constraint per trip anchors it at `stop − seconds × speed`. Extra
+ *     match trips by their scheduled arrival AT THAT STOP. The soonest ETA
+ *     still wins when times are a real headway apart; the same minute-rounded
+ *     wave prefers the later stop (Citybus copies "Now" onto every listed
+ *     stop — index order would pin S52 at Tung Chung Crescent). Extra
  *     anchored trips beyond the board-stop slots cap at EXTRA_ANCHORS.
  *   - With or without fetchMore, cached rows the ETA panel fetched for other
  *     window stops (e.g. the stop selected before a switch) are reused, so
@@ -85,6 +87,22 @@ import { lrtLastMins } from "./data/lrtServiceHours.js";
 
 /** Typical bus speed for synthetic/fallback anchoring (m/s, ~30 km/h). */
 const V_TYP = 8.3;
+/**
+ * Walk-back hop speed (m/s). Matches etaStopReachMinutes (~18 km/h + dwell),
+ * not the 30 km/h traffic model: S52 hops in Yat Tung are ~500 m / ~2 min on
+ * the stop list, and 8.3 m/s walked a "Now" at Mei Yat House all the way
+ * back to Tung Chung Crescent once fetch-more copied that Now upstream.
+ */
+const BUS_WALK_V = 5;
+/** Dwell folded into each walked hop (s) — same as estimateEtaRouteRideSeconds. */
+const BUS_WALK_DWELL_S = 18;
+/**
+ * Fetch-more often repeats the same minute-rounded ETA at every stop the
+ * vehicle is listed at. Treat timestamps this close as one arrival wave so
+ * the later stop (further along the route) wins, not the first stop in
+ * index order (Tung Chung Crescent before Mei Yat House).
+ */
+const SAME_WAVE_MS = 75_000;
 /** Fastest metro hop (m/s, ~80 km/h) — min travel time = distance / this. */
 const RAIL_V_MAX = 22;
 /**
@@ -306,6 +324,26 @@ export function canonicalLivePosOp(co, routeId) {
 /** Seconds still to go until we treat the ETA as physically at the stop. */
 function remainingSec(etaT, now) {
   return Math.max(0, (etaT + NOW_SLACK_MS - now) / 1000);
+}
+
+/**
+ * Pick the fetch-more row that locates the bus. Soonest ETA still wins when
+ * the times are a real headway apart. When they are the same minute-rounded
+ * wave (Citybus copies "Now" onto every listed stop), the later stop along
+ * the route is the one the vehicle is at — index order would pin S52 at
+ * Tung Chung Crescent while Mei Yat House also reads Now.
+ * @param {{ etaT: number, d: number, stopIdx: number } | null | undefined} prev
+ * @param {{ etaT: number, d: number, stopIdx: number }} next
+ */
+function isBetterBusConstraint(prev, next) {
+  if (!prev) return true;
+  if (next.etaT < prev.etaT - SAME_WAVE_MS) return true;
+  if (Math.abs(next.etaT - prev.etaT) <= SAME_WAVE_MS) {
+    if (next.stopIdx > prev.stopIdx) return true;
+    if (next.stopIdx === prev.stopIdx && next.d > prev.d) return true;
+    return false;
+  }
+  return false;
 }
 
 function mtrStopCode(stop) {
@@ -778,6 +816,7 @@ export class BusPositionEngine {
         this.etaMap.clear();
         this.tripEtas.clear();
         this.tripState.clear();
+        this.shownPos.clear();
         this.synth = [];
         this.departed = [];
         this.pending.clear();
@@ -830,7 +869,8 @@ export class BusPositionEngine {
       this.trafficIndex && Number.isFinite(lon)
         ? this.trafficIndex.multiplierAt(lon, lat)
         : 1;
-    return dist / Math.max(0.5, V_TYP * (mult || 1));
+    const rolling = dist / Math.max(0.5, BUS_WALK_V * (mult || 1));
+    return rolling + BUS_WALK_DWELL_S;
   }
 
   /**
@@ -870,11 +910,21 @@ export class BusPositionEngine {
       i -= 1;
     }
     // Speed up when min-hop floors would take longer than the remaining ETA.
-    const scale = accFloor > tRemain && accFloor > 0 ? tRemain / accFloor : 1;
+    // Stretch when the budget outlives the path behind the anchor (hops were
+    // too short): sitting at km 0 is the origin, not "4 min before Mei Yat".
+    const scale =
+      accFloor > 0 && accFloor > tRemain
+        ? tRemain / accFloor
+        : accFloor > 0 && accFloor < tRemain && fromDist > 0
+          ? tRemain / accFloor
+          : 1;
     d = fromDist;
     let t = tRemain;
     for (const h of hops) {
-      const hop = Math.max(h.natural, h.floored * scale);
+      const hop =
+        scale >= 1
+          ? Math.max(h.natural, h.floored) * scale
+          : Math.max(h.natural, h.floored * scale);
       if (hop <= 1e-6) {
         d = h.dPrev;
         continue;
@@ -1474,7 +1524,11 @@ export class BusPositionEngine {
           }
           if (!best) {
             if (stopIdx === ctx.boardStopIndex) {
-              synthRows.push({ etaT: eta.t, dest: eta.dest });
+              synthRows.push({
+                etaT: eta.t,
+                dest: eta.dest,
+                d: Number.isFinite(d) ? d : undefined,
+              });
             }
             continue;
           }
@@ -1486,7 +1540,7 @@ export class BusPositionEngine {
           if (etas) etas.push({ stopIdx, etaT: eta.t, d });
           else this.tripEtas.set(best.id, [{ stopIdx, etaT: eta.t, d }]);
           const prev = this.constraints.get(best.id);
-          if (!prev || eta.t < prev.etaT) {
+          if (isBetterBusConstraint(prev, { etaT: eta.t, d, stopIdx })) {
             this.constraints.set(best.id, { etaT: eta.t, d, stopIdx });
           }
           if (stopIdx === ctx.boardStopIndex) this.etaMap.set(best.id, eta.t);
