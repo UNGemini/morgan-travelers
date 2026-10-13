@@ -179,6 +179,23 @@
       </span>
     </div>
 
+    <!-- MTR service disruption — from MTR's own RYG line-status feed -->
+    <div id="disruption-banner" class="offline-banner disruption-banner" hidden role="alert">
+      <span class="material-symbols-outlined" aria-hidden="true">warning</span>
+      <span class="beta-banner-text">
+        <strong>Service disruption</strong>
+        <span id="disruption-banner-text"></span>
+      </span>
+      <button
+        type="button"
+        id="disruption-banner-close"
+        class="beta-banner-close"
+        aria-label="Close"
+      >
+        <span class="material-symbols-outlined" aria-hidden="true">close</span>
+      </button>
+    </div>
+
     <div id="app" class="app-shell" data-ui-mode="eta" data-toolbar="open" data-detail="open" data-sheet="open">
       <!-- Full-bleed map -->
       <div id="map-stage" class="map-stage">

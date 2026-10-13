@@ -225,6 +225,7 @@ export const zhCn = {
   "Select mode: box-select · Follow roads snaps selected points only · Del removes": "选择模式：框选 · 沿道路只吸附已选点 · Del 删除",
   "Select mode (B) — Follow roads snaps selected points only": "选择模式（B）——沿道路只吸附已选点",
   "Select points first, or press V to snap the whole path": "请先选点，或按 V 吸附整条路径",
+  "Service disruption": "服务受阻",
   "Set as last": "设为终点",
   "START": "起",
   "END": "终",

@@ -7,6 +7,7 @@
  * /eta/mtr/*      → https://rt.data.gov.hk/v1/transport/mtr/*
  * /eta/gmb/*      → https://data.etagmb.gov.hk/*
  * /eta/mtr-open/* → https://opendata.mtr.com.hk/*
+ * /eta/mtr-alert/*→ https://www.mtr.com.hk/alert/*  (service-status XML)
  *
  * POST is required for MTR Bus getSchedule:
  *   POST /eta/mtr/bus/getSchedule  { language, routeName }
@@ -24,6 +25,8 @@ const TARGETS = {
   mtr: "https://rt.data.gov.hk/v1/transport/mtr",
   gmb: "https://data.etagmb.gov.hk",
   "mtr-open": "https://opendata.mtr.com.hk",
+  // Line-by-line RYG service status + latest alert (XML, not JSON).
+  "mtr-alert": "https://www.mtr.com.hk/alert",
 };
 
 const MAX_BODY = 16_384;

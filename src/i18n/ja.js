@@ -223,6 +223,7 @@ export const ja = {
   "Select mode: box-select · Follow roads snaps selected points only · Del removes": "選択モード：範囲選択 · 道路追従は選択点のみ · Del で削除",
   "Select mode (B) — Follow roads snaps selected points only": "選択モード（B）— 道路追従は選択点のみ吸着",
   "Select points first, or press V to snap the whole path": "先に点を選ぶか、V で経路全体を吸着",
+  "Service disruption": "運行障害",
   "Set as last": "終点にする",
   "START": "始",
   "END": "終",

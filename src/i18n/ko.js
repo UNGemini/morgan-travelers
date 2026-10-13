@@ -223,6 +223,7 @@ export const ko = {
   "Select mode: box-select · Follow roads snaps selected points only · Del removes": "선택 모드: 상자 선택 · 도로 따라가기는 선택 점만 · Del로 삭제",
   "Select mode (B) — Follow roads snaps selected points only": "선택 모드（B）— 도로 따라가기는 선택 점만",
   "Select points first, or press V to snap the whole path": "먼저 점을 고르거나 V로 전체 경로를 붙이세요",
+  "Service disruption": "운행 장애",
   "Set as last": "종점으로",
   "START": "시작",
   "END": "끝",

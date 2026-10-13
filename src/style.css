@@ -5935,6 +5935,27 @@ body.contrib-submitting .bg-orb {
   opacity: 0.9;
 }
 
+/* ── Service disruption: red stroke + chip on the affected section ── */
+.rt-step-disrupted .rt-line-solid {
+  opacity: 1;
+}
+.rt-disruption-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 99px;
+  border: 1px solid rgba(255, 85, 85, 0.45);
+  background: rgba(255, 85, 85, 0.16);
+  color: #ff9a9a;
+  font: 600 0.62rem/1.5 var(--font);
+  white-space: nowrap;
+}
+.rt-disruption-chip .material-symbols-outlined {
+  font-size: 13px;
+}
+
 .rt-line-dotted {
   width: 0;
   background: transparent;
@@ -6568,6 +6589,33 @@ html.pwa .offline-banner.gl-error-banner {
   }
 }
 
+/* ── MTR service-disruption card — same floating card, red accent ── */
+.disruption-banner .material-symbols-outlined {
+  font-size: 18px;
+  color: #ff8a8a;
+  flex-shrink: 0;
+}
+/* Full-width like the beta / GL cards; translateZ keeps it off the iOS
+   status-bar layer (see the banner note above) */
+.disruption-banner,
+html.pwa .disruption-banner {
+  left: 16px;
+  right: 16px;
+  width: auto;
+  max-width: none;
+  transform: translateZ(0);
+  justify-content: flex-start;
+}
+/* Yields to any card already floating at the top of the screen */
+#offline-banner:not([hidden]) ~ #disruption-banner,
+#beta-banner:not([hidden]) ~ #disruption-banner,
+#gl-error-banner:not([hidden]) ~ #disruption-banner {
+  top: calc(12px + env(safe-area-inset-top, 0px) + 52px);
+}
+body:has(#offline-banner:not([hidden])):has(#beta-banner:not([hidden])) #disruption-banner {
+  top: calc(12px + env(safe-area-inset-top, 0px) + 104px);
+}
+
 /* Full screen (mobile): the sheet chrome reaches the top edge, so float the
    cards below the grabber/title row instead of over it — the frosted glass
    would otherwise blur the title and profile behind it. Top keys off the
@@ -6580,6 +6628,11 @@ body:has(#app.app-shell[data-sheet="full"]) #offline-banner:not([hidden]) + #bet
 }
 body:has(#app.app-shell[data-sheet="full"]) .offline-banner.gl-error-banner {
   top: calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) + 12px + 104px);
+}
+body:has(#app.app-shell[data-sheet="full"]) #offline-banner:not([hidden]) ~ #disruption-banner,
+body:has(#app.app-shell[data-sheet="full"]) #beta-banner:not([hidden]) ~ #disruption-banner,
+body:has(#app.app-shell[data-sheet="full"]) #gl-error-banner:not([hidden]) ~ #disruption-banner {
+  top: calc(var(--sheet-chrome-h-px, var(--sheet-chrome-h)) + 12px + 52px);
 }
 
 /* ── Banner entrance — both floating cards drop in when they appear ── */

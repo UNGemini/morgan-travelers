@@ -90,6 +90,12 @@ import {
 } from "./lang.js";
 import { resolveRouteColor, detectMtrLineCode, normalizeHex } from "./mtrColors.js";
 import {
+  initMtrStatus,
+  disruptedMtrLines,
+  isMtrLineDisrupted,
+  onMtrStatusChange,
+} from "./serviceStatus.js";
+import {
   initFares,
   estimatePlanFare,
   formatPlanFare,
@@ -4054,20 +4060,26 @@ function initBetaBanner() {
 }
 initBetaBanner();
 
-/** Dismiss the banner for the rest of the session (swipe or close button). */
+/** Slide a floating banner up and out, then hide it. */
+function hideBannerAnimated(el) {
+  if (!el || el.hidden) return;
+  el.style.transition = "transform 0.22s ease, opacity 0.22s ease";
+  el.style.transform = "translateY(-120%)";
+  el.style.opacity = "0";
+  window.setTimeout(() => {
+    el.hidden = true;
+    el.style.transition = "";
+    el.style.transform = "";
+    el.style.opacity = "";
+  }, 240);
+}
+
+/** Dismiss the beta banner for the rest of the session (swipe or close). */
 function dismissBetaBanner() {
   if (!betaBannerEl || betaBannerEl.hidden) return;
   // Hidden for the rest of the session; the Settings toggle is permanent.
   setBetaBannerDismissed(true);
-  betaBannerEl.style.transition = "transform 0.22s ease, opacity 0.22s ease";
-  betaBannerEl.style.transform = "translateY(-120%)";
-  betaBannerEl.style.opacity = "0";
-  window.setTimeout(() => {
-    betaBannerEl.hidden = true;
-    betaBannerEl.style.transition = "";
-    betaBannerEl.style.transform = "";
-    betaBannerEl.style.opacity = "";
-  }, 240);
+  hideBannerAnimated(betaBannerEl);
 }
 
 /** Desktop close button — same session dismissal as the swipe. */
@@ -4076,28 +4088,28 @@ function initBetaBannerClose() {
   btn?.addEventListener("click", dismissBetaBanner);
 }
 
-/** Swipe up on the banner to dismiss it for the rest of the session. */
-function initBetaBannerSwipe() {
+/** Swipe up on a floating banner to dismiss it (shared by the top cards). */
+function initBannerSwipeDismiss(el, onDismiss) {
   let startY = null;
   let dy = 0;
   let dragging = false;
   const clearStyles = () => {
-    betaBannerEl.style.transition = "";
-    betaBannerEl.style.transform = "";
-    betaBannerEl.style.opacity = "";
+    el.style.transition = "";
+    el.style.transform = "";
+    el.style.opacity = "";
   };
-  betaBannerEl.addEventListener(
+  el.addEventListener(
     "touchstart",
     (e) => {
-      if (betaBannerEl.hidden || e.touches.length !== 1) return;
+      if (el.hidden || e.touches.length !== 1) return;
       startY = e.touches[0].clientY;
       dy = 0;
       dragging = false;
-      betaBannerEl.style.transition = "none";
+      el.style.transition = "none";
     },
     { passive: true },
   );
-  betaBannerEl.addEventListener(
+  el.addEventListener(
     "touchmove",
     (e) => {
       if (startY == null) return;
@@ -4105,35 +4117,40 @@ function initBetaBannerSwipe() {
       if (dy > 0 && !dragging) return;
       if (dy < -8) dragging = true;
       const p = Math.max(-160, dy);
-      betaBannerEl.style.transform = `translateY(${p}px)`;
-      betaBannerEl.style.opacity = String(1 - Math.min(1, -dy / 160));
+      el.style.transform = `translateY(${p}px)`;
+      el.style.opacity = String(1 - Math.min(1, -dy / 160));
     },
     { passive: true },
   );
   const finish = (dismiss) => {
     if (dismiss) {
-      dismissBetaBanner();
+      onDismiss();
     } else {
       // Below the threshold — spring back.
-      betaBannerEl.style.transition = "transform 0.2s ease, opacity 0.2s ease";
-      betaBannerEl.style.transform = "";
-      betaBannerEl.style.opacity = "";
+      el.style.transition = "transform 0.2s ease, opacity 0.2s ease";
+      el.style.transform = "";
+      el.style.opacity = "";
       window.setTimeout(clearStyles, 220);
     }
   };
-  betaBannerEl.addEventListener("touchend", () => {
+  el.addEventListener("touchend", () => {
     if (startY == null) return;
     const was = dy;
     startY = null;
     dragging = false;
     finish(was <= -60);
   });
-  betaBannerEl.addEventListener("touchcancel", () => {
+  el.addEventListener("touchcancel", () => {
     if (startY == null) return;
     startY = null;
     dragging = false;
     finish(false);
   });
+}
+
+/** Swipe up on the banner to dismiss it for the rest of the session. */
+function initBetaBannerSwipe() {
+  initBannerSwipeDismiss(betaBannerEl, dismissBetaBanner);
 }
 
 /** Settings → Beta warning banner: persistent show/hide for the banner. */
@@ -4166,6 +4183,88 @@ function initBetaBannerPrefUi() {
     syncBetaBanner();
   });
 }
+
+/**
+ * MTR service-disruption banner — MTR's own RYG line-status feed, re-checked
+ * while the app is open (and on every re-open). Swipe-up or the desktop close
+ * button dismisses it for the session, keyed to the alert id so a new incident
+ * brings the card back.
+ */
+let disruptionBannerEl = null;
+let disruptionBannerAlertId = "";
+const DISRUPTION_DISMISS_KEY = "morgan.disruptionBannerDismissed";
+
+function disruptionDismissedId() {
+  try {
+    return sessionStorage.getItem(DISRUPTION_DISMISS_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+function setDisruptionDismissedId(id) {
+  try {
+    sessionStorage.setItem(DISRUPTION_DISMISS_KEY, String(id || ""));
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Alert text in the active language. MTR ships EN + TC only; zh-cn converts
+ * the TC string through the bundled simplify map (same as station names).
+ * @param {{ nameEn: string, nameTc: string, messages: { titleEn: string, titleTc: string }[] }} line
+ */
+function mtrAlertText(line) {
+  const msg = line.messages?.[0] || null;
+  const lang = getLang();
+  const useTc = lang === "zh-hk" || lang === "zh-tw" || lang === "zh-cn";
+  const raw = useTc
+    ? msg?.titleTc || line.nameTc
+    : msg?.titleEn || line.nameEn;
+  const text = lang === "zh-cn" ? simplifyZh(raw) : raw;
+  return String(text || "").trim();
+}
+
+/** Show the card for the worst disrupted line, unless this alert was swiped away. */
+function syncDisruptionBanner() {
+  if (!disruptionBannerEl) return;
+  const worst = disruptedMtrLines()[0] || null;
+  if (!worst) {
+    disruptionBannerEl.hidden = true;
+    return;
+  }
+  disruptionBannerAlertId = `${worst.code}:${worst.messages?.[0]?.id || worst.status}`;
+  if (disruptionDismissedId() === disruptionBannerAlertId) {
+    disruptionBannerEl.hidden = true;
+    return;
+  }
+  const body = disruptionBannerEl.querySelector("#disruption-banner-text");
+  if (body) body.textContent = mtrAlertText(worst);
+  disruptionBannerEl.hidden = false;
+}
+
+function dismissDisruptionBanner() {
+  if (!disruptionBannerEl || disruptionBannerEl.hidden) return;
+  setDisruptionDismissedId(disruptionBannerAlertId);
+  hideBannerAnimated(disruptionBannerEl);
+}
+
+function initDisruptionBanner() {
+  disruptionBannerEl = document.getElementById("disruption-banner");
+  if (!disruptionBannerEl) return;
+  initBannerSwipeDismiss(disruptionBannerEl, dismissDisruptionBanner);
+  document
+    .getElementById("disruption-banner-close")
+    ?.addEventListener("click", dismissDisruptionBanner);
+  // New feed state re-renders the open view so the red stroke follows it.
+  onMtrStatusChange(() => {
+    syncDisruptionBanner();
+    refreshLanguageViews();
+  });
+  syncDisruptionBanner();
+}
+initDisruptionBanner();
+initMtrStatus();
 
 /**
  * Ran on downloaded data (offline) and connectivity returns — the loaded
@@ -7625,6 +7724,11 @@ function routeLineRowHtml(row) {
   </div>`;
 }
 
+/** Red chip marking an MTR section hit by a service disruption. */
+function disruptionChipHtml() {
+  return `<span class="rt-disruption-chip"><span class="material-symbols-outlined" aria-hidden="true">warning</span>${escapeHtml(t("Service disruption"))}</span>`;
+}
+
 /**
  * Final walk after transit to the destination pin (egress).
  * @param {object} leg
@@ -7736,6 +7840,9 @@ function planRouteLineHtml(legsArr, opts = {}) {
       const dir = transitDirectionLabel(opt);
       // MTR legs get the coloured pill badge (line name over English full name)
       const mtrCode = detectMtrLineCode(opt);
+      // Disrupted MTR line → red stroke down this section + a red chip.
+      const disrupted =
+        !!mtrCode && mtrCode !== "LRT" && isMtrLineDisrupted(mtrCode);
       const routeBadge =
         mtrCode && mtrCode !== "LRT"
           ? mtrLineBadgeHtml(mtrCode, color, route, "rt-route-badge")
@@ -7747,10 +7854,12 @@ function planRouteLineHtml(legsArr, opts = {}) {
       rows.push({
         kind: "transit",
         line: "solid",
-        color,
+        color: disrupted ? "#ff5555" : color,
         icon,
+        extraClass: disrupted ? "rt-step-disrupted" : "",
         bodyHtml: `<div class="rt-transit-head">
           ${routeBadge}
+          ${disrupted ? disruptionChipHtml() : ""}
           ${transitDirectionHtml(opt)}
         </div>`,
       });
@@ -15554,6 +15663,15 @@ async function renderEtaRouteDetailBody(route, ctx) {
     ? `<div class="wheels-dir-switch-row">${dirSwitchButtons}</div>`
     : "";
 
+  // Disrupted MTR line → the whole rail stroke for this route turns red.
+  const detailLineCode =
+    route.kind === "mtr"
+      ? detectMtrLineCode(etaRouteAsOption(route, named, dir, named[boardIndex] || null)) ||
+        String(route.id || "").toUpperCase()
+      : "";
+  const detailDisrupted = !!detailLineCode && isMtrLineDisrupted(detailLineCode);
+  const strokeColor = detailDisrupted ? "#ff5555" : color;
+
   let stopsHtml = "";
   if (!named.length && etaSelectedStops.length) {
     stopsHtml = `<p class="hint">${escapeHtml(t("{n} path points on map (stop names unavailable).", { n: etaSelectedStops.length }))}</p>`;
@@ -15569,10 +15687,12 @@ async function renderEtaRouteDetailBody(route, ctx) {
     const headRow = routeLineRowHtml({
       kind: "transit",
       line: "solid",
-      color,
+      color: strokeColor,
       icon: modeIcon,
+      extraClass: detailDisrupted ? "rt-step-disrupted" : "",
       bodyHtml: `<div class="rt-transit-head">
         <span class="rt-route-id">${escapeHtml(route.id)}</span>
+        ${detailDisrupted ? disruptionChipHtml() : ""}
         <span class="rt-route-to">${escapeHtml(etaHasDepartureSwitch(dirs) ? etaDepartureLabel(dir) : (localizeDirLabel(dir, "dest") || dest))}</span>
       </div>`,
     });
@@ -15630,9 +15750,9 @@ async function renderEtaRouteDetailBody(route, ctx) {
         // Passed rail: route colour lightened toward white (no grey, no alpha)
         const stepColor = isBefore
           ? (cssSupportsColorMix()
-              ? `color-mix(in srgb, ${color} 60%, white)`
+              ? `color-mix(in srgb, ${strokeColor} 60%, white)`
               : "#ffffff")
-          : color;
+          : strokeColor;
         let row = routeLineRowHtml({
           kind: "stop",
           line: isLast ? "none" : "solid",
