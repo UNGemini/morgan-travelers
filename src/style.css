@@ -5935,9 +5935,15 @@ body.contrib-submitting .bg-orb {
   opacity: 0.9;
 }
 
-/* ── Service disruption: red stroke + chip on the affected section ── */
+/* ── Service disruption: a red stroke AROUND the affected section ──
+   The rail and its markers keep their own colours — the red ring outside
+   them is what marks the section, so the line still reads as its route. */
 .rt-step-disrupted .rt-line-solid {
   opacity: 1;
+  box-shadow: 0 0 0 1.5px #ff5555;
+}
+.rt-step-disrupted .rt-marker-dot {
+  box-shadow: 0 0 0 2px #ff5555;
 }
 .rt-disruption-chip {
   display: inline-flex;

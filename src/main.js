@@ -5507,6 +5507,26 @@ function ensureRouteLayers() {
       layout: { "line-cap": "round", "line-join": "round" },
     });
   }
+  // Disrupted MTR section: a red casing under the route line, so the stroke
+  // reads as a red ring around the path while the line keeps its own colour.
+  if (!map.getLayer("route-line-disruption")) {
+    map.addLayer(
+      {
+        id: "route-line-disruption",
+        type: "line",
+        source: "route-line",
+        filter: ["==", ["get", "disrupted"], true],
+        paint: {
+          "line-color": "#ff5555",
+          "line-width": 9,
+          "line-opacity": 0.95,
+        },
+        layout: { "line-cap": "round", "line-join": "round" },
+      },
+      "route-line-main",
+    );
+  }
+
   if (!map.getLayer("route-line-main")) {
     map.addLayer({
       id: "route-line-main",
@@ -6322,6 +6342,7 @@ async function geometryFromPlan(plan, opts = {}) {
             color: routeColorCss(opt) || "#c0aefc",
             name: opt.route_short_name || opt.route_name,
             mode: opt.mode || "",
+            disrupted: mtrOptionDisrupted(opt),
           },
           geometry: {
             type: "LineString",
@@ -7729,6 +7750,12 @@ function disruptionChipHtml() {
   return `<span class="rt-disruption-chip"><span class="material-symbols-outlined" aria-hidden="true">warning</span>${escapeHtml(t("Service disruption"))}</span>`;
 }
 
+/** True when a leg's option is an MTR line that is not running normally. */
+function mtrOptionDisrupted(opt) {
+  const code = detectMtrLineCode(opt);
+  return !!code && code !== "LRT" && isMtrLineDisrupted(code);
+}
+
 /**
  * Final walk after transit to the destination pin (egress).
  * @param {object} leg
@@ -7840,9 +7867,9 @@ function planRouteLineHtml(legsArr, opts = {}) {
       const dir = transitDirectionLabel(opt);
       // MTR legs get the coloured pill badge (line name over English full name)
       const mtrCode = detectMtrLineCode(opt);
-      // Disrupted MTR line → red stroke down this section + a red chip.
-      const disrupted =
-        !!mtrCode && mtrCode !== "LRT" && isMtrLineDisrupted(mtrCode);
+      // Disrupted MTR line → red stroke around this section + a red chip.
+      // The line keeps its own colour; the ring is what marks it.
+      const disrupted = mtrOptionDisrupted(opt);
       const routeBadge =
         mtrCode && mtrCode !== "LRT"
           ? mtrLineBadgeHtml(mtrCode, color, route, "rt-route-badge")
@@ -7854,7 +7881,7 @@ function planRouteLineHtml(legsArr, opts = {}) {
       rows.push({
         kind: "transit",
         line: "solid",
-        color: disrupted ? "#ff5555" : color,
+        color,
         icon,
         extraClass: disrupted ? "rt-step-disrupted" : "",
         bodyHtml: `<div class="rt-transit-head">
@@ -9238,6 +9265,7 @@ function geometryFromPlanSync(plan) {
             leg_index: i,
             color: routeColorCss(opt) || "#c0aefc",
             name: opt.route_short_name || opt.route_name,
+            disrupted: mtrOptionDisrupted(opt),
           },
           geometry: { type: "LineString", coordinates: coords },
         });
@@ -13996,6 +14024,7 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
   if (!map?.getStyle || !etaMapGeomCache) return;
   ensureRouteLayers();
   const { coords, color, stops } = etaMapGeomCache;
+  const disrupted = etaMapGeomCache.disrupted === true;
   if (!coords?.length) return;
 
   const named = (stops || []).filter(
@@ -14025,6 +14054,7 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
         passed: true,
         passed_color: mixTowardWhite(color),
         route: etaMapGeomCache.routeId,
+        disrupted,
       },
       geometry: { type: "LineString", coordinates: passed },
     });
@@ -14037,13 +14067,14 @@ function applyEtaRouteProgressOnMap(boardIndex, opts = {}) {
         color,
         passed: false,
         route: etaMapGeomCache.routeId,
+        disrupted,
       },
       geometry: { type: "LineString", coordinates: remaining },
     });
   } else if (coords.length >= 2 && !lineFeats.length) {
     lineFeats.push({
       type: "Feature",
-      properties: { kind: "transit", color, passed: false },
+      properties: { kind: "transit", color, passed: false, disrupted },
       geometry: { type: "LineString", coordinates: coords },
     });
   }
@@ -15213,6 +15244,9 @@ async function paintEtaRouteOnMap(route, stops, opts = {}) {
     coords: lineCoords,
     color,
     routeId: String(route.id || ""),
+    // Red ring on the drawn path when this MTR line is disrupted
+    disrupted:
+      route.kind === "mtr" && isMtrLineDisrupted(String(route.id || "")),
     stops: (stops || []).map((s) => ({ ...s })),
   };
   {
@@ -15663,14 +15697,13 @@ async function renderEtaRouteDetailBody(route, ctx) {
     ? `<div class="wheels-dir-switch-row">${dirSwitchButtons}</div>`
     : "";
 
-  // Disrupted MTR line → the whole rail stroke for this route turns red.
+  // Disrupted MTR line → a red ring is drawn around this route's stroke.
   const detailLineCode =
     route.kind === "mtr"
       ? detectMtrLineCode(etaRouteAsOption(route, named, dir, named[boardIndex] || null)) ||
         String(route.id || "").toUpperCase()
       : "";
   const detailDisrupted = !!detailLineCode && isMtrLineDisrupted(detailLineCode);
-  const strokeColor = detailDisrupted ? "#ff5555" : color;
 
   let stopsHtml = "";
   if (!named.length && etaSelectedStops.length) {
@@ -15687,7 +15720,7 @@ async function renderEtaRouteDetailBody(route, ctx) {
     const headRow = routeLineRowHtml({
       kind: "transit",
       line: "solid",
-      color: strokeColor,
+      color,
       icon: modeIcon,
       extraClass: detailDisrupted ? "rt-step-disrupted" : "",
       bodyHtml: `<div class="rt-transit-head">
@@ -15750,9 +15783,9 @@ async function renderEtaRouteDetailBody(route, ctx) {
         // Passed rail: route colour lightened toward white (no grey, no alpha)
         const stepColor = isBefore
           ? (cssSupportsColorMix()
-              ? `color-mix(in srgb, ${strokeColor} 60%, white)`
+              ? `color-mix(in srgb, ${color} 60%, white)`
               : "#ffffff")
-          : strokeColor;
+          : color;
         let row = routeLineRowHtml({
           kind: "stop",
           line: isLast ? "none" : "solid",
