@@ -10,6 +10,7 @@
     "predev": "node scripts/sync-maplibre-worker.mjs && node scripts/build-fares.mjs",
     "prebuild": "node scripts/sync-maplibre-worker.mjs",
     "dev": "vite",
+    "dev:disrupt": "MTR_MOCK_DISRUPT=KTL:red npm run dev",
     "build": "vite build",
     "build:fares": "node scripts/build-fares.mjs",
     "build:bus-shapes": "node scripts/build-bus-shapes-index.mjs",

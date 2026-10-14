@@ -803,6 +803,9 @@ function crossOriginIsolation() {
         next();
       });
       server.middlewares.use(overridesApiMiddleware);
+      // /eta/* is served by Cloudflare Functions in production — stand in the
+      // MTR status feed locally so the disruption UI is testable.
+      server.middlewares.use(mtrAlertMiddleware);
     },
     configurePreviewServer(server) {
       server.middlewares.use((_req, res, next) => {
@@ -810,6 +813,7 @@ function crossOriginIsolation() {
         next();
       });
       server.middlewares.use(overridesApiMiddleware);
+      server.middlewares.use(mtrAlertMiddleware);
       // vite preview does not run `server.proxy` — mirror the /edge proxy so
       // the PMTiles basemap / graph fetch work identically to production.
       server.middlewares.use("/edge", (req, res) => {
@@ -838,6 +842,82 @@ function crossOriginIsolation() {
       });
     },
   };
+}
+
+/** Numeric-entity encode, the way MTR ships CJK inside CDATA. */
+function ent(text) {
+  return [...String(text || "")]
+    .map((c) => `&#${c.codePointAt(0)};`)
+    .join("");
+}
+
+/**
+ * Overlay MTR_MOCK_DISRUPT ("KTL:red,TWL:yellow") onto the real feed, e.g.
+ * MTR_MOCK_DISRUPT=KTL:red npm run dev. Unset → the feed passes through, so a
+ * local run mirrors production (real incidents included).
+ */
+function applyMockDisruption(xml) {
+  const spec = String(process.env.MTR_MOCK_DISRUPT || "").trim();
+  if (!spec) return xml;
+  const wanted = new Map();
+  for (const part of spec.split(",")) {
+    const [code, status = "red"] = part.split(":").map((s) => s.trim());
+    if (!code) continue;
+    wanted.set(
+      code.toUpperCase(),
+      /^(red|yellow)$/i.test(status) ? status.toLowerCase() : "red",
+    );
+  }
+  if (!wanted.size) return xml;
+  return xml.replace(/<line>[\s\S]*?<\/line>/g, (block) => {
+    const code = (block.match(/<line_code>([^<]+)<\/line_code>/) || [])[1]
+      ?.trim()
+      .toUpperCase();
+    const status = code ? wanted.get(code) : null;
+    if (!status) return block;
+    const nameEn =
+      (block.match(/<line_name>([^<]*)<\/line_name>/) || [])[1] || code;
+    const nameTc =
+      (block.match(/<line_name_tc>([^<]*)<\/line_name_tc>/) || [])[1] || code;
+    const msg =
+      `<messages><message><id>mock-${code}</id>` +
+      `<title_en><![CDATA[${ent(`${nameEn} train service disruption (simulated locally)`)}]]></title_en>` +
+      `<title_tc><![CDATA[${ent(`${nameTc}列車服務受阻（本機模擬）`)}]]></title_tc>` +
+      `<status>${status}</status></message></messages>`;
+    // First <status> in the block is the line's own; the messages block follows.
+    return block
+      .replace(/<status>[^<]*<\/status>/, `<status>${status}</status>`)
+      .replace(/<messages>[\s\S]*?<\/messages>/, msg);
+  });
+}
+
+/**
+ * Dev / preview stand-in for the Cloudflare /eta/mtr-alert/* function (Pages
+ * Functions do not run here). Mirrors the real status XML and honours
+ * MTR_MOCK_DISRUPT, so the disruption banner + red stroke can be exercised
+ * locally with the genuine payload shape (entity-encoded CJK included).
+ */
+function mtrAlertMiddleware(req, res, next) {
+  const url = req.url?.split("?")[0] || "";
+  if (!url.startsWith("/eta/mtr-alert/")) return next();
+  const upstreamPath = url.replace(/^\/eta\/mtr-alert/, "") || "/";
+  fetch(`https://www.mtr.com.hk/alert${upstreamPath}`, {
+    headers: { Accept: "application/xml" },
+  })
+    .then(async (up) => {
+      if (!up.ok) throw new Error(`upstream HTTP ${up.status}`);
+      const xml = applyMockDisruption(await up.text());
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/xml; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+      res.end(xml);
+    })
+    .catch((e) => {
+      res.statusCode = 502;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }));
+    });
 }
 
 export default defineConfig({
