@@ -7870,6 +7870,8 @@ function planRouteLineHtml(legsArr, opts = {}) {
       // Disrupted MTR line → red stroke around this section + a red chip.
       // The line keeps its own colour; the ring is what marks it.
       const disrupted = mtrOptionDisrupted(opt);
+      // Every stop row of this leg belongs to the affected section too
+      const disruptClass = disrupted ? " rt-step-disrupted" : "";
       const routeBadge =
         mtrCode && mtrCode !== "LRT"
           ? mtrLineBadgeHtml(mtrCode, color, route, "rt-route-badge")
@@ -7883,7 +7885,7 @@ function planRouteLineHtml(legsArr, opts = {}) {
         line: "solid",
         color,
         icon,
-        extraClass: disrupted ? "rt-step-disrupted" : "",
+        extraClass: disruptClass.trim(),
         bodyHtml: `<div class="rt-transit-head">
           ${routeBadge}
           ${disrupted ? disruptionChipHtml() : ""}
@@ -7896,6 +7898,7 @@ function planRouteLineHtml(legsArr, opts = {}) {
           kind: "stop",
           line: next ? "dotted" : "none",
           color,
+          extraClass: disruptClass.trim(),
           bodyHtml: `<span class="rt-stop-name">${escapeHtml(t("Transit"))}</span>`,
         });
       } else if (!fullStops && stops.length >= 2) {
@@ -7907,7 +7910,7 @@ function planRouteLineHtml(legsArr, opts = {}) {
           kind: "stop",
           line: "solid",
           color,
-          extraClass: hasVia ? "rt-stop-board-compact" : "",
+          extraClass: `${hasVia ? "rt-stop-board-compact" : ""}${disruptClass}`.trim(),
           bodyHtml: `<span class="rt-stop-name">${escapeHtml(stopLineLabel(board) || t("Board"))}</span>`,
         });
         if (hasVia) {
@@ -7915,6 +7918,7 @@ function planRouteLineHtml(legsArr, opts = {}) {
             kind: "via",
             line: "solid",
             color,
+            extraClass: disruptClass.trim(),
             bodyHtml: `<span class="rt-via-text">${escapeHtml(t("Ride {n} stop{s}", { n: rideN, s: rideN === 1 ? "" : "s" }))}</span>`,
           });
         }
@@ -7922,7 +7926,7 @@ function planRouteLineHtml(legsArr, opts = {}) {
           kind: "stop",
           line: next ? "dotted" : "none",
           color,
-          extraClass: hasVia ? "rt-stop-alight-compact" : "",
+          extraClass: `${hasVia ? "rt-stop-alight-compact" : ""}${disruptClass}`.trim(),
           bodyHtml: `<span class="rt-stop-name">${escapeHtml(stopLineLabel(alight) || t("Alight"))}</span>`,
         });
       } else {
@@ -7997,7 +8001,7 @@ function planRouteLineHtml(legsArr, opts = {}) {
             kind: "stop",
             line,
             color,
-            extraClass: liveEta && isFirst ? "rt-stop-has-eta" : "",
+            extraClass: `${liveEta && isFirst ? "rt-stop-has-eta" : ""}${disruptClass}`.trim(),
             bodyHtml: `<span class="rt-stop-name${roleClass}"${nameAttrs}>${escapeHtml(label)}</span>${roleHtml}${etaCard}`,
           });
         }
@@ -15791,7 +15795,7 @@ async function renderEtaRouteDetailBody(route, ctx) {
           line: isLast ? "none" : "solid",
           color: stepColor,
           last: isLast,
-          extraClass: `eta-pick-stop${isEtaStop ? " rt-stop-eta-active" : ""}${isBefore ? " eta-stop-before" : ""}`,
+          extraClass: `eta-pick-stop${isEtaStop ? " rt-stop-eta-active" : ""}${isBefore ? " eta-stop-before" : ""}${detailDisrupted ? " rt-step-disrupted" : ""}`,
           bodyHtml: `<span class="rt-stop-name${isEtaStop ? " is-eta-stop" : ""}${isBefore ? " is-past" : ""}">${escapeHtml(s.name)}${visitHtml}</span>${roleHtml}`,
         });
         row = row.replace(
