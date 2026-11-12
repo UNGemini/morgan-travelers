@@ -18404,6 +18404,12 @@ async function relocalizeEtaRouteDetail() {
 
 initLanguageUi();
 
+// ?glass=preview — internal side-by-side of today's controls and the 2.0
+// glass presets. Lazy: the preset bundle only loads when the flag is present.
+if (new URLSearchParams(location.search).get("glass") === "preview") {
+  void import("./glass/preview.js").then((m) => m.mountGlassPreview());
+}
+
 // ── Settings: onboarding re-run + full device-data wipe ──────────────────────
 function initSettingsDangerZone() {
   document.getElementById("btn-rerun-onboarding")?.addEventListener("click", () => {

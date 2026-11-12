@@ -61,6 +61,8 @@ Key technical property to design around: refraction only works over an image/can
 - **Over panels/images → true refraction**, using `data-lg-backdrop` regions.
 - Keep the existing hard rule from v1: **floating alert cards get no backdrop blur** (motion cost + it smeared content). Glass is for chrome, not for notifications.
 
+**Ported (landed in this repo):** `src/glass/` vendors the engine (`engine.js`, MIT, © gentpan) and ships `mv-switch` / `mv-segmented` / `mv-button` / `mv-glass` as **vanilla custom elements** — no React. Glisse's `.tsx` wrappers are thin; its `internal/lens|svg|spring` modules are plain DOM, so the port costs ~1 day, not a framework migration. Tokens are namespaced `--gls-*` because the app already owns `--lg-blur` and both upstream libraries also use `--lg-*`. `?glass=preview` renders a device-friendly side-by-side against today's controls.
+
 ### 3.2 Token architecture
 
 Extend today's `--glass-rgb` / `--glass-border` into a two-layer system:
@@ -105,7 +107,8 @@ Rules: every glass surface also defines an **opaque fallback** (`prefers-reduced
 | --- | --- | --- | --- |
 | **Capacitor wrapper** | Days, reuses everything, offline already solved | Not "native"; no real Liquid Glass; WebView map perf | Fallback only |
 | **React Native + MapLibre RN** | One codebase, big ecosystem | WASM RAPTOR can't run on Hermes; a second JS runtime for the map; still no native glass | No |
-| **Native shells + shared Rust core** | True Liquid Glass (iOS 26 `glassEffect`, Android RenderEffect), MapLibre Native, best perf, same graph | Two UIs to build; core must be compiled per platform | **Recommended** |
+| **Native shells + shared Rust core** | True Liquid Glass (iOS 26 `glassEffect`, Android RenderEffect), MapLibre Native, best perf, same graph | Two UIs to build; core must be compiled per platform | **Recommended for iOS** |
+| **Android: Capacitor shell + native modules** | Reuses the whole web UI on day one; Android WebView is **Blink**, so the engine's `mode:'backdrop'` refraction actually works (fidelity above iOS Safari); native plugins cover background GPS, offline transfers, Play Billing, push | Not Material; WebView map perf below native on low-end devices | **Recommended for Android 2.0** — revisit a Compose UI per-screen later |
 
 ### 4.2 Recommended shape
 
