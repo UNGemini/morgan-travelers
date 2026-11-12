@@ -316,6 +316,15 @@ Estimates assume **2–3 engineers** (one native-focused); they are indicative, 
 
 **Milestone gates:** P1 ends with predicted packs for ≥ 90% of planned routes and a working paid watch on web. P2 ends with App Store submission. Every phase keeps **guest parity** — no feature regressions for signed-out users.
 
+### Release model (decided 2026-11-12)
+
+- **One launch day for all three surfaces.** Web, iOS and Android ship together, so **iOS native (SwiftUI + Apple's Liquid Glass SDK) is the critical path** and the Android Capacitor shell is what makes a same-day Android launch affordable.
+- **1.0 clients keep working.** New capability is additive, never breaking:
+  - `/eta/*` request/response shapes unchanged; new endpoints versioned (`/v1/…`).
+  - Position packs and the offline manifest gain **optional** entries; a missing entry falls back to today's behaviour.
+  - Accounts and Pro stay optional — guest mode must pass a regression suite before every release.
+  - Service-worker updates remain opt-in (`updateRequested`), so a 1.0 client is never force-reloaded into 2.0 mid-session.
+
 ---
 
 ## 13. Risks
