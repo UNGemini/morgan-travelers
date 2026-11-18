@@ -279,13 +279,29 @@ Add a **fare-edit** mode:
 
 ---
 
-## 10. Workstream H — Accounts & sync (UNLOOP ID)
+## 10. Workstream H — Accounts & sync (UNLOOP ID — external dependency)
 
-- **Guest mode is the default** and stays feature-complete (§6.1). Sign-in only adds sync + Pro.
-- **Sync scopes**: `pinned`, `settings`, `planPrefs` (home/work, ticket type, walk speed, preferences).
-- **Model**: per-item documents with `updatedAt` + tombstones; last-writer-wins per field; deterministic tie-break by device id. No merge UI for v1 — conflicts surface only for destructive deletes.
-- **Transport**: `GET /v1/sync/{scope}?since=` / `PUT /v1/sync/{scope}` (batch, idempotent, ETag). Offline queue in IndexedDB, flushed on reconnect.
-- **Privacy**: pinned routes are personal; allow **optional E2E encryption** of the `pinned` scope with a key derived from the user's passkey (phase 2) — the server then cannot read it.
+> **Ownership (2026-11-12):** account-system development is being handled by a separate team/AI. This repo **consumes** it; [`unloop-id.md`](./unloop-id.md) is the provider spec, not a workstream we schedule here.
+
+**What this repo still owns**
+
+- Guest/local behaviour stays the shipping default — 2.0 must be complete and useful with no account at all.
+- A thin **sync adapter** behind one interface (`getScope/putScope`), with the local store as source of truth when signed out.
+- **Read-only** entitlement handling on the client: the server decides Pro; the app only renders it.
+
+**Interface contract this repo depends on** (must be frozen before any account UI lands, whatever the implementation):
+
+| Contract | Shape |
+| --- | --- |
+| Sign-in | OIDC authorization code + PKCE → session cookie (web) / refresh token (native) |
+| Session | `GET /v1/me` → `{ uid, handle, roles[], entitlements{travelers_pro} }`, 401 when signed out |
+| Entitlement | short-lived signed claim `travelers_pro: {active, expires_at}`; re-checked server-side for the watcher |
+| Sync | `GET/PUT /v1/sync/{pinned|settings|planPrefs}?since=` with per-item `updatedAt` + tombstones |
+| Errors | structured `{ok:false,error,correlationId}` — same convention as `/eta` |
+
+**De-risking the handoff — Pro must not depend on accounts.** If identity slips, Pro still has to ship: key entitlements to the **store subscription** (StoreKit 2 / Play / Stripe session id + restore), issue our own signed entitlement token, and migrate those records onto UNLOOP IDs when the provider is live. Accounts then become a *convenience* (cross-device sync), not a gate.
+
+**Privacy**: pinned routes are personal; the `pinned` scope is the first candidate for optional E2E encryption once the provider supports a passkey-derived key.
 
 ---
 

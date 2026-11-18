@@ -2,6 +2,8 @@
 
 **Status:** Draft for review · **Owner:** UN_Gemini · **Last updated:** 2026-10-14
 
+> **Handoff (2026-11-12):** implementation of this identity provider moves to a separate team/AI. Treat this document as the **spec + interface contract**; Travelers' side only depends on the "Interface contract" table in [`travelers-2.0.md`](./travelers-2.0.md) §10.
+
 Companion: [`travelers-2.0.md`](./travelers-2.0.md) · Extends: *UNLOOP STUDIO | Identity Ecosystem & AXiS Framework PRD v2.1*.
 
 ---
