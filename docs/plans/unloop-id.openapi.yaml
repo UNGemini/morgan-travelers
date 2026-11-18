@@ -1,0 +1,383 @@
+openapi: 3.1.0
+info:
+  title: UNLOOP ID — Travelers contract
+  version: 1.0.0
+  summary: The frozen surface Travelers 2.0 codes against. Additive fields are fine; shapes here must not break.
+  description: |
+    Password-less identity provider. Access tokens carry sub/handle/scopes/Pro only —
+    never email, provider subject ids, or AID links. Signed-out callers get 401 (not 200
+    with a null body), so the client can branch cheaply.
+
+    Error convention matches the app's /eta proxies:
+      { ok: false, error: "machine_readable_code", correlationId: "..." }
+    plus an `x-correlation-id` response header.
+
+servers:
+  - url: https://id.unloop.studio
+    description: production
+  - url: http://localhost:8788
+    description: local (wrangler pages dev / miniflare)
+
+tags:
+  - name: auth
+  - name: account
+  - name: sync
+  - name: entitlements
+
+security:
+  - cookieAuth: []
+  - bearerAuth: []
+
+paths:
+  /auth/otp/request:
+    post:
+      tags: [auth]
+      summary: Email a one-time code
+      description: Always 204, whether or not the address exists (anti-enumeration).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "204": { description: Accepted (uniform) }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /auth/otp/verify:
+    post:
+      tags: [auth]
+      summary: Exchange a one-time code for a session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email: { type: string, format: email }
+                code: { type: string, pattern: "^[0-9]{6}$" }
+      responses:
+        "200":
+          description: Signed in
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /auth/passkey/register:
+    post:
+      tags: [auth]
+      summary: Add a passkey to the signed-in UID (step-up required)
+      description: Requires a session minted or stepped up in the last 10 minutes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credential]
+              properties:
+                credential:
+                  type: object
+                  description: PublicKeyCredential (JSON serialised)
+                  additionalProperties: true
+                name: { type: string, description: Device nickname }
+      responses:
+        "201": { description: Credential stored }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/StepUpRequired" }
+
+  /auth/passkey/login:
+    post:
+      tags: [auth]
+      summary: Sign in with a discovered passkey
+      description: Discoverable credentials, userVerification required, attestation none.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assertion]
+              properties:
+                assertion:
+                  type: object
+                  description: PublicKeyCredential assertion (JSON serialised)
+                  additionalProperties: true
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /auth/{provider}/start:
+    get:
+      tags: [auth]
+      summary: Begin OAuth (authorization code + PKCE)
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, enum: [google, apple] }
+        - name: redirect_to
+          in: query
+          description: App path to return to after sign-in (same-origin only)
+          schema: { type: string }
+      responses:
+        "302":
+          description: Redirect to the provider with state + nonce + PKCE challenge
+          headers:
+            Location: { schema: { type: string, format: uri } }
+
+  /auth/{provider}/callback:
+    get:
+      tags: [auth]
+      summary: OAuth callback
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, enum: [google, apple] }
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+      responses:
+        "302":
+          description: Sets the session cookie and redirects to the app
+          headers:
+            Set-Cookie: { schema: { type: string } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the current session
+      responses:
+        "204": { description: Signed out }
+
+  /auth/logout-all:
+    post:
+      tags: [auth]
+      summary: Revoke every session for this UID
+      responses:
+        "204": { description: Signed out everywhere }
+
+  /v1/me:
+    get:
+      tags: [account]
+      summary: Current identity
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/entitlements:
+    get:
+      tags: [entitlements]
+      summary: Entitlements for the signed-in UID
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Entitlements" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/sync/{scope}:
+    parameters:
+      - name: scope
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/SyncScope" }
+    get:
+      tags: [sync]
+      summary: Pull changes since a cursor
+      parameters:
+        - name: since
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SyncPull" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [sync]
+      summary: Push a batch (idempotent)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SyncPush" }
+      responses:
+        "200":
+          description: Merged; returns the server cursor
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cursor]
+                properties:
+                  cursor: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: Version conflict on a destructive change
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /account/export:
+    get:
+      tags: [account]
+      summary: Download every record held for this UID (JSON)
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /account:
+    delete:
+      tags: [account]
+      summary: Soft-delete (30 days), then purge
+      responses:
+        "202": { description: Scheduled for deletion }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: __Host-uid
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Unauthorized:
+      description: Signed out or expired
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    BadRequest:
+      description: Invalid input
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: Too many attempts
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    StepUpRequired:
+      description: Fresh authentication required (see error code)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [ok, error, correlationId]
+      properties:
+        ok: { type: boolean, const: false }
+        error: { type: string, examples: ["invalid_credentials", "step_up_required", "rate_limited"] }
+        message: { type: string }
+        correlationId: { type: string }
+
+    Session:
+      type: object
+      required: [uid, handle, expiresAt]
+      properties:
+        uid: { type: string, examples: ["UN-00000001"] }
+        handle: { type: string }
+        expiresAt: { type: string, format: date-time }
+        accessToken: { type: string, description: "Omit for cookie clients" }
+        refreshToken: { type: string, description: "Native clients only" }
+
+    Role:
+      type: string
+      enum: [user, moderator, admin, "verified_contributor:path", "verified_contributor:fares", "verified_contributor:stops"]
+
+    TravelersPro:
+      type: object
+      required: [active]
+      properties:
+        active: { type: boolean }
+        expires_at: { type: string, format: date-time, nullable: true }
+        source: { type: string, enum: [appstore, play, stripe, grant] }
+
+    Entitlements:
+      type: object
+      properties:
+        travelers_pro: { $ref: "#/components/schemas/TravelersPro" }
+
+    Me:
+      type: object
+      required: [uid, handle, roles, entitlements]
+      properties:
+        uid: { type: string, examples: ["UN-00000001"] }
+        handle: { type: string }
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/Role" }
+        entitlements: { $ref: "#/components/schemas/Entitlements" }
+
+    SyncScope:
+      type: string
+      enum: [pinned, settings, planPrefs]
+
+    SyncItem:
+      type: object
+      required: [id, updatedAt, value]
+      properties:
+        id: { type: string }
+        updatedAt: { type: integer, description: "Epoch ms, last writer wins" }
+        value:
+          type: object
+          additionalProperties: true
+        deleted: { type: boolean, description: "Tombstone" }
+
+    SyncPull:
+      type: object
+      required: [items, cursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/SyncItem" }
+        tombstones:
+          type: array
+          items: { type: string }
+        cursor: { type: string }
+
+    SyncPush:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/SyncItem" }
+        baseCursor: { type: string }
